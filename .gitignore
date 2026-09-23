@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 *.env
 *.dev.vars
+.wrangler
+wrangler.json
+wrangler.jsonc
