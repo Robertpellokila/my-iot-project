@@ -1,134 +1,128 @@
 <script setup>
-import {
-  onMounted,
-  ref,
-} from "vue";
-
+import { onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
+import { createRfid, getProfiles } from "../services/rfidService";
 
-import {
-  createRfid,
-  getProfiles,
-} from "../services/rfidService";
-
+// IMPORT SUPABASE CLIENT KAMU DI SINI
+// Sesuaikan path-nya jika berbeda (misal: "../supabase/index.js")
+import { supabase } from "../lib/supabase"; 
 
 const router = useRouter();
 
+const ownerId = ref("");
+const cardType = ref("RFID Card");
+const label = ref("");
+const uid = ref("");
 
-const ownerId =
-  ref("");
+const profiles = ref([]);
+const loading = ref(false);
+const loadingProfiles = ref(false);
+const errorMessage = ref("");
+const successMessage = ref("");
 
-const cardType =
-  ref("RFID Card");
+let realtimeChannel;
 
-const label =
-  ref("");
+const loadProfiles = async () => {
+  loadingProfiles.value = true;
+  try {
+    profiles.value = await getProfiles();
+  } catch (error) {
+    console.error(error);
+    errorMessage.value = error.message || "Failed to load profiles.";
+  } finally {
+    loadingProfiles.value = false;
+  }
+};
 
-const uid =
-  ref("");
+// ==========================================
+// FASE 3.4: SETUP SUPABASE REALTIME
+// ==========================================
+const setupRealtime = () => {
+  realtimeChannel = supabase
+    .channel('scan_events_listener')
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'scan_events'
+      },
+      (payload) => {
+        console.log('Kartu baru terdeteksi:', payload.new);
+        
+        // Otomatis isi field UID di form!
+        uid.value = payload.new.uid;
+        
+        // Berikan feedback visual ke user
+        successMessage.value = "Kartu terdeteksi! UID telah diisi otomatis.";
+        errorMessage.value = "";
+        
+        // Hapus pesan sukses setelah 3 detik
+        setTimeout(() => {
+          if (successMessage.value === "Kartu terdeteksi! UID telah diisi otomatis.") {
+            successMessage.value = "";
+          }
+        }, 3000);
+      }
+    )
+    .subscribe();
+};
 
+const handleSubmit = async () => {
+  errorMessage.value = "";
+  successMessage.value = "";
 
-const profiles =
-  ref([]);
+  if (!uid.value.trim()) {
+    errorMessage.value = "UID RFID wajib diisi.";
+    return;
+  }
 
+  loading.value = true;
 
-const loading =
-  ref(false);
+  try {
+    await createRfid({
+      uid: uid.value,
+      ownerId: ownerId.value || null,
+      cardType: cardType.value,
+      label: label.value,
+      isActive: true,
+    });
 
-const loadingProfiles =
-  ref(false);
+    successMessage.value = "RFID berhasil didaftarkan.";
 
-const errorMessage =
-  ref("");
+    setTimeout(() => {
+      router.push({ name: "rfid-list" });
+    }, 700);
+  } catch (error) {
+    console.error(error);
+    errorMessage.value = error.message || "Gagal mendaftarkan RFID.";
+  } finally {
+    loading.value = false;
+  }
+};
 
-const successMessage =
-  ref("");
+const resetForm = () => {
+  ownerId.value = "";
+  cardType.value = "RFID Card";
+  label.value = "";
+  uid.value = "";
+  errorMessage.value = "";
+  successMessage.value = "";
+};
 
+// ==========================================
+// LIFECYCLE HOOKS
+// ==========================================
+onMounted(() => {
+  loadProfiles();
+  setupRealtime(); // Aktifkan listener saat halaman dibuka
+});
 
-const loadProfiles =
-  async () => {
-    loadingProfiles.value = true;
-
-    try {
-      profiles.value =
-        await getProfiles();
-
-    } catch (error) {
-      console.error(error);
-
-      errorMessage.value =
-        error.message ||
-        "Failed to load profiles.";
-    } finally {
-      loadingProfiles.value = false;
-    }
-  };
-
-
-const handleSubmit =
-  async () => {
-    errorMessage.value = "";
-
-    successMessage.value = "";
-
-    if (!uid.value.trim()) {
-      errorMessage.value =
-        "UID RFID wajib diisi.";
-
-      return;
-    }
-
-    loading.value = true;
-
-    try {
-      await createRfid({
-        uid: uid.value,
-        ownerId:
-          ownerId.value || null,
-        cardType:
-          cardType.value,
-        label:
-          label.value,
-        isActive: true,
-      });
-
-
-      successMessage.value =
-        "RFID berhasil didaftarkan.";
-
-
-      setTimeout(() => {
-        router.push({
-          name: "rfid-list",
-        });
-      }, 700);
-
-    } catch (error) {
-      console.error(error);
-
-      errorMessage.value =
-        error.message ||
-        "Gagal mendaftarkan RFID.";
-    } finally {
-      loading.value = false;
-    }
-  };
-
-
-const resetForm =
-  () => {
-    ownerId.value = "";
-    cardType.value =
-      "RFID Card";
-    label.value = "";
-    uid.value = "";
-
-    errorMessage.value = "";
-    successMessage.value = "";
-  };
-
-
-onMounted(loadProfiles);
+onUnmounted(() => {
+  if (realtimeChannel) {
+    supabase.removeChannel(realtimeChannel); // Matikan listener saat pindah halaman
+  }
+});
 </script>
 
 
