@@ -1,0 +1,2803 @@
+CREATE OR REPLACE FUNCTION public.submit_battle_action(p_code text, p_player text, p_token text, p_action text, p_card_id uuid DEFAULT NULL::uuid, p_payload jsonb DEFAULT '{}'::jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  v_battle public.battle_sessions%rowtype;
+  v_card public.battle_cards%rowtype;
+  v_expected_token text;
+  v_enemy text;
+  v_card_json jsonb;
+  v_card_attack integer := 10;
+  v_card_element text := '';
+  v_game_card_id uuid;
+  v_damage integer := 0;
+  v_original_damage integer := 0;
+  v_actual_heal integer := 0;
+  v_old_hp integer := 0;
+  v_defending boolean := false;
+  v_shield numeric := 0;
+  v_debuff numeric := 0;
+  v_element_count integer := 0;
+  v_synergy_points integer := 0;
+  v_synergy_used jsonb;
+  v_synergy_value numeric := 0;
+  v_next_player text;
+  v_completed_round integer;
+  v_next_round integer;
+  v_should_question boolean := false;
+  v_question_id uuid;
+  v_winner text := null;
+  v_active_count integer := 0;
+  v_bench_count integer := 0;
+  v_total_count integer := 0;
+v_target_card public.battle_cards%rowtype;
+v_target_json jsonb;
+v_target_card_id uuid := null;
+v_target_defense integer := 0;
+v_target_defense_effective integer := 0;
+v_target_hp_before integer := 0;
+v_target_hp_after integer := 0;
+v_base_damage integer := 0;
+v_final_damage integer := 0;
+v_effective_damage integer := 0;
+v_player_damage integer := 0;
+v_attack_bonus integer := 0;
+v_defense_reduction integer := 0;
+v_attack_multiplier numeric := 1.0;
+v_damage_multiplier numeric := 1.0;
+v_destroyed boolean := false;
+v_destruction_percent numeric := 0.3000;
+v_enemy_active_count integer := 0;
+v_direct_attack_multiplier numeric := 0.5000;
+v_player_hp_before integer := 0;
+v_player_hp_after integer := 0;
+v_power_strike_applied boolean := false;
+v_ruleset text := 'classic';
+v_is_tcg boolean := false;
+v_deck_remaining integer := 0;
+begin
+  p_code :=
+    upper(
+      trim(
+        coalesce(
+          p_code,
+          ''
+        )
+      )
+    );
+  p_player :=
+    lower(
+      trim(
+        coalesce(
+          p_player,
+          ''
+        )
+      )
+    );
+  p_action :=
+    lower(
+      trim(
+        coalesce(
+          p_action,
+          ''
+        )
+      )
+    );
+  if p_player not in (
+    'p1',
+    'p2'
+  )
+  then
+    return jsonb_build_object(
+      'ok',
+      false,
+      'message',
+      'Invalid player.'
+    );
+  end if;
+  if p_action not in (
+    'attack',
+    'defense',
+    'ultimate',
+    'heal',
+    'synergy',
+    'summon',
+    'move_to_bench',
+    'return_from_bench'
+  )
+  then
+    return jsonb_build_object(
+      'ok',
+      false,
+      'message',
+      'Invalid action.'
+    );
+  end if;
+  v_enemy :=
+    case
+      when p_player = 'p1'
+        then 'p2'
+      else 'p1'
+    end;
+  select *
+  into v_battle
+  from public.battle_sessions
+  where upper(code) =
+    p_code
+  for update;
+  if not found then
+    return jsonb_build_object(
+      'ok',
+      false,
+      'message',
+      'Battle tidak ditemukan.'
+    );
+  end if;
+  v_ruleset :=
+    lower(
+      trim(
+        coalesce(
+          v_battle.ruleset,
+          'classic'
+        )
+      )
+    );
+  v_is_tcg :=
+    v_ruleset = 'tcg_v1';
+  v_expected_token :=
+    case
+      when p_player = 'p1'
+        then v_battle.player1_token
+      else v_battle.player2_token
+    end;
+  if
+    v_expected_token is null
+    or
+    p_token is null
+    or
+    p_token <>
+      v_expected_token
+  then
+    return jsonb_build_object(
+      'ok',
+      false,
+      'message',
+      'Player token tidak valid.'
+    );
+  end if;
+  if
+    v_battle.winner is not null
+    or
+    v_battle.status =
+      'finished'
+  then
+    return jsonb_build_object(
+      'ok',
+      false,
+      'message',
+      'Battle sudah selesai.'
+    );
+  end if;
+  if
+    coalesce(
+      v_battle.question_active,
+      false
+    )
+  then
+    return jsonb_build_object(
+      'ok',
+      false,
+      'message',
+      'Coding Challenge sedang aktif.'
+    );
+  end if;
+  if
+    v_battle.current_turn <>
+    p_player
+  then
+    return jsonb_build_object(
+      'ok',
+      false,
+      'message',
+      'Belum giliran kamu.'
+    );
+  end if;
+  if p_action in (
+    'attack',
+    'defense',
+    'ultimate',
+    'heal',
+    'synergy',
+    'move_to_bench',
+    'return_from_bench'
+  )
+  then
+    if p_card_id is null then
+      return jsonb_build_object(
+        'ok',
+        false,
+        'message',
+        'Pilih card terlebih dahulu.'
+      );
+    end if;
+    select *
+    into v_card
+    from public.battle_cards
+    where id =
+      p_card_id
+      and battle_id =
+        v_battle.id
+      and player =
+        p_player
+    for update;
+    if not found then
+      return jsonb_build_object(
+        'ok',
+        false,
+        'message',
+        'Card bukan milik player.'
+      );
+    end if;
+    v_card_json :=
+      to_jsonb(
+        v_card
+      );
+    v_card_attack :=
+      greatest(
+        1,
+        coalesce(
+          nullif(
+            v_card_json
+              ->> 'attack',
+            ''
+          )::integer,
+          10
+        )
+      );
+    v_card_element :=
+      lower(
+        trim(
+          coalesce(
+            v_card_json
+              ->> 'element',
+            ''
+          )
+        )
+      );
+    begin
+      v_game_card_id :=
+        nullif(
+          v_card_json
+            ->> 'game_card_id',
+          ''
+        )::uuid;
+    exception
+      when others then
+        v_game_card_id :=
+          null;
+    end;
+    if
+      v_game_card_id is not null
+      and
+      (
+        v_card_attack = 10
+        or
+        v_card_element = ''
+      )
+    then
+      select
+        greatest(
+          1,
+          coalesce(
+            gc.attack,
+            10
+          )
+        ),
+        lower(
+          trim(
+            coalesce(
+              gc.element,
+              ''
+            )
+          )
+        )
+      into
+        v_card_attack,
+        v_card_element
+      from public.game_cards gc
+      where gc.id =
+        v_game_card_id;
+    end if;
+  end if;
+  if p_action in (
+    'attack',
+    'defense',
+    'ultimate',
+    'heal',
+    'synergy'
+  )
+  then
+    if
+      v_card.zone <>
+        'active'
+      or
+      coalesce(
+        v_card.exhausted,
+        false
+      )
+    then
+      return jsonb_build_object(
+        'ok',
+        false,
+        'message',
+        'Card tidak dapat digunakan.'
+      );
+    end if;
+  end if;
+  if p_action =
+    'attack'
+  then
+    if v_is_tcg then
+      begin
+        v_target_card_id :=
+          nullif(
+            trim(
+              coalesce(
+                p_payload ->> 'target_card_id',
+                ''
+              )
+            ),
+            ''
+          )::uuid;
+      exception
+        when others then
+          v_target_card_id := null;
+      end;
+      if v_target_card_id is null then
+        select count(*)
+        into v_enemy_active_count
+        from public.battle_cards
+        where battle_id = v_battle.id
+          and player = v_enemy
+          and zone = 'active'
+          and not coalesce(exhausted, false)
+          and coalesce(current_hp, base_hp, 0) > 0;
+        if v_enemy_active_count > 0 then
+          return jsonb_build_object(
+            'ok', false,
+            'requires_target', true,
+            'enemy_active_count', v_enemy_active_count,
+            'message', 'TARGET CARD REQUIRED'
+          );
+        end if;
+        if not coalesce(
+          v_battle.direct_attack_enabled,
+          true
+        )
+        then
+          return jsonb_build_object(
+            'ok', false,
+            'requires_target', false,
+            'enemy_active_count', 0,
+            'direct_attack_enabled', false,
+            'message', 'DIRECT ATTACK DISABLED'
+          );
+        end if;
+        v_attack_bonus := 0;
+        v_defense_reduction := 0;
+        v_attack_multiplier := 1.0;
+        v_damage_multiplier := 1.0;
+        v_direct_attack_multiplier := 0.5000;
+        v_power_strike_applied := false;
+        if (
+          p_player = 'p1'
+          and coalesce(
+            v_battle.player1_power_strike_ready,
+            false
+          )
+        )
+        or (
+          p_player = 'p2'
+          and coalesce(
+            v_battle.player2_power_strike_ready,
+            false
+          )
+        )
+        then
+          v_damage_multiplier :=
+            v_damage_multiplier * 1.5;
+          v_power_strike_applied := true;
+        end if;
+        if p_player = 'p1' then
+          v_debuff :=
+            coalesce(
+              v_battle.player1_attack_debuff,
+              0
+            );
+        else
+          v_debuff :=
+            coalesce(
+              v_battle.player2_attack_debuff,
+              0
+            );
+        end if;
+        if v_debuff > 0 then
+          v_damage_multiplier :=
+            v_damage_multiplier *
+            greatest(
+              0,
+              1 - v_debuff
+            );
+          if p_player = 'p1' then
+            v_battle.player1_attack_debuff := 0;
+          else
+            v_battle.player2_attack_debuff := 0;
+          end if;
+        end if;
+        if v_enemy = 'p1' then
+          v_defending :=
+            coalesce(
+              v_battle.player1_defending,
+              false
+            );
+        else
+          v_defending :=
+            coalesce(
+              v_battle.player2_defending,
+              false
+            );
+        end if;
+        if v_defending then
+          v_damage_multiplier :=
+            v_damage_multiplier * 0.5;
+          if v_enemy = 'p1' then
+            v_battle.player1_defending := false;
+          else
+            v_battle.player2_defending := false;
+          end if;
+        end if;
+        if v_enemy = 'p1' then
+          v_shield :=
+            coalesce(
+              v_battle.player1_synergy_shield,
+              0
+            );
+        else
+          v_shield :=
+            coalesce(
+              v_battle.player2_synergy_shield,
+              0
+            );
+        end if;
+        if v_shield > 0 then
+          v_damage_multiplier :=
+            v_damage_multiplier *
+            greatest(
+              0,
+              1 - v_shield
+            );
+          if v_enemy = 'p1' then
+            v_battle.player1_synergy_shield := 0;
+          else
+            v_battle.player2_synergy_shield := 0;
+          end if;
+        end if;
+        v_base_damage :=
+          greatest(
+            1,
+            round(
+              (
+                v_card_attack +
+                v_attack_bonus
+              ) *
+              v_attack_multiplier *
+              v_direct_attack_multiplier
+            )::integer
+          );
+        v_final_damage :=
+          greatest(
+            1,
+            round(
+              v_base_damage *
+              v_damage_multiplier
+            )::integer
+          );
+        v_damage :=
+          v_final_damage;
+        if v_enemy = 'p1' then
+          v_player_hp_before :=
+            greatest(
+              0,
+              coalesce(
+                v_battle.player1_hp,
+                0
+              )
+            );
+          v_battle.player1_hp :=
+            greatest(
+              0,
+              v_player_hp_before -
+              v_final_damage
+            );
+          v_player_hp_after :=
+            v_battle.player1_hp;
+        else
+          v_player_hp_before :=
+            greatest(
+              0,
+              coalesce(
+                v_battle.player2_hp,
+                0
+              )
+            );
+          v_battle.player2_hp :=
+            greatest(
+              0,
+              v_player_hp_before -
+              v_final_damage
+            );
+          v_player_hp_after :=
+            v_battle.player2_hp;
+        end if;
+        if p_player = 'p1' then
+          v_battle.player1_skill :=
+            least(
+              100,
+              coalesce(
+                v_battle.player1_skill,
+                0
+              ) + 25
+            );
+          v_battle.player2_skill :=
+            least(
+              100,
+                coalesce(
+                v_battle.player2_skill,
+                0
+              ) + 15
+            );
+        else
+          v_battle.player2_skill :=
+            least(
+              100,
+              coalesce(
+                v_battle.player2_skill,
+                0
+              ) + 25
+            );
+          v_battle.player1_skill :=
+            least(
+              100,
+              coalesce(
+                v_battle.player1_skill,
+                0
+              ) + 15
+            );
+        end if;
+        if p_player = 'p1' then
+          if coalesce(
+            v_battle.player1_power_strike_ready,
+            false
+          )
+          then
+            v_battle.player1_power_strike_ready := false;
+          end if;
+        else
+          if coalesce(
+            v_battle.player2_power_strike_ready,
+            false
+          )
+          then
+            v_battle.player2_power_strike_ready := false;
+          end if;
+        end if;
+        insert into public.battle_events (
+          battle_id,
+          type,
+          source_player,
+          target_player,
+          card_id,
+          payload
+        )
+        values (
+          v_battle.id,
+          'attack',
+          p_player,
+          v_enemy,
+          p_card_id,
+          jsonb_build_object(
+            'ruleset', v_ruleset,
+            'attack_mode', 'direct',
+            'attacker_card_id', p_card_id,
+            'target_card_id', null,
+            'base_attack', v_card_attack,
+            'attack_bonus', v_attack_bonus,
+            'attack_multiplier', v_attack_multiplier,
+            'direct_attack_multiplier', v_direct_attack_multiplier,
+            'base_damage', v_base_damage,
+            'damage_multiplier', v_damage_multiplier,
+            'final_damage', v_final_damage,
+            'damage', v_final_damage,
+            'player_hp_before', v_player_hp_before,
+            'player_hp_after', v_player_hp_after,
+            'power_strike', v_power_strike_applied,
+            'destroyed', false,
+            'player_damage', v_final_damage,
+            'message',
+              upper(p_player)
+              || ' DIRECT ATTACK -'
+              || v_final_damage
+              || ' HP'
+          )
+        );
+      else
+      select *
+      into v_target_card
+      from public.battle_cards
+      where id = v_target_card_id
+        and battle_id = v_battle.id
+        and player = v_enemy
+      for update;
+      if not found then
+        return jsonb_build_object(
+          'ok', false,
+          'message', 'Target Card tidak valid.'
+        );
+      end if;
+      if
+        v_target_card.zone <> 'active'
+        or coalesce(v_target_card.exhausted, false)
+      then
+        return jsonb_build_object(
+          'ok', false,
+          'message', 'Target harus Enemy Active Card.'
+        );
+      end if;
+      v_target_json :=
+        to_jsonb(v_target_card);
+      v_target_defense :=
+        greatest(
+          0,
+          coalesce(
+            nullif(
+              v_target_json ->> 'defense',
+              ''
+            )::integer,
+            0
+          )
+        );
+      v_target_hp_before :=
+        greatest(
+          0,
+          coalesce(
+            nullif(
+              v_target_json ->> 'current_hp',
+              ''
+            )::integer,
+            nullif(
+              v_target_json ->> 'base_hp',
+              ''
+            )::integer,
+            nullif(
+              v_target_json ->> 'hp',
+              ''
+            )::integer,
+            0
+          )
+        );
+      if v_target_hp_before <= 0 then
+        return jsonb_build_object(
+          'ok', false,
+          'message', 'Target Card sudah tidak memiliki HP.'
+        );
+      end if;
+      v_attack_bonus := 0;
+      v_defense_reduction := 0;
+      v_attack_multiplier := 1.0;
+      v_damage_multiplier := 1.0;
+      if (
+        p_player = 'p1'
+        and coalesce(
+          v_battle.player1_power_strike_ready,
+          false
+        )
+      )
+      or (
+        p_player = 'p2'
+        and coalesce(
+          v_battle.player2_power_strike_ready,
+          false
+        )
+      )
+      then
+        v_damage_multiplier :=
+          v_damage_multiplier * 1.5;
+      end if;
+      if p_player = 'p1' then
+        v_debuff :=
+          coalesce(
+            v_battle.player1_attack_debuff,
+            0
+          );
+      else
+        v_debuff :=
+          coalesce(
+            v_battle.player2_attack_debuff,
+            0
+          );
+      end if;
+      if v_debuff > 0 then
+        v_damage_multiplier :=
+          v_damage_multiplier *
+          greatest(
+            0,
+            1 - v_debuff
+          );
+        if p_player = 'p1' then
+          v_battle.player1_attack_debuff := 0;
+        else
+          v_battle.player2_attack_debuff := 0;
+        end if;
+      end if;
+      if v_enemy = 'p1' then
+        v_defending :=
+          coalesce(
+            v_battle.player1_defending,
+            false
+          );
+      else
+        v_defending :=
+          coalesce(
+            v_battle.player2_defending,
+            false
+          );
+      end if;
+      if v_defending then
+        v_damage_multiplier :=
+          v_damage_multiplier * 0.5;
+        if v_enemy = 'p1' then
+          v_battle.player1_defending := false;
+        else
+          v_battle.player2_defending := false;
+        end if;
+      end if;
+      if v_enemy = 'p1' then
+        v_shield :=
+          coalesce(
+            v_battle.player1_synergy_shield,
+            0
+          );
+      else
+        v_shield :=
+          coalesce(
+            v_battle.player2_synergy_shield,
+            0
+          );
+      end if;
+      if v_shield > 0 then
+        v_damage_multiplier :=
+          v_damage_multiplier *
+          greatest(
+            0,
+            1 - v_shield
+          );
+        if v_enemy = 'p1' then
+          v_battle.player1_synergy_shield := 0;
+        else
+          v_battle.player2_synergy_shield := 0;
+        end if;
+      end if;
+      v_target_defense_effective :=
+        greatest(
+          0,
+          v_target_defense -
+          v_defense_reduction
+        );
+      v_base_damage :=
+        greatest(
+          1,
+          round(
+            (
+              v_card_attack +
+              v_attack_bonus
+            ) *
+            v_attack_multiplier
+          )::integer -
+          v_target_defense_effective
+        );
+      v_final_damage :=
+        greatest(
+          1,
+          round(
+            v_base_damage *
+            v_damage_multiplier
+          )::integer
+        );
+      v_damage := v_final_damage;
+      v_target_hp_after :=
+        greatest(
+          0,
+          v_target_hp_before -
+          v_final_damage
+        );
+      v_effective_damage :=
+        least(
+          v_target_hp_before,
+          v_final_damage
+        );
+      v_destroyed :=
+        v_target_hp_after <= 0;
+      if v_destroyed then
+        update public.battle_cards
+        set
+          current_hp = 0,
+          zone = 'graveyard',
+          exhausted = true,
+          destroyed_at = now(),
+          graveyard_at = now(),
+          graveyard_reason = 'destroyed'
+        where id = v_target_card_id;
+      else
+        update public.battle_cards
+        set
+          current_hp = v_target_hp_after
+        where id = v_target_card_id;
+      end if;
+      v_player_damage := 0;
+      if
+        v_destroyed
+        and coalesce(
+          v_battle.destruction_damage_enabled,
+          true
+        )
+      then
+        v_destruction_percent :=
+          greatest(
+            0,
+            least(
+              1,
+              coalesce(
+                v_battle.destruction_damage_percent,
+                0.3000
+              )
+            )
+          );
+        if coalesce(
+          v_battle.destruction_damage_mode,
+          'final_damage_percent'
+        ) = 'overflow_percent'
+        then
+          v_player_damage :=
+            greatest(
+              0,
+              round(
+                greatest(
+                  0,
+                  v_final_damage -
+                  v_target_hp_before
+                ) *
+                v_destruction_percent
+              )::integer
+            );
+        elsif coalesce(
+          v_battle.destruction_damage_mode,
+          'final_damage_percent'
+        ) = 'final_damage_percent'
+        then
+          v_player_damage :=
+            greatest(
+              0,
+              round(
+                v_effective_damage *
+                v_destruction_percent
+              )::integer
+            );
+        else
+          v_player_damage := 0;
+        end if;
+        if v_player_damage > 0 then
+          if v_enemy = 'p1' then
+            v_battle.player1_hp :=
+              greatest(
+                0,
+                v_battle.player1_hp -
+                v_player_damage
+              );
+          else
+            v_battle.player2_hp :=
+              greatest(
+                0,
+                v_battle.player2_hp -
+                v_player_damage
+              );
+          end if;
+        end if;
+      end if;
+      if p_player = 'p1' then
+        v_battle.player1_skill :=
+          least(
+            100,
+            v_battle.player1_skill + 25
+          );
+        v_battle.player2_skill :=
+          least(
+            100,
+            v_battle.player2_skill + 15
+          );
+      else
+        v_battle.player2_skill :=
+          least(
+            100,
+            v_battle.player2_skill + 25
+          );
+        v_battle.player1_skill :=
+          least(
+            100,
+            v_battle.player1_skill + 15
+          );
+      end if;
+      if p_player = 'p1' then
+        if coalesce(
+          v_battle.player1_power_strike_ready,
+          false
+        ) then
+          v_battle.player1_power_strike_ready := false;
+        end if;
+      else
+        if coalesce(
+          v_battle.player2_power_strike_ready,
+          false
+        ) then
+          v_battle.player2_power_strike_ready := false;
+        end if;
+      end if;
+      insert into public.battle_events (
+        battle_id,
+        type,
+        source_player,
+        target_player,
+        card_id,
+        payload
+      )
+      values (
+        v_battle.id,
+        'attack',
+        p_player,
+        v_enemy,
+        p_card_id,
+        jsonb_build_object(
+          'ruleset', v_ruleset,
+          'attack_mode', 'targeted_card',
+          'attacker_card_id', p_card_id,
+          'target_card_id', v_target_card_id,
+          'base_attack', v_card_attack,
+          'attack_bonus', v_attack_bonus,
+          'attack_multiplier', v_attack_multiplier,
+          'target_defense', v_target_defense,
+          'defense_reduction', v_defense_reduction,
+          'effective_defense', v_target_defense_effective,
+          'base_damage', v_base_damage,
+          'damage_multiplier', v_damage_multiplier,
+          'final_damage', v_final_damage,
+          'damage', v_final_damage,
+          'target_hp_before', v_target_hp_before,
+          'target_hp_after', v_target_hp_after,
+          'effective_damage', v_effective_damage,
+          'destroyed', v_destroyed,
+          'player_damage', v_player_damage,
+          'destruction_damage_mode',
+            v_battle.destruction_damage_mode,
+          'destruction_damage_percent',
+            v_battle.destruction_damage_percent,
+          'message',
+            upper(p_player)
+            || ' TARGET ATTACK '
+            || v_final_damage
+            || ' DAMAGE'
+        )
+      );
+      if v_destroyed then
+        insert into public.battle_events (
+          battle_id,
+          type,
+          source_player,
+          target_player,
+          card_id,
+          payload
+        )
+        values (
+          v_battle.id,
+          'card_destroyed',
+          p_player,
+          v_enemy,
+          v_target_card_id,
+          jsonb_build_object(
+            'ruleset', v_ruleset,
+            'attacker_card_id', p_card_id,
+            'target_card_id', v_target_card_id,
+            'reason', 'destroyed',
+            'previous_zone', 'active',
+            'zone', 'graveyard',
+            'final_damage', v_final_damage,
+            'effective_damage', v_effective_damage,
+            'player_damage', v_player_damage,
+            'message', 'Target Card destroyed'
+          )
+        );
+      end if;
+      end if;
+    else
+      v_damage :=
+        greatest(
+          1,
+          v_card_attack
+        );
+      if (
+        p_player = 'p1'
+        and coalesce(
+          v_battle.player1_power_strike_ready,
+          false
+        )
+      )
+      or (
+        p_player = 'p2'
+        and coalesce(
+          v_battle.player2_power_strike_ready,
+          false
+        )
+      )
+      then
+        v_damage :=
+          greatest(
+            1,
+            round(
+              v_damage * 1.5
+            )::integer
+          );
+      end if;
+      if p_player = 'p1' then
+        v_debuff :=
+          coalesce(
+            v_battle.player1_attack_debuff,
+            0
+          );
+      else
+        v_debuff :=
+          coalesce(
+            v_battle.player2_attack_debuff,
+            0
+          );
+      end if;
+      if v_debuff > 0 then
+        v_damage :=
+          round(
+            v_damage *
+            (1 - v_debuff)
+          )::integer;
+        if p_player = 'p1' then
+          v_battle.player1_attack_debuff := 0;
+        else
+          v_battle.player2_attack_debuff := 0;
+        end if;
+      end if;
+      if v_enemy = 'p1' then
+        v_defending :=
+          coalesce(
+            v_battle.player1_defending,
+            false
+          );
+      else
+        v_defending :=
+          coalesce(
+            v_battle.player2_defending,
+            false
+          );
+      end if;
+      if v_defending then
+        v_damage :=
+          round(
+            v_damage * 0.5
+          )::integer;
+        if v_enemy = 'p1' then
+          v_battle.player1_defending := false;
+        else
+          v_battle.player2_defending := false;
+        end if;
+      end if;
+      if v_enemy = 'p1' then
+        v_shield :=
+          coalesce(
+            v_battle.player1_synergy_shield,
+            0
+          );
+      else
+        v_shield :=
+          coalesce(
+            v_battle.player2_synergy_shield,
+                  0
+          );
+      end if;
+      if v_shield > 0 then
+        v_damage :=
+          round(
+            v_damage *
+            (1 - v_shield)
+          )::integer;
+        if v_enemy = 'p1' then
+          v_battle.player1_synergy_shield := 0;
+        else
+          v_battle.player2_synergy_shield := 0;
+        end if;
+      end if;
+      v_damage :=
+        greatest(
+          0,
+          v_damage
+        );
+      if v_enemy = 'p1' then
+        v_battle.player1_hp :=
+          greatest(
+            0,
+            v_battle.player1_hp -
+            v_damage
+          );
+      else
+        v_battle.player2_hp :=
+          greatest(
+            0,
+            v_battle.player2_hp -
+            v_damage
+          );
+      end if;
+      if p_player = 'p1' then
+        v_battle.player1_skill :=
+          least(
+            100,
+            v_battle.player1_skill + 25
+          );
+        v_battle.player2_skill :=
+          least(
+            100,
+            v_battle.player2_skill + 15
+          );
+      else
+        v_battle.player2_skill :=
+          least(
+            100,
+            v_battle.player2_skill + 25
+          );
+        v_battle.player1_skill :=
+          least(
+            100,
+            v_battle.player1_skill + 15
+          );
+      end if;
+      if p_player = 'p1' then
+        if coalesce(
+          v_battle.player1_power_strike_ready,
+          false
+        ) then
+          v_battle.player1_power_strike_ready := false;
+        end if;
+      else
+        if coalesce(
+          v_battle.player2_power_strike_ready,
+          false
+        ) then
+          v_battle.player2_power_strike_ready := false;
+        end if;
+      end if;
+      insert into public.battle_events (
+        battle_id,
+        type,
+        source_player,
+        target_player,
+        card_id,
+        payload
+      )
+      values (
+        v_battle.id,
+        'attack',
+        p_player,
+        v_enemy,
+        p_card_id,
+        jsonb_build_object(
+          'damage', v_damage,
+          'message',
+            upper(p_player)
+            || ' ATTACK -'
+            || v_damage
+            || ' HP'
+        )
+      );
+    end if;
+  elsif p_action =
+    'defense'
+  then
+    if p_player = 'p1' then
+      v_battle.player1_defending :=
+        true;
+      v_battle.player1_skill :=
+        least(
+          100,
+          v_battle.player1_skill +
+          10
+        );
+    else
+      v_battle.player2_defending :=
+        true;
+      v_battle.player2_skill :=
+        least(
+          100,
+          v_battle.player2_skill +
+          10
+        );
+    end if;
+    insert into public.battle_events (
+      battle_id,
+      type,
+      source_player,
+      card_id,
+      payload
+    )
+    values (
+      v_battle.id,
+      'defense',
+      p_player,
+      p_card_id,
+      jsonb_build_object(
+        'message',
+        '🛡 DEFENSE ACTIVE'
+      )
+    );
+  elsif p_action =
+    'ultimate'
+  then
+    if p_player = 'p1' then
+      if
+        v_battle.player1_skill < 100
+        or
+        coalesce(
+          v_battle.player1_ultimate_used,
+          false
+        )
+      then
+        return jsonb_build_object(
+          'ok',
+          false,
+          'message',
+          'Ultimate belum tersedia.'
+        );
+      end if;
+      v_battle.player1_skill :=
+        0;
+      v_battle.player1_ultimate_used :=
+        true;
+    else
+      if
+        v_battle.player2_skill < 100
+        or
+        coalesce(
+          v_battle.player2_ultimate_used,
+          false
+        )
+      then
+        return jsonb_build_object(
+          'ok',
+          false,
+          'message',
+          'Ultimate belum tersedia.'
+        );
+      end if;
+      v_battle.player2_skill :=
+        0;
+      v_battle.player2_ultimate_used :=
+        true;
+    end if;
+    v_damage :=
+      greatest(
+        1,
+        round(
+          v_card_attack *
+          2
+        )::integer
+      );
+    if p_player = 'p1' then
+      v_debuff :=
+        coalesce(
+          v_battle
+            .player1_attack_debuff,
+          0
+        );
+    else
+      v_debuff :=
+        coalesce(
+          v_battle
+            .player2_attack_debuff,
+          0
+        );
+    end if;
+    if v_debuff > 0 then
+      v_damage :=
+        round(
+          v_damage *
+          (
+            1 -
+            v_debuff
+          )
+        )::integer;
+      if p_player = 'p1' then
+        v_battle
+          .player1_attack_debuff :=
+          0;
+      else
+        v_battle
+          .player2_attack_debuff :=
+          0;
+      end if;
+    end if;
+    if v_enemy = 'p1' then
+      v_defending :=
+        coalesce(
+          v_battle
+            .player1_defending,
+          false
+        );
+    else
+      v_defending :=
+        coalesce(
+          v_battle
+            .player2_defending,
+          false
+        );
+    end if;
+    if v_defending then
+      v_damage :=
+        round(
+          v_damage *
+          0.5
+        )::integer;
+      if v_enemy = 'p1' then
+        v_battle
+          .player1_defending :=
+          false;
+      else
+        v_battle
+          .player2_defending :=
+          false;
+      end if;
+    end if;
+    if v_enemy = 'p1' then
+      v_shield :=
+        coalesce(
+          v_battle
+            .player1_synergy_shield,
+          0
+        );
+    else
+      v_shield :=
+        coalesce(
+          v_battle
+            .player2_synergy_shield,
+          0
+        );
+    end if;
+    if v_shield > 0 then
+      v_damage :=
+        round(
+          v_damage *
+          (
+            1 -
+            v_shield
+          )
+        )::integer;
+      if v_enemy = 'p1' then
+        v_battle
+          .player1_synergy_shield :=
+          0;
+      else
+        v_battle
+          .player2_synergy_shield :=
+          0;
+      end if;
+    end if;
+    v_damage :=
+      greatest(
+        0,
+        v_damage
+      );
+    if v_enemy = 'p1' then
+      v_battle.player1_hp :=
+        greatest(
+          0,
+          v_battle.player1_hp -
+          v_damage
+        );
+    else
+      v_battle.player2_hp :=
+        greatest(
+          0,
+          v_battle.player2_hp -
+          v_damage
+        );
+    end if;
+    if v_enemy = 'p1' then
+      v_battle.player1_skill :=
+        least(
+          100,
+          v_battle.player1_skill +
+          20
+        );
+    else
+      v_battle.player2_skill :=
+        least(
+          100,
+          v_battle.player2_skill +
+          20
+        );
+    end if;
+    insert into public.battle_events (
+      battle_id,
+      type,
+      source_player,
+      target_player,
+      card_id,
+      payload
+    )
+    values (
+      v_battle.id,
+      'ultimate',
+      p_player,
+      v_enemy,
+      p_card_id,
+      jsonb_build_object(
+        'damage',
+        v_damage,
+        'message',
+        '💥 ULTIMATE -'
+        || v_damage
+        || ' HP'
+      )
+    );
+    insert into public.battle_events (
+      battle_id,
+      type,
+      source_player,
+      target_player,
+      card_id,
+      payload
+    )
+    values (
+      v_battle.id,
+      'damage',
+      p_player,
+      v_enemy,
+      p_card_id,
+      jsonb_build_object(
+        'damage',
+        v_damage
+      )
+    );
+  elsif p_action =
+    'heal'
+  then
+    if p_player = 'p1' then
+      if
+        v_battle.player1_hp >
+          (
+            v_battle.player1_max_hp *
+            0.5
+          )
+        or
+        coalesce(
+          v_battle.player1_heal_used,
+          false
+        )
+      then
+        return jsonb_build_object(
+          'ok',
+          false,
+          'message',
+          'Heal hanya tersedia ketika HP ≤ 50% dan hanya satu kali.'
+        );
+      end if;
+      v_old_hp :=
+        v_battle.player1_hp;
+      v_battle.player1_hp :=
+        least(
+          v_battle.player1_max_hp,
+          v_battle.player1_hp +
+          round(
+            v_battle.player1_max_hp *
+            0.35
+          )::integer
+        );
+      v_actual_heal :=
+        v_battle.player1_hp -
+        v_old_hp;
+      v_battle.player1_heal_used :=
+        true;
+    else
+      if
+        v_battle.player2_hp >
+          (
+            v_battle.player2_max_hp *
+            0.5
+          )
+        or
+        coalesce(
+          v_battle.player2_heal_used,
+          false
+        )
+      then
+        return jsonb_build_object(
+          'ok',
+          false,
+          'message',
+          'Heal hanya tersedia ketika HP ≤ 50% dan hanya satu kali.'
+        );
+      end if;
+      v_old_hp :=
+        v_battle.player2_hp;
+      v_battle.player2_hp :=
+        least(
+          v_battle.player2_max_hp,
+          v_battle.player2_hp +
+          round(
+            v_battle.player2_max_hp *
+            0.35
+          )::integer
+        );
+      v_actual_heal :=
+        v_battle.player2_hp -
+        v_old_hp;
+      v_battle.player2_heal_used :=
+        true;
+    end if;
+    insert into public.battle_events (
+      battle_id,
+      type,
+      source_player,
+      card_id,
+      payload
+    )
+    values (
+      v_battle.id,
+      'heal',
+      p_player,
+      p_card_id,
+      jsonb_build_object(
+        'amount',
+        v_actual_heal,
+        'message',
+        '💚 +'
+        || v_actual_heal
+        || ' HP'
+      )
+    );
+  elsif p_action =
+    'synergy'
+  then
+    if v_card_element not in (
+      'grass',
+      'fire',
+      'water',
+      'electric',
+      'ice',
+      'dark'
+    )
+    then
+      return jsonb_build_object(
+        'ok',
+        false,
+        'message',
+        'Card tidak memiliki synergy yang valid.'
+      );
+    end if;
+    select count(*)
+    into v_element_count
+    from public.battle_cards bc
+    where
+      bc.battle_id =
+        v_battle.id
+      and
+      bc.player =
+        p_player
+      and
+      bc.zone =
+        'active'
+      and
+      not coalesce(
+        bc.exhausted,
+        false
+      )
+      and
+      lower(
+        coalesce(
+          to_jsonb(bc)
+            ->> 'element',
+          ''
+        )
+      ) =
+        v_card_element;
+    v_synergy_points :=
+      least(
+        4,
+        v_element_count
+      );
+    if v_synergy_points < 2 then
+      return jsonb_build_object(
+        'ok',
+        false,
+        'message',
+        'Synergy membutuhkan minimal 2 card dengan element yang sama.'
+      );
+    end if;
+    if p_player = 'p1' then
+      v_synergy_used :=
+        coalesce(
+          v_battle
+            .player1_synergy_used,
+          '{}'::jsonb
+        );
+    else
+      v_synergy_used :=
+        coalesce(
+          v_battle
+            .player2_synergy_used,
+          '{}'::jsonb
+        );
+    end if;
+    if
+      coalesce(
+        (
+          v_synergy_used
+            ->>
+          v_card_element
+        )::boolean,
+        false
+      )
+    then
+      return jsonb_build_object(
+        'ok',
+        false,
+        'message',
+        'Synergy element ini sudah digunakan.'
+      );
+    end if;
+    v_synergy_used :=
+      jsonb_set(
+        v_synergy_used,
+        array[
+          v_card_element
+        ],
+        'true'::jsonb,
+        true
+      );
+    if p_player = 'p1' then
+      v_battle.player1_synergy_used :=
+        v_synergy_used;
+        else
+      v_battle.player2_synergy_used :=
+        v_synergy_used;
+    end if;
+    if v_card_element =
+      'grass'
+    then
+      v_synergy_value :=
+        case
+          when v_synergy_points >= 4
+            then 0.60
+          when v_synergy_points = 3
+            then 0.45
+          else 0.30
+        end;
+      if p_player = 'p1' then
+        v_old_hp :=
+          v_battle.player1_hp;
+        v_battle.player1_hp :=
+          least(
+            v_battle.player1_max_hp,
+            v_battle.player1_hp +
+            round(
+              v_battle.player1_max_hp *
+              v_synergy_value
+            )::integer
+          );
+        v_actual_heal :=
+          v_battle.player1_hp -
+          v_old_hp;
+      else
+        v_old_hp :=
+          v_battle.player2_hp;
+        v_battle.player2_hp :=
+          least(
+            v_battle.player2_max_hp,
+            v_battle.player2_hp +
+            round(
+              v_battle.player2_max_hp *
+              v_synergy_value
+            )::integer
+          );
+        v_actual_heal :=
+          v_battle.player2_hp -
+          v_old_hp;
+      end if;
+    elsif v_card_element =
+      'fire'
+    then
+      v_synergy_value :=
+        case
+          when v_synergy_points >= 4
+            then 2.2
+          when v_synergy_points = 3
+            then 1.8
+          else 1.5
+        end;
+      v_damage :=
+        greatest(
+          1,
+          round(
+            v_card_attack *
+            v_synergy_value
+          )::integer
+        );
+    elsif v_card_element =
+      'water'
+    then
+      v_synergy_value :=
+        case
+          when v_synergy_points >= 4
+            then 0.80
+          when v_synergy_points = 3
+            then 0.60
+          else 0.40
+        end;
+      if p_player = 'p1' then
+        v_battle.player1_synergy_shield :=
+          v_synergy_value;
+      else
+        v_battle.player2_synergy_shield :=
+          v_synergy_value;
+      end if;
+    elsif v_card_element =
+      'electric'
+    then
+      v_synergy_value :=
+        case
+          when v_synergy_points >= 4
+            then 100
+          when v_synergy_points = 3
+            then 70
+          else 40
+        end;
+      if p_player = 'p1' then
+        v_battle.player1_skill :=
+          least(
+            100,
+            v_battle.player1_skill +
+            v_synergy_value::integer
+          );
+      else
+        v_battle.player2_skill :=
+          least(
+            100,
+            v_battle.player2_skill +
+            v_synergy_value::integer
+          );
+      end if;
+    elsif v_card_element =
+      'ice'
+    then
+      v_synergy_value :=
+        case
+          when v_synergy_points >= 4
+            then 0.60
+          when v_synergy_points = 3
+            then 0.40
+          else 0.25
+        end;
+      if v_enemy = 'p1' then
+        v_battle.player1_attack_debuff :=
+          v_synergy_value;
+      else
+        v_battle.player2_attack_debuff :=
+          v_synergy_value;
+      end if;
+    elsif v_card_element =
+      'dark'
+    then
+      v_synergy_value :=
+        case
+          when v_synergy_points >= 4
+            then 2.0
+          when v_synergy_points = 3
+            then 1.7
+          else 1.4
+        end;
+      v_damage :=
+        greatest(
+          1,
+          round(
+            v_card_attack *
+            v_synergy_value
+          )::integer
+        );
+    end if;
+    if v_card_element in (
+      'fire',
+      'dark'
+    )
+    then
+      if p_player = 'p1' then
+        v_debuff :=
+          coalesce(
+            v_battle.player1_attack_debuff,
+            0
+          );
+      else
+        v_debuff :=
+          coalesce(
+            v_battle.player2_attack_debuff,
+            0
+          );
+      end if;
+      if v_debuff > 0 then
+        v_damage :=
+          round(
+            v_damage *
+            (
+              1 -
+              v_debuff
+            )
+          )::integer;
+        if p_player = 'p1' then
+          v_battle.player1_attack_debuff :=
+            0;
+        else
+          v_battle.player2_attack_debuff :=
+            0;
+        end if;
+      end if;
+      if v_card_element <>
+        'dark'
+      then
+        if v_enemy = 'p1' then
+          v_defending :=
+            coalesce(
+              v_battle.player1_defending,
+              false
+            );
+        else
+          v_defending :=
+            coalesce(
+              v_battle.player2_defending,
+              false
+            );
+        end if;
+        if v_defending then
+          v_damage :=
+            round(
+              v_damage *
+              0.5
+            )::integer;
+          if v_enemy = 'p1' then
+            v_battle.player1_defending :=
+              false;
+          else
+            v_battle.player2_defending :=
+              false;
+          end if;
+        end if;
+      end if;
+      if v_enemy = 'p1' then
+        v_shield :=
+          coalesce(
+            v_battle.player1_synergy_shield,
+            0
+          );
+      else
+        v_shield :=
+          coalesce(
+            v_battle.player2_synergy_shield,
+            0
+          );
+      end if;
+      if v_shield > 0 then
+        v_damage :=
+          round(
+            v_damage *
+            (
+              1 -
+              v_shield
+            )
+          )::integer;
+        if v_enemy = 'p1' then
+          v_battle.player1_synergy_shield :=
+            0;
+        else
+          v_battle.player2_synergy_shield :=
+            0;
+        end if;
+      end if;
+      v_damage :=
+        greatest(
+          0,
+          v_damage
+        );
+      if v_enemy = 'p1' then
+        v_battle.player1_hp :=
+          greatest(
+            0,
+            v_battle.player1_hp -
+            v_damage
+          );
+      else
+        v_battle.player2_hp :=
+          greatest(
+            0,
+            v_battle.player2_hp -
+            v_damage
+          );
+      end if;
+    end if;
+    insert into public.battle_events (
+      battle_id,
+      type,
+      source_player,
+      target_player,
+      card_id,
+      payload
+    )
+    values (
+      v_battle.id,
+      'synergy',
+      p_player,
+      case
+        when v_card_element in (
+          'fire',
+          'ice',
+          'dark'
+        )
+          then v_enemy
+        else null
+      end,
+      p_card_id,
+      jsonb_build_object(
+        'element',
+        v_card_element,
+        'points',
+        v_synergy_points,
+        'damage',
+        v_damage,
+        'heal',
+        v_actual_heal,
+        'value',
+        v_synergy_value,
+        'message',
+        upper(
+          v_card_element
+        )
+        || ' SYNERGY'
+      )
+    );
+  elsif p_action =
+    'move_to_bench'
+  then
+    if
+      v_card.zone <>
+        'active'
+    then
+      return jsonb_build_object(
+        'ok',
+        false,
+        'message',
+        'Card bukan Active Card.'
+      );
+    end if;
+    select count(*)
+    into v_active_count
+    from public.battle_cards
+    where battle_id =
+      v_battle.id
+      and player =
+        p_player
+      and zone =
+        'active'
+      and not coalesce(
+        exhausted,
+        false
+      );
+    if v_active_count <= 1 then
+      return jsonb_build_object(
+        'ok',
+        false,
+        'message',
+        'Minimal satu Active Card harus tetap ada.'
+      );
+    end if;
+    if
+      v_is_tcg
+      and
+      coalesce(
+        v_card.bench_return_count,
+        0
+      ) >= 1
+    then
+      update public.battle_cards
+      set
+        zone =
+          'graveyard',
+        exhausted =
+          true,
+        graveyard_at =
+          now(),
+        graveyard_reason =
+          'bench_exhausted'
+      where id =
+        p_card_id;
+      insert into public.battle_events (
+        battle_id,
+        type,
+        source_player,
+        card_id,
+        payload
+      )
+      values (
+        v_battle.id,
+        'graveyard',
+        p_player,
+        p_card_id,
+        jsonb_build_object(
+          'ruleset',
+          v_ruleset,
+          'reason',
+          'bench_exhausted',
+          'previous_zone',
+          'active',
+          'zone',
+          'graveyard',
+          'message',
+          'Card moved to Graveyard'
+        )
+      );
+      return jsonb_build_object(
+        'ok',
+        true,
+        'action',
+        'move_to_graveyard',
+        'card_id',
+        p_card_id,
+        'zone',
+        'graveyard',
+        'graveyard_reason',
+        'bench_exhausted',
+        'message',
+        'Card exhausted dan masuk Graveyard.'
+      );
+    end if;
+    select count(*)
+    into v_bench_count
+    from public.battle_cards
+    where battle_id =
+      v_battle.id
+      and player =
+        p_player
+      and zone =
+        'bench';
+    if
+      v_bench_count >=
+      coalesce(
+        v_battle.max_bench,
+        4
+      )
+    then
+      return jsonb_build_object(
+        'ok',
+        false,
+        'message',
+        'Bench penuh.'
+      );
+    end if;
+    update public.battle_cards
+    set
+      zone =
+        'bench',
+      exhausted =
+        case
+          when v_is_tcg
+            then false
+          when coalesce(
+            bench_return_count,
+            0
+          ) >= 1
+            then true
+          else exhausted
+        end
+    where id =
+      p_card_id;
+    insert into public.battle_events (
+      battle_id,
+      type,
+      source_player,
+      card_id,
+      payload
+    )
+    values (
+      v_battle.id,
+      'bench',
+      p_player,
+      p_card_id,
+      jsonb_build_object(
+        'ruleset',
+        v_ruleset,
+        'zone',
+        'bench',
+        'return_count',
+        coalesce(
+          v_card.bench_return_count,
+          0
+        ),
+        'message',
+        'Card moved to Bench'
+      )
+    );
+    update public.battle_sessions
+    set
+      player1_hp =
+        v_battle.player1_hp,
+      player2_hp =
+        v_battle.player2_hp
+    where id =
+      v_battle.id;
+    return jsonb_build_object(
+      'ok',
+      true,
+      'action',
+      'move_to_bench',
+      'card_id',
+      p_card_id,
+      'zone',
+      'bench',
+      'message',
+      'Card moved to Bench.'
+    );
+  elsif p_action =
+    'return_from_bench'
+  then
+    if
+      v_card.zone <>
+        'bench'
+      or
+      coalesce(
+        v_card.exhausted,
+        false
+      )
+    then
+      return jsonb_build_object(
+        'ok',
+        false,
+        'message',
+        'Bench Card tidak dapat kembali.'
+      );
+    end if;
+    if
+      coalesce(
+        v_card.bench_return_count,
+        0
+      ) >= 1
+    then
+      if not v_is_tcg then
+        update public.battle_cards
+        set exhausted =
+          true
+        where id =
+          p_card_id;
+      end if;
+      return jsonb_build_object(
+        'ok',
+        false,
+        'message',
+        'Return Bench sudah pernah digunakan.'
+      );
+    end if;
+    select count(*)
+    into v_active_count
+    from public.battle_cards
+    where battle_id =
+      v_battle.id
+      and player =
+        p_player
+      and zone =
+        'active'
+      and not coalesce(
+        exhausted,
+        false
+      );
+    if
+      v_active_count >=
+      coalesce(
+        v_battle.max_active,
+        4
+      )
+    then
+      return jsonb_build_object(
+        'ok',
+        false,
+        'needs_swap',
+        true,
+        'message',
+        'Active Deck penuh. Pilih Active Card untuk ditukar.'
+      );
+    end if;
+    update public.battle_cards
+    set
+      zone =
+        'active',
+      exhausted =
+        false,
+      bench_return_count =
+        coalesce(
+          bench_return_count,
+          0  ) + 1
+    where id =
+      p_card_id;
+    insert into public.battle_events (
+      battle_id,
+      type,
+      source_player,
+      card_id,
+      payload
+    )
+    values (
+      v_battle.id,
+      'swap',
+      p_player,
+      p_card_id,
+      jsonb_build_object(
+        'ruleset',
+        v_ruleset,
+        'from',
+        'bench',
+        'to',
+        'active',
+        'return_count',
+        coalesce(
+          v_card.bench_return_count,
+          0
+        ) + 1,
+        'message',
+        'Card returned from Bench'
+      )
+    );
+    return jsonb_build_object(
+      'ok',
+      true,
+      'action',
+      'return_from_bench',
+      'card_id',
+      p_card_id,
+      'zone',
+      'active',
+      'return_count',
+      coalesce(
+        v_card.bench_return_count,
+        0
+      ) + 1,
+      'message',
+      'Card returned to Active.'
+    );
+  elsif p_action =
+    'summon'
+  then
+    select count(*)
+    into v_active_count
+    from public.battle_cards
+    where battle_id =
+      v_battle.id
+      and player =
+        p_player
+      and zone =
+        'active'
+      and not coalesce(
+        exhausted,
+        false
+      );
+    if v_is_tcg then
+      if
+        v_active_count >=
+        coalesce(
+          v_battle.max_active,
+          4
+        )
+      then
+        return jsonb_build_object(
+          'ok',
+          false,
+          'message',
+          'ACTIVE DECK FULL'
+        );
+      end if;
+      v_deck_remaining :=
+        case
+          when p_player = 'p1'
+            then coalesce(
+              v_battle.player1_deck_remaining,
+              0
+            )
+          else coalesce(
+            v_battle.player2_deck_remaining,
+            0
+          )
+        end;
+      if v_deck_remaining <= 0 then
+        return jsonb_build_object(
+          'ok',
+          false,
+          'message',
+          'DECK EMPTY'
+        );
+      end if;
+    else
+      select count(*)
+      into v_total_count
+      from public.battle_cards
+      where battle_id =
+        v_battle.id
+        and player =
+          p_player;
+      if
+        v_active_count >=
+          coalesce(
+            v_battle.max_active,
+            4
+          )
+        or
+        v_total_count >=
+          coalesce(
+            v_battle.deck_size,
+            8
+          )
+      then
+        return jsonb_build_object(
+          'ok',
+          false,
+          'message',
+          'Tidak dapat Summon Card lagi.'
+        );
+      end if;
+    end if;
+    update public.battle_sessions
+    set
+      pending_action =
+        'summon',
+      pending_action_player =
+        p_player
+    where id =
+      v_battle.id;
+    insert into public.battle_events (
+      battle_id,
+      type,
+      source_player,
+      payload
+    )
+    values (
+      v_battle.id,
+      'action_request',
+      p_player,
+      jsonb_build_object(
+        'action',
+        'summon',
+        'ruleset',
+        v_ruleset,
+        'deck_remaining',
+        case
+          when v_is_tcg
+            then v_deck_remaining
+          else null
+        end,
+        'message',
+        'SCAN RFID TO SUMMON'
+      )
+    );
+    return jsonb_build_object(
+      'ok',
+      true,
+      'action',
+      'summon',
+      'waiting_rfid',
+      true,
+      'deck_remaining',
+      case
+        when v_is_tcg
+          then v_deck_remaining
+        else null
+      end,
+      'message',
+      'Summon ready. Scan RFID Card.'
+    );
+  end if;
+  if v_battle.player1_hp <= 0 then
+    v_winner :=
+      'p2';
+  elsif v_battle.player2_hp <= 0 then
+    v_winner :=
+      'p1';
+  end if;
+  if v_winner is not null then
+    v_battle.winner :=
+      v_winner;
+    v_battle.status :=
+      'finished';
+    update public.battle_sessions
+    set
+      player1_hp =
+        v_battle.player1_hp,
+      player2_hp =
+        v_battle.player2_hp,
+      player1_skill =
+        v_battle.player1_skill,
+      player2_skill =
+        v_battle.player2_skill,
+      player1_defending =
+        v_battle.player1_defending,
+      player2_defending =
+        v_battle.player2_defending,
+      player1_synergy_shield =
+        v_battle.player1_synergy_shield,
+      player2_synergy_shield =
+        v_battle.player2_synergy_shield,
+      player1_attack_debuff =
+        v_battle.player1_attack_debuff,
+      player2_attack_debuff =
+        v_battle.player2_attack_debuff,
+        player1_power_strike_ready =
+  v_battle.player1_power_strike_ready,
+player2_power_strike_ready =
+  v_battle.player2_power_strike_ready,
+      player1_ultimate_used =
+        v_battle.player1_ultimate_used,
+      player2_ultimate_used =
+        v_battle.player2_ultimate_used,
+      player1_heal_used =
+        v_battle.player1_heal_used,
+      player2_heal_used =
+        v_battle.player2_heal_used,
+      player1_synergy_used =
+        v_battle.player1_synergy_used,
+      player2_synergy_used =
+        v_battle.player2_synergy_used,
+      winner =
+        v_winner,
+      status =
+        'finished',
+      finished_at =
+        now()
+    where id =
+      v_battle.id;
+    insert into public.battle_events (
+      battle_id,
+      type,
+      source_player,
+      target_player,
+      payload
+    )
+    values (
+      v_battle.id,
+      'win',
+      v_winner,
+      case
+        when v_winner = 'p1'
+          then 'p2'
+        else 'p1'
+      end,
+      jsonb_build_object(
+        'winner',
+        v_winner,
+        'message',
+        upper(v_winner)
+        || ' WINS'
+      )
+    );
+    return jsonb_build_object(
+      'ok',
+      true,
+      'winner',
+      v_winner,
+      'action',
+      p_action,
+      'damage',
+      v_damage,
+      'message',
+      upper(v_winner)
+      || ' WINS'
+    );
+  end if;
+  v_next_player :=
+    case
+      when p_player = 'p1'
+        then 'p2'
+      else 'p1'
+    end;
+  v_completed_round :=
+    coalesce(
+      v_battle.round,
+      1
+    );
+  v_next_round :=
+    v_completed_round;
+  if p_player = 'p2' then
+    if
+      v_completed_round >=
+      coalesce(
+        v_battle.total_rounds,
+        10
+      )
+    then
+      if
+        v_battle.player1_hp >
+        v_battle.player2_hp
+      then
+        v_winner :=
+          'p1';
+      elsif
+        v_battle.player2_hp >
+        v_battle.player1_hp
+      then
+        v_winner :=
+          'p2';
+      else
+        v_winner :=
+          'draw';
+      end if;
+      update public.battle_sessions
+      set
+        player1_hp =
+          v_battle.player1_hp,
+        player2_hp =
+          v_battle.player2_hp,
+        player1_skill =
+          v_battle.player1_skill,
+        player2_skill =
+          v_battle.player2_skill,
+        player1_defending =
+          v_battle.player1_defending,
+        player2_defending =
+          v_battle.player2_defending,
+        player1_synergy_shield =
+          v_battle.player1_synergy_shield,
+        player2_synergy_shield =
+          v_battle.player2_synergy_shield,
+        player1_attack_debuff =
+          v_battle.player1_attack_debuff,
+        player2_attack_debuff =
+          v_battle.player2_attack_debuff,
+          player1_power_strike_ready =
+  v_battle.player1_power_strike_ready,
+player2_power_strike_ready =
+  v_battle.player2_power_strike_ready,
+        player1_ultimate_used =
+          v_battle.player1_ultimate_used,
+        player2_ultimate_used =
+          v_battle.player2_ultimate_used,
+        player1_heal_used =
+          v_battle.player1_heal_used,
+        player2_heal_used =
+          v_battle.player2_heal_used,
+        player1_synergy_used =
+          v_battle.player1_synergy_used,
+        player2_synergy_used =
+          v_battle.player2_synergy_used,
+        winner =
+          v_winner,
+        status =
+          'finished',
+        finished_at =
+          now()
+      where id =
+        v_battle.id;
+      insert into public.battle_events (
+        battle_id,
+        type,
+        source_player,
+        payload
+      )
+      values (
+        v_battle.id,
+        'win',
+        case
+          when v_winner in (
+            'p1',
+            'p2'
+          )
+            then v_winner
+          else null
+        end,
+        jsonb_build_object(
+          'winner',
+          v_winner,
+          'reason',
+          'round_limit',
+          'message',
+          case
+            when v_winner = 'draw'
+              then 'BATTLE DRAW'
+            else upper(v_winner)
+              || ' WINS'
+          end
+        )
+      );
+      return jsonb_build_object(
+        'ok',
+        true,
+        'winner',
+        v_winner,
+        'finished',
+        true,
+        'action',
+        p_action,
+        'message',
+        'Battle finished.'
+      );
+    end if;
+    v_should_question :=
+      coalesce(
+        v_battle.question_enabled,
+        false
+      )
+      and
+      coalesce(
+        v_battle.question_every_rounds,
+        0
+      ) > 0
+      and
+      (
+        v_completed_round %
+        v_battle.question_every_rounds
+      ) = 0;
+    if v_should_question then
+      select cq.id
+into v_question_id
+from public.coding_questions cq
+where
+  coalesce(
+    cq.is_active,
+    true
+  ) = true
+  and
+  (
+    lower(
+      coalesce(
+        v_battle.question_level,
+        'medium'
+      )
+    ) = 'mixed'
+    or
+    lower(
+      coalesce(
+        cq.difficulty,
+        'medium'
+      )
+    ) =
+    lower(
+      coalesce(
+        v_battle.question_level,
+        'medium'
+      )
+    )
+  )
+order by random()
+limit 1;
+      if v_question_id is not null then
+        insert into public.battle_question_rounds (
+          battle_id,
+          question_id,
+          round_number,
+          status
+        )
+        values (
+          v_battle.id,
+          v_question_id,
+          v_completed_round,
+          'active'
+        )
+        returning id
+        into
+          v_battle.current_question_round_id;
+        v_battle.current_question_id :=
+          v_question_id;
+        v_battle.question_active :=
+          true;
+        v_battle.status :=
+          'question';
+      end if;
+    end if;
+    v_next_round :=
+      v_completed_round + 1;
+  end if;
+  update public.battle_sessions
+  set
+    player1_hp =
+      v_battle.player1_hp,
+    player2_hp =
+      v_battle.player2_hp,
+    player1_max_hp =
+      v_battle.player1_max_hp,
+    player2_max_hp =
+      v_battle.player2_max_hp,
+    player1_skill =
+      v_battle.player1_skill,
+    player2_skill =
+      v_battle.player2_skill,
+    player1_defending =
+      v_battle.player1_defending,
+    player2_defending =
+      v_battle.player2_defending,
+    player1_synergy_shield =
+      v_battle.player1_synergy_shield,
+    player2_synergy_shield =
+      v_battle.player2_synergy_shield,
+    player1_attack_debuff =
+      v_battle.player1_attack_debuff,
+    player2_attack_debuff =
+      v_battle.player2_attack_debuff,
+      player1_power_strike_ready =
+  v_battle.player1_power_strike_ready,
+player2_power_strike_ready =
+  v_battle.player2_power_strike_ready,
+    player1_ultimate_used =
+      v_battle.player1_ultimate_used,
+    player2_ultimate_used =
+      v_battle.player2_ultimate_used,
+    player1_heal_used =
+      v_battle.player1_heal_used,
+    player2_heal_used =
+      v_battle.player2_heal_used,
+    player1_synergy_used =
+      v_battle.player1_synergy_used,
+    player2_synergy_used =
+      v_battle.player2_synergy_used,
+    current_turn =
+      v_next_player,
+    round =
+      v_next_round,
+    question_active =
+      v_battle.question_active,
+    current_question_id =
+      v_battle.current_question_id,
+    current_question_round_id =
+      v_battle.current_question_round_id,
+    status =
+      case
+        when v_battle.question_active
+          then 'question'
+        else 'battle'
+      end
+  where id =
+    v_battle.id;
+  return jsonb_build_object(
+    'ok',
+    true,
+    'action',
+    p_action,
+    'player',
+    p_player,
+    'next_turn',
+    v_next_player,
+    'round',
+    v_next_round,
+    'damage',
+    v_damage,
+    'heal',
+    v_actual_heal,
+    'question_active',
+    v_battle.question_active,
+    'message',
+    upper(p_action)
+    || ' SUCCESS'
+  );
+end;
+$function$

@@ -1,8 +1,6 @@
 <script setup>
 import { ref, computed } from "vue";
-
 import { useRouter } from "vue-router";
-
 import { supabase } from "../lib/supabase";
 
 // =========================================================
@@ -12,33 +10,70 @@ import { supabase } from "../lib/supabase";
 const router = useRouter();
 
 // =========================================================
-// FORM
+// PLAYER
 // =========================================================
 
 const player1Name = ref("Player 1");
-
 const player2Name = ref("Player 2");
 
-const totalRounds = ref(10);
+// =========================================================
+// GAME RULES
+// =========================================================
 
+const totalRounds = ref(10);
 const startingPlayer = ref("random");
 
-const deckSize = ref(8);
+// =========================================================
+// TCG V1
+// =========================================================
 
-const initialCardsRequired = ref(1);
+const ruleset = ref("tcg_v1");
 
+const playerStartingHp = ref(200);
+
+// =========================================================
+// PHYSICAL DECK
+// =========================================================
+
+const deckSize = ref(20);
+const initialCardsRequired = ref(3);
 const maxActive = ref(4);
-
 const maxBench = ref(4);
+
+// =========================================================
+// TCG COMBAT
+// =========================================================
+
+const targetCardEnabled = ref(true);
+const directAttackEnabled = ref(true);
+
+const destructionDamageEnabled = ref(true);
+
+// Untuk TCG V1 awal:
+//
+// final_damage_percent
+// overflow_percent
+//
+// Fixed damage belum digunakan karena schema sekarang
+// memakai destruction_damage_percent 0.00 - 1.00.
+const destructionDamageMode = ref("final_damage_percent");
+
+const destructionDamagePercent = ref(30);
+
+// =========================================================
+// ADVANCED TCG
+// =========================================================
+
+const specialCardSkillsEnabled = ref(true);
+const comboEnabled = ref(true);
+const fusionEnabled = ref(true);
 
 // =========================================================
 // QUESTION
 // =========================================================
 
 const questionEnabled = ref(true);
-
 const questionLevel = ref("medium");
-
 const questionEveryRounds = ref(5);
 
 // =========================================================
@@ -46,9 +81,7 @@ const questionEveryRounds = ref(5);
 // =========================================================
 
 const loading = ref(false);
-
 const error = ref(null);
-
 const createdBattle = ref(null);
 
 // =========================================================
@@ -60,30 +93,60 @@ const publicUrl = computed(() => {
     return "";
   }
 
-  return `${window.location.origin}` + `/battle/${createdBattle.value.code}`;
+  return `${window.location.origin}/battle/${createdBattle.value.code}`;
 });
 
 const player1Url = computed(() => {
-  if (!createdBattle.value?.code || !createdBattle.value?.player1_token) {
+  if (
+    !createdBattle.value?.code ||
+    !createdBattle.value?.player1_token
+  ) {
     return "";
   }
 
   return (
     `${window.location.origin}` +
     `/play/${createdBattle.value.code}/p1` +
-    `?token=${encodeURIComponent(createdBattle.value.player1_token)}`
+    `?token=${encodeURIComponent(
+      createdBattle.value.player1_token,
+    )}`
   );
 });
 
 const player2Url = computed(() => {
-  if (!createdBattle.value?.code || !createdBattle.value?.player2_token) {
+  if (
+    !createdBattle.value?.code ||
+    !createdBattle.value?.player2_token
+  ) {
     return "";
   }
 
   return (
     `${window.location.origin}` +
     `/play/${createdBattle.value.code}/p2` +
-    `?token=${encodeURIComponent(createdBattle.value.player2_token)}`
+    `?token=${encodeURIComponent(
+      createdBattle.value.player2_token,
+    )}`
+  );
+});
+
+// =========================================================
+// DISPLAY
+// =========================================================
+
+const destructionDamageDisplay = computed(() => {
+  if (!destructionDamageEnabled.value) {
+    return "OFF";
+  }
+
+  return `${Number(destructionDamagePercent.value)}%`;
+});
+
+const deckAfterInitial = computed(() => {
+  return Math.max(
+    0,
+    Number(deckSize.value) -
+      Number(initialCardsRequired.value),
   );
 });
 
@@ -99,12 +162,19 @@ const generateBattleCode = () => {
    * I dan 1
    */
 
-  const characters = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const characters =
+    "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
   let result = "";
 
   for (let i = 0; i < 6; i++) {
-    result += characters[Math.floor(Math.random() * characters.length)];
+    result +=
+      characters[
+        Math.floor(
+          Math.random() *
+            characters.length,
+        )
+      ];
   }
 
   return result;
@@ -123,7 +193,9 @@ const resolveStartingPlayer = () => {
     return "p2";
   }
 
-  return Math.random() < 0.5 ? "p1" : "p2";
+  return Math.random() < 0.5
+    ? "p1"
+    : "p2";
 };
 
 // =========================================================
@@ -139,15 +211,59 @@ const validateForm = () => {
     return "Nama Player 2 wajib diisi.";
   }
 
+  // =======================================================
+  // ROUND
+  // =======================================================
+
   if (Number(totalRounds.value) < 1) {
     return "Jumlah round minimal 1.";
   }
 
-  if (Number(deckSize.value) < 1) {
+  if (Number(totalRounds.value) > 100) {
+    return "Jumlah round maksimal 100.";
+  }
+
+  // =======================================================
+  // PLAYER HP
+  // =======================================================
+
+  if (
+    !Number.isFinite(
+      Number(playerStartingHp.value),
+    ) ||
+    Number(playerStartingHp.value) < 1
+  ) {
+    return "Player Starting HP minimal 1.";
+  }
+
+  if (
+    Number(playerStartingHp.value) >
+    99999
+  ) {
+    return "Player Starting HP terlalu besar.";
+  }
+
+  // =======================================================
+  // DECK
+  // =======================================================
+
+  if (
+    !Number.isFinite(
+      Number(deckSize.value),
+    ) ||
+    Number(deckSize.value) < 1
+  ) {
     return "Deck Size minimal 1.";
   }
 
-  if (Number(initialCardsRequired.value) < 1) {
+  if (Number(deckSize.value) > 100) {
+    return "Deck Size maksimal 100 kartu.";
+  }
+
+  if (
+    Number(initialCardsRequired.value) <
+    1
+  ) {
     return "Initial Cards minimal 1.";
   }
 
@@ -159,30 +275,110 @@ const validateForm = () => {
     return "Max Bench tidak valid.";
   }
 
-  if (Number(initialCardsRequired.value) > Number(maxActive.value)) {
-    return "Initial Cards tidak boleh " + "lebih besar dari Max Active.";
-  }
-
-  if (Number(maxActive.value) > Number(deckSize.value)) {
-    return "Max Active tidak boleh " + "lebih besar dari Deck Size.";
+  if (
+    Number(initialCardsRequired.value) >
+    Number(maxActive.value)
+  ) {
+    return (
+      "Initial Cards tidak boleh " +
+      "lebih besar dari Max Active."
+    );
   }
 
   if (
-    Number(maxActive.value) + Number(maxBench.value) >
-    Number(deckSize.value)
+    Number(
+      initialCardsRequired.value,
+    ) > Number(deckSize.value)
   ) {
-    return "Max Active + Max Bench " + "tidak boleh melebihi Deck Size.";
+    return (
+      "Initial Cards tidak boleh " +
+      "lebih besar dari Deck Size."
+    );
   }
 
-  if (questionEnabled.value && Number(questionEveryRounds.value) < 1) {
-    return "Question Every minimal 1 round.";
+  if (
+    Number(maxActive.value) >
+    Number(deckSize.value)
+  ) {
+    return (
+      "Max Active tidak boleh " +
+      "lebih besar dari Deck Size."
+    );
+  }
+
+  if (
+    Number(maxActive.value) +
+      Number(maxBench.value) >
+    Number(deckSize.value)
+  ) {
+    return (
+      "Max Active + Max Bench " +
+      "tidak boleh melebihi Deck Size."
+    );
+  }
+
+  // =======================================================
+  // DESTRUCTION DAMAGE
+  // =======================================================
+
+  if (
+    destructionDamageEnabled.value
+  ) {
+    if (
+      Number(
+        destructionDamagePercent.value,
+      ) < 0 ||
+      Number(
+        destructionDamagePercent.value,
+      ) > 100
+    ) {
+      return (
+        "Destruction Damage harus " +
+        "antara 0% sampai 100%."
+      );
+    }
+
+    if (
+      ![
+        "final_damage_percent",
+        "overflow_percent",
+      ].includes(
+        destructionDamageMode.value,
+      )
+    ) {
+      return (
+        "Destruction Damage Mode " +
+        "tidak valid."
+      );
+    }
+  }
+
+  // =======================================================
+  // QUESTION
+  // =======================================================
+
+  if (
+    questionEnabled.value &&
+    Number(
+      questionEveryRounds.value,
+    ) < 1
+  ) {
+    return (
+      "Question Every minimal " +
+      "1 round."
+    );
   }
 
   if (
     questionEnabled.value &&
-    Number(questionEveryRounds.value) > Number(totalRounds.value)
+    Number(
+      questionEveryRounds.value,
+    ) > Number(totalRounds.value)
   ) {
-    return "Question Every tidak boleh " + "lebih besar dari Total Rounds.";
+    return (
+      "Question Every tidak boleh " +
+      "lebih besar dari Total Rounds."
+    );
   }
 
   return null;
@@ -195,10 +391,12 @@ const validateForm = () => {
 const createBattle = async () => {
   error.value = null;
 
-  const validationError = validateForm();
+  const validationError =
+    validateForm();
 
   if (validationError) {
-    error.value = validationError;
+    error.value =
+      validationError;
 
     return;
   }
@@ -214,34 +412,41 @@ const createBattle = async () => {
 
     const {
       data: { user },
-
       error: userError,
-    } = await supabase.auth.getUser();
+    } =
+      await supabase.auth.getUser();
 
     if (userError) {
       throw userError;
     }
 
     if (!user) {
-      throw new Error("Session login tidak ditemukan.");
+      throw new Error(
+        "Session login tidak ditemukan.",
+      );
     }
 
     // =====================================================
     // STARTING PLAYER
     // =====================================================
 
-    const resolvedStartingPlayer = resolveStartingPlayer();
+    const resolvedStartingPlayer =
+      resolveStartingPlayer();
 
     // =====================================================
     // RETRY CODE
     // =====================================================
 
     let created = null;
-
     let lastError = null;
 
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const code = generateBattleCode();
+    for (
+      let attempt = 0;
+      attempt < 5;
+      attempt++
+    ) {
+      const code =
+        generateBattleCode();
 
       // ===================================================
       // PAYLOAD
@@ -264,47 +469,178 @@ const createBattle = async () => {
         // PLAYER
         // =================================================
 
-        player1_name: player1Name.value.trim(),
+        player1_name:
+          player1Name.value.trim(),
 
-        player2_name: player2Name.value.trim(),
+        player2_name:
+          player2Name.value.trim(),
+
+        // =================================================
+        // RULESET
+        // =================================================
+
+        ruleset:
+          ruleset.value,
 
         // =================================================
         // GAME RULES
         // =================================================
 
-        total_rounds: Number(totalRounds.value),
+        total_rounds:
+          Number(
+            totalRounds.value,
+          ),
 
-        starting_player: resolvedStartingPlayer,
+        starting_player:
+          resolvedStartingPlayer,
 
-        current_turn: resolvedStartingPlayer,
+        current_turn:
+          resolvedStartingPlayer,
 
         // =================================================
-        // DECK
+        // PLAYER HP
         // =================================================
 
-        deck_size: Number(deckSize.value),
+        player_starting_hp:
+          Number(
+            playerStartingHp.value,
+          ),
 
-        initial_cards_required: Number(initialCardsRequired.value),
+        player1_hp:
+          Number(
+            playerStartingHp.value,
+          ),
 
-        max_active: Number(maxActive.value),
+        player1_max_hp:
+          Number(
+            playerStartingHp.value,
+          ),
 
-        max_bench: Number(maxBench.value),
+        player2_hp:
+          Number(
+            playerStartingHp.value,
+          ),
+
+        player2_max_hp:
+          Number(
+            playerStartingHp.value,
+          ),
+
+        // =================================================
+        // PHYSICAL DECK
+        // =================================================
+
+        deck_size:
+          Number(
+            deckSize.value,
+          ),
+
+        player1_starting_deck:
+          Number(
+            deckSize.value,
+          ),
+
+        player2_starting_deck:
+          Number(
+            deckSize.value,
+          ),
+
+        player1_deck_remaining:
+          Number(
+            deckSize.value,
+          ),
+
+        player2_deck_remaining:
+          Number(
+            deckSize.value,
+          ),
+
+        initial_cards_required:
+          Number(
+            initialCardsRequired.value,
+          ),
+
+        max_active:
+          Number(
+            maxActive.value,
+          ),
+
+        max_bench:
+          Number(
+            maxBench.value,
+          ),
+
+        // =================================================
+        // TCG COMBAT
+        // =================================================
+
+        target_card_enabled:
+          Boolean(
+            targetCardEnabled.value,
+          ),
+
+        direct_attack_enabled:
+          Boolean(
+            directAttackEnabled.value,
+          ),
+
+        destruction_damage_enabled:
+          Boolean(
+            destructionDamageEnabled.value,
+          ),
+
+        destruction_damage_mode:
+          destructionDamageMode.value,
+
+        destruction_damage_percent:
+          Number(
+            destructionDamagePercent.value,
+          ) / 100,
+
+        // =================================================
+        // ADVANCED TCG
+        // =================================================
+
+        special_card_skills_enabled:
+          Boolean(
+            specialCardSkillsEnabled.value,
+          ),
+
+        combo_enabled:
+          Boolean(
+            comboEnabled.value,
+          ),
+
+        fusion_enabled:
+          Boolean(
+            fusionEnabled.value,
+          ),
 
         // =================================================
         // QUESTION
         // =================================================
 
-        question_enabled: Boolean(questionEnabled.value),
+        question_enabled:
+          Boolean(
+            questionEnabled.value,
+          ),
 
-        question_level: questionLevel.value,
+        question_level:
+          questionLevel.value,
 
-        question_every_rounds: Number(questionEveryRounds.value),
+        question_every_rounds:
+          Number(
+            questionEveryRounds.value,
+          ),
 
-        question_active: false,
+        question_active:
+          false,
 
-        current_question_id: null,
+        current_question_id:
+          null,
 
-        current_question_round_id: null,
+        current_question_round_id:
+          null,
 
         // =================================================
         // GAME STATE
@@ -315,18 +651,6 @@ const createBattle = async () => {
         status: "waiting",
 
         winner: null,
-
-        // =================================================
-        // HP
-        // =================================================
-
-        player1_hp: 200,
-
-        player1_max_hp: 200,
-
-        player2_hp: 200,
-
-        player2_max_hp: 200,
 
         // =================================================
         // SKILL
@@ -340,21 +664,27 @@ const createBattle = async () => {
         // DEFENSE
         // =================================================
 
-        player1_defending: false,
+        player1_defending:
+          false,
 
-        player2_defending: false,
+        player2_defending:
+          false,
 
         // =================================================
         // SYNERGY
         // =================================================
 
-        player1_synergy_shield: 0,
+        player1_synergy_shield:
+          0,
 
-        player2_synergy_shield: 0,
+        player2_synergy_shield:
+          0,
 
-        player1_attack_debuff: 0,
+        player1_attack_debuff:
+          0,
 
-        player2_attack_debuff: 0,
+        player2_attack_debuff:
+          0,
 
         // =================================================
         // DATE
@@ -369,8 +699,13 @@ const createBattle = async () => {
       // INSERT
       // ===================================================
 
-      const { data, error: insertError } = await supabase
-        .from("battle_sessions")
+      const {
+        data,
+        error: insertError,
+      } = await supabase
+        .from(
+          "battle_sessions",
+        )
         .insert(payload)
         .select("*")
         .single();
@@ -385,13 +720,17 @@ const createBattle = async () => {
         break;
       }
 
-      lastError = insertError;
+      lastError =
+        insertError;
 
       // ===================================================
       // UNIQUE CODE COLLISION
       // ===================================================
 
-      if (insertError.code !== "23505") {
+      if (
+        insertError.code !==
+        "23505"
+      ) {
         throw insertError;
       }
     }
@@ -401,7 +740,12 @@ const createBattle = async () => {
     // =====================================================
 
     if (!created) {
-      throw lastError ?? new Error("Gagal membuat Battle Code.");
+      throw (
+        lastError ??
+        new Error(
+          "Gagal membuat Battle Code.",
+        )
+      );
     }
 
     // =====================================================
@@ -410,33 +754,44 @@ const createBattle = async () => {
 
     const {
       data: bindResult,
-
       error: bindError,
     } = await supabase.rpc(
       "bind_battle_readers",
-
       {
         p_code: created.code,
       },
     );
 
     if (bindError) {
-      console.error("RFID binding gagal:", bindError);
+      console.error(
+        "RFID binding gagal:",
+        bindError,
+      );
 
       throw bindError;
     }
 
-    if (bindResult?.ok === false) {
+    if (
+      bindResult?.ok ===
+      false
+    ) {
       throw new Error(
-        bindResult.message ?? "Gagal menghubungkan RFID readers.",
+        bindResult.message ??
+          "Gagal menghubungkan RFID readers.",
       );
     }
 
-    createdBattle.value = created;
+    createdBattle.value =
+      created;
   } catch (err) {
-    console.error("Create Battle:", err);
+    console.error(
+      "Create Battle:",
+      err,
+    );
 
-    error.value = err?.message ?? "Gagal membuat battle.";
+    error.value =
+      err?.message ??
+      "Gagal membuat battle.";
   } finally {
     loading.value = false;
   }
@@ -452,9 +807,14 @@ const copyText = async (text) => {
   }
 
   try {
-    await navigator.clipboard.writeText(text);
+    await navigator.clipboard.writeText(
+      text,
+    );
   } catch (err) {
-    console.error("Copy gagal:", err);
+    console.error(
+      "Copy gagal:",
+      err,
+    );
   }
 };
 
@@ -469,7 +829,9 @@ const openBattleHistory = () => {
 };
 
 const openPublicBattle = () => {
-  if (!createdBattle.value?.code) {
+  if (
+    !createdBattle.value?.code
+  ) {
     return;
   }
 
@@ -477,28 +839,39 @@ const openPublicBattle = () => {
     name: "public-battle",
 
     params: {
-      code: createdBattle.value.code,
+      code:
+        createdBattle.value
+          .code,
     },
   });
 };
 
-const openPlayer = (playerValue) => {
-  if (!createdBattle.value?.code) {
+const openPlayer = (
+  playerValue,
+) => {
+  if (
+    !createdBattle.value?.code
+  ) {
     return;
   }
 
   const playerToken =
     playerValue === "p1"
-      ? createdBattle.value.player1_token
-      : createdBattle.value.player2_token;
+      ? createdBattle.value
+          .player1_token
+      : createdBattle.value
+          .player2_token;
 
   router.push({
     name: "player-battle",
 
     params: {
-      code: createdBattle.value.code,
+      code:
+        createdBattle.value
+          .code,
 
-      player: playerValue,
+      player:
+        playerValue,
     },
 
     query: {
@@ -512,7 +885,8 @@ const openPlayer = (playerValue) => {
 // =========================================================
 
 const createAnother = () => {
-  createdBattle.value = null;
+  createdBattle.value =
+    null;
 
   error.value = null;
 };
@@ -534,28 +908,53 @@ const createAnother = () => {
          SETUP FORM
     ==================================================== -->
 
-    <main v-if="!createdBattle" class="setup-container">
+    <main
+      v-if="!createdBattle"
+      class="setup-container"
+    >
       <!-- =================================================
            HEADER
       ================================================== -->
 
       <header class="setup-header">
-        <div class="setup-header-main">
-          <div class="setup-logo">⚔️</div>
+        <div
+          class="setup-header-main"
+        >
+          <div
+            class="setup-logo"
+          >
+            ⚔️
+          </div>
 
           <div>
-            <div class="setup-eyebrow">BATTLE CONTROL</div>
+            <div
+              class="setup-eyebrow"
+            >
+              BATTLE CONTROL
+            </div>
 
-            <h1>Create Battle</h1>
+            <h1>
+              Create Battle
+            </h1>
 
             <p>
-              Atur pemain, deck, round, dan coding challenge sebelum
+              Atur pemain,
+              physical deck,
+              TCG rules,
+              round, dan coding
+              challenge sebelum
               pertandingan dimulai.
             </p>
           </div>
         </div>
 
-        <button type="button" class="history-button" @click="openBattleHistory">
+        <button
+          type="button"
+          class="history-button"
+          @click="
+            openBattleHistory
+          "
+        >
           ◷ BATTLE HISTORY
         </button>
       </header>
@@ -564,39 +963,71 @@ const createAnother = () => {
            FORM
       ================================================== -->
 
-      <form class="setup-form" @submit.prevent="createBattle">
+      <form
+        class="setup-form"
+        @submit.prevent="
+          createBattle
+        "
+      >
         <!-- ===============================================
              PLAYERS
         ================================================ -->
 
-        <section class="setup-card">
-          <div class="section-heading">
-            <div class="section-icon">👥</div>
+        <section
+          class="setup-card"
+        >
+          <div
+            class="section-heading"
+          >
+            <div
+              class="section-icon"
+            >
+              👥
+            </div>
 
             <div>
-              <h2>Players</h2>
+              <h2>
+                Players
+              </h2>
 
-              <p>Tentukan nama kedua pemain.</p>
+              <p>
+                Tentukan nama
+                kedua pemain.
+              </p>
             </div>
           </div>
 
-          <div class="form-grid two">
-            <label class="field">
-              <span> Player 1 </span>
+          <div
+            class="form-grid two"
+          >
+            <label
+              class="field"
+            >
+              <span>
+                Player 1
+              </span>
 
               <input
-                v-model="player1Name"
+                v-model="
+                  player1Name
+                "
                 type="text"
                 maxlength="40"
                 placeholder="Player 1"
               />
             </label>
 
-            <label class="field">
-              <span> Player 2 </span>
+            <label
+              class="field"
+            >
+              <span>
+                Player 2
+              </span>
 
               <input
-                v-model="player2Name"
+                v-model="
+                  player2Name
+                "
                 type="text"
                 maxlength="40"
                 placeholder="Player 2"
@@ -609,132 +1040,294 @@ const createAnother = () => {
              GAME RULES
         ================================================ -->
 
-        <section class="setup-card">
-          <div class="section-heading">
-            <div class="section-icon">🎮</div>
+        <section
+          class="setup-card"
+        >
+          <div
+            class="section-heading"
+          >
+            <div
+              class="section-icon"
+            >
+              🎮
+            </div>
 
             <div>
-              <h2>Game Rules</h2>
+              <h2>
+                Game Rules
+              </h2>
 
-              <p>Tentukan jumlah round dan player yang memulai.</p>
+              <p>
+                Rule utama battle
+                untuk TCG V1.
+              </p>
             </div>
           </div>
 
-          <div class="form-grid two">
+          <div
+            class="ruleset-banner compact"
+          >
+            <div>
+              <span>
+                ACTIVE RULESET
+              </span>
+
+              <strong>
+                TCG V1
+              </strong>
+            </div>
+
+            <small>
+              Card HP • Graveyard
+              • Physical Deck
+            </small>
+          </div>
+
+          <div
+            class="form-grid three"
+          >
             <!-- TOTAL ROUND -->
 
-            <label class="field">
-              <span> Total Rounds </span>
+            <label
+              class="field"
+            >
+              <span>
+                Total Rounds
+              </span>
 
               <input
-                v-model.number="totalRounds"
+                v-model.number="
+                  totalRounds
+                "
                 type="number"
                 min="1"
                 max="100"
               />
 
               <small>
-                Battle berakhir jika HP 0 atau round mencapai batas.
+                Battle berakhir
+                jika HP Player 0
+                atau round mencapai
+                batas.
               </small>
             </label>
 
             <!-- STARTING PLAYER -->
 
-            <label class="field">
-              <span> Starting Player </span>
+            <label
+              class="field"
+            >
+              <span>
+                Starting Player
+              </span>
 
-              <select v-model="startingPlayer">
-                <option value="random">🎲 Random</option>
+              <select
+                v-model="
+                  startingPlayer
+                "
+              >
+                <option
+                  value="random"
+                >
+                  🎲 Random
+                </option>
 
-                <option value="p1">Player 1</option>
+                <option
+                  value="p1"
+                >
+                  Player 1
+                </option>
 
-                <option value="p2">Player 2</option>
+                <option
+                  value="p2"
+                >
+                  Player 2
+                </option>
               </select>
 
               <small>
-                Jika Random, player awal dipilih saat battle dibuat.
+                Jika Random,
+                player awal dipilih
+                saat battle dibuat.
+              </small>
+            </label>
+
+            <!-- PLAYER HP -->
+
+            <label
+              class="field"
+            >
+              <span>
+                Player Starting HP
+              </span>
+
+              <input
+                v-model.number="
+                  playerStartingHp
+                "
+                type="number"
+                min="1"
+                max="99999"
+              />
+
+              <small>
+                HP utama Player.
+                Card HP tidak lagi
+                ditambahkan ke
+                Player HP pada
+                TCG V1.
               </small>
             </label>
           </div>
         </section>
 
         <!-- ===============================================
-             DECK
+             PHYSICAL DECK
         ================================================ -->
 
-        <section class="setup-card">
-          <div class="section-heading">
-            <div class="section-icon">🎴</div>
+        <section
+          class="setup-card"
+        >
+          <div
+            class="section-heading"
+          >
+            <div
+              class="section-icon"
+            >
+              🎴
+            </div>
 
             <div>
-              <h2>Deck Configuration</h2>
+              <h2>
+                Physical Deck
+              </h2>
 
-              <p>Tentukan aturan deck masing-masing player.</p>
+              <p>
+                Tentukan jumlah
+                physical card yang
+                digunakan masing-masing
+                player.
+              </p>
             </div>
           </div>
 
-          <div class="form-grid four">
+          <div
+            class="form-grid four"
+          >
             <!-- DECK SIZE -->
 
-            <label class="field">
-              <span> Deck Size </span>
+            <label
+              class="field"
+            >
+              <span>
+                Deck Size
+              </span>
 
-              <input v-model.number="deckSize" type="number" min="1" max="20" />
+              <input
+                v-model.number="
+                  deckSize
+                "
+                type="number"
+                min="1"
+                max="100"
+              />
 
-              <small> Maksimal total kartu. </small>
+              <small>
+                Jumlah physical card
+                yang diambil oleh
+                masing-masing player.
+              </small>
             </label>
 
             <!-- INITIAL -->
 
-            <label class="field">
-              <span> Initial Cards </span>
+            <label
+              class="field"
+            >
+              <span>
+                Initial Cards
+              </span>
 
               <input
-                v-model.number="initialCardsRequired"
+                v-model.number="
+                  initialCardsRequired
+                "
                 type="number"
                 min="1"
-                :max="maxActive"
+                :max="
+                  maxActive
+                "
               />
 
-              <small> Kartu yang dibutuhkan sebelum battle. </small>
+              <small>
+                Card yang harus
+                discan sebelum
+                battle dimulai.
+              </small>
             </label>
 
             <!-- ACTIVE -->
 
-            <label class="field">
-              <span> Max Active </span>
+            <label
+              class="field"
+            >
+              <span>
+                Max Active
+              </span>
 
               <input
-                v-model.number="maxActive"
+                v-model.number="
+                  maxActive
+                "
                 type="number"
                 min="1"
-                :max="deckSize"
+                :max="
+                  deckSize
+                "
               />
 
-              <small> Maksimal kartu aktif. </small>
+              <small>
+                Maksimal card
+                aktif di arena.
+              </small>
             </label>
 
             <!-- BENCH -->
 
-            <label class="field">
-              <span> Max Bench </span>
+            <label
+              class="field"
+            >
+              <span>
+                Max Bench
+              </span>
 
               <input
-                v-model.number="maxBench"
+                v-model.number="
+                  maxBench
+                "
                 type="number"
                 min="0"
-                :max="deckSize"
+                :max="
+                  deckSize
+                "
               />
 
-              <small> Maksimal kartu Bench. </small>
+              <small>
+                Maksimal card
+                yang berada
+                di Bench.
+              </small>
             </label>
           </div>
 
           <!-- SUMMARY -->
 
-          <div class="deck-summary">
+          <div
+            class="deck-summary"
+          >
             <span>
-              Deck
+              Physical Deck
+
               <strong>
                 {{ deckSize }}
               </strong>
@@ -742,13 +1335,28 @@ const createAnother = () => {
 
             <span>
               Initial
+
               <strong>
-                {{ initialCardsRequired }}
+                {{
+                  initialCardsRequired
+                }}
+              </strong>
+            </span>
+
+            <span>
+              Remaining
+              After Initial
+
+              <strong>
+                {{
+                  deckAfterInitial
+                }}
               </strong>
             </span>
 
             <span>
               Active
+
               <strong>
                 {{ maxActive }}
               </strong>
@@ -756,37 +1364,538 @@ const createAnother = () => {
 
             <span>
               Bench
+
               <strong>
                 {{ maxBench }}
               </strong>
             </span>
           </div>
+
+          <div
+            class="info-note"
+          >
+            <strong>
+              PHYSICAL DECK
+            </strong>
+
+            Kartu tidak perlu
+            didaftarkan ke Battle
+            sebelum pertandingan.
+            Server hanya menghitung
+            berapa kartu dari jatah
+            physical deck yang sudah
+            dimainkan.
+          </div>
         </section>
 
         <!-- ===============================================
-             QUESTION
+             TCG COMBAT
         ================================================ -->
 
-        <section class="setup-card">
-          <div class="section-heading question-heading">
-            <div class="heading-left">
-              <div class="section-icon">💻</div>
+        <section
+          class="setup-card tcg-card"
+        >
+          <div
+            class="section-heading"
+          >
+            <div
+              class="section-icon"
+            >
+              ⚔️
+            </div>
+
+            <div>
+              <h2>
+                TCG Combat Rules
+              </h2>
+
+              <p>
+                Konfigurasi mekanik
+                pertarungan kartu.
+              </p>
+            </div>
+          </div>
+
+          <div
+            class="ruleset-banner"
+          >
+            <div>
+              <span>
+                ACTIVE RULESET
+              </span>
+
+              <strong>
+                TCG V1
+              </strong>
+            </div>
+
+            <small>
+              Target Card •
+              Destruction Damage •
+              Graveyard •
+              Direct Attack
+            </small>
+          </div>
+
+          <div
+            class="combat-rule-list"
+          >
+            <!-- TARGET CARD -->
+
+            <label
+              class="rule-option"
+            >
+              <div>
+                <strong>
+                  🎯 Target Card
+                  Attack
+                </strong>
+
+                <small>
+                  Player memilih
+                  Active Card lawan
+                  yang ingin diserang.
+                </small>
+              </div>
+
+              <span
+                class="toggle"
+              >
+                <input
+                  v-model="
+                    targetCardEnabled
+                  "
+                  type="checkbox"
+                />
+
+                <span
+                  class="toggle-track"
+                >
+                  <span
+                    class="toggle-dot"
+                  />
+                </span>
+              </span>
+            </label>
+
+            <!-- DIRECT ATTACK -->
+
+            <label
+              class="rule-option"
+            >
+              <div>
+                <strong>
+                  💥 Direct Attack
+                </strong>
+
+                <small>
+                  Mengizinkan damage
+                  langsung ke Player
+                  jika kondisi direct
+                  attack terpenuhi.
+                </small>
+              </div>
+
+              <span
+                class="toggle"
+              >
+                <input
+                  v-model="
+                    directAttackEnabled
+                  "
+                  type="checkbox"
+                />
+
+                <span
+                  class="toggle-track"
+                >
+                  <span
+                    class="toggle-dot"
+                  />
+                </span>
+              </span>
+            </label>
+
+            <!-- DESTRUCTION -->
+
+            <label
+              class="rule-option"
+            >
+              <div>
+                <strong>
+                  🔥 Destruction
+                  Damage
+                </strong>
+
+                <small>
+                  Saat sebuah Card
+                  dihancurkan, owner
+                  Card menerima damage
+                  tambahan.
+                </small>
+              </div>
+
+              <span
+                class="toggle"
+              >
+                <input
+                  v-model="
+                    destructionDamageEnabled
+                  "
+                  type="checkbox"
+                />
+
+                <span
+                  class="toggle-track"
+                >
+                  <span
+                    class="toggle-dot"
+                  />
+                </span>
+              </span>
+            </label>
+          </div>
+
+          <!-- DESTRUCTION CONFIG -->
+
+          <div
+            class="form-grid two destruction-settings"
+            :class="{
+              disabled:
+                !destructionDamageEnabled,
+            }"
+          >
+            <label
+              class="field"
+            >
+              <span>
+                Destruction Mode
+              </span>
+
+              <select
+                v-model="
+                  destructionDamageMode
+                "
+                :disabled="
+                  !destructionDamageEnabled
+                "
+              >
+                <option
+                  value="final_damage_percent"
+                >
+                  Final Damage %
+                </option>
+
+                <option
+                  value="overflow_percent"
+                >
+                  Overflow Damage %
+                </option>
+              </select>
+
+              <small
+                v-if="
+                  destructionDamageMode ===
+                  'final_damage_percent'
+                "
+              >
+                Player menerima
+                persentase dari
+                final damage
+                penghancur Card.
+              </small>
+
+              <small
+                v-else
+              >
+                Player hanya menerima
+                persentase damage
+                yang melewati sisa
+                HP Card.
+              </small>
+            </label>
+
+            <label
+              class="field"
+            >
+              <span>
+                Destruction Damage
+              </span>
+
+              <div
+                class="input-suffix"
+              >
+                <input
+                  v-model.number="
+                    destructionDamagePercent
+                  "
+                  type="number"
+                  min="0"
+                  max="100"
+                  :disabled="
+                    !destructionDamageEnabled
+                  "
+                />
+
+                <span>
+                  %
+                </span>
+              </div>
+
+              <small>
+                Default TCG V1:
+                30%.
+              </small>
+            </label>
+          </div>
+
+          <div
+            class="combat-preview"
+          >
+            <span>
+              DESTRUCTION
+            </span>
+
+            <strong>
+              {{
+                destructionDamageDisplay
+              }}
+            </strong>
+
+            <p
+              v-if="
+                destructionDamageMode ===
+                'final_damage_percent'
+              "
+            >
+              Jika final damage
+              penghancur Card = 60
+              dan setting 30%,
+              Player menerima
+              18 damage.
+            </p>
+
+            <p v-else>
+              Jika Card tersisa
+              40 HP menerima
+              60 damage, overflow
+              adalah 20. Dengan
+              30%, Player menerima
+              6 damage.
+            </p>
+          </div>
+        </section>
+
+        <!-- ===============================================
+             ADVANCED TCG
+        ================================================ -->
+
+        <section
+          class="setup-card"
+        >
+          <div
+            class="section-heading"
+          >
+            <div
+              class="section-icon"
+            >
+              ✨
+            </div>
+
+            <div>
+              <h2>
+                Advanced TCG
+              </h2>
+
+              <p>
+                Feature flag untuk
+                mekanik Card lanjutan.
+              </p>
+            </div>
+          </div>
+
+          <div
+            class="combat-rule-list"
+          >
+            <!-- SKILL -->
+
+            <label
+              class="rule-option"
+            >
+              <div>
+                <strong>
+                  🪄 Special
+                  Card Skills
+                </strong>
+
+                <small>
+                  Mengaktifkan skill
+                  khusus yang dimiliki
+                  Card tertentu.
+                </small>
+              </div>
+
+              <span
+                class="toggle"
+              >
+                <input
+                  v-model="
+                    specialCardSkillsEnabled
+                  "
+                  type="checkbox"
+                />
+
+                <span
+                  class="toggle-track"
+                >
+                  <span
+                    class="toggle-dot"
+                  />
+                </span>
+              </span>
+            </label>
+
+            <!-- COMBO -->
+
+            <label
+              class="rule-option"
+            >
+              <div>
+                <strong>
+                  🔗 Card
+                  Combination
+                </strong>
+
+                <small>
+                  Kombinasi Card
+                  tertentu di luar
+                  Element Synergy.
+                </small>
+              </div>
+
+              <span
+                class="toggle"
+              >
+                <input
+                  v-model="
+                    comboEnabled
+                  "
+                  type="checkbox"
+                />
+
+                <span
+                  class="toggle-track"
+                >
+                  <span
+                    class="toggle-dot"
+                  />
+                </span>
+              </span>
+            </label>
+
+            <!-- FUSION -->
+
+            <label
+              class="rule-option"
+            >
+              <div>
+                <strong>
+                  🌟 Fusion
+                </strong>
+
+                <small>
+                  Mengizinkan beberapa
+                  Card digabung menjadi
+                  Fusion Card.
+                </small>
+              </div>
+
+              <span
+                class="toggle"
+              >
+                <input
+                  v-model="
+                    fusionEnabled
+                  "
+                  type="checkbox"
+                />
+
+                <span
+                  class="toggle-track"
+                >
+                  <span
+                    class="toggle-dot"
+                  />
+                </span>
+              </span>
+            </label>
+          </div>
+
+          <div
+            class="future-note"
+          >
+            <span>
+              PLANNED
+            </span>
+
+            Special Skill,
+            Combination, dan Fusion
+            sudah disimpan dalam
+            battle rules. Engine-nya
+            akan kita aktifkan pada
+            fase berikutnya.
+          </div>
+        </section>
+
+        <!-- ===============================================
+             CODING QUESTION
+        ================================================ -->
+
+        <section
+          class="setup-card"
+        >
+          <div
+            class="section-heading question-heading"
+          >
+            <div
+              class="heading-left"
+            >
+              <div
+                class="section-icon"
+              >
+                💻
+              </div>
 
               <div>
-                <h2>Coding Challenge</h2>
+                <h2>
+                  Coding Challenge
+                </h2>
 
                 <p>
-                  Player tercepat yang menjawab benar mendapatkan random bonus
-                  skill.
+                  Player tercepat
+                  yang menjawab benar
+                  mendapatkan random
+                  bonus skill.
                 </p>
               </div>
             </div>
 
-            <label class="toggle">
-              <input v-model="questionEnabled" type="checkbox" />
+            <label
+              class="toggle"
+            >
+              <input
+                v-model="
+                  questionEnabled
+                "
+                type="checkbox"
+              />
 
-              <span class="toggle-track">
-                <span class="toggle-dot" />
+              <span
+                class="toggle-track"
+              >
+                <span
+                  class="toggle-dot"
+                />
               </span>
             </label>
           </div>
@@ -794,46 +1903,93 @@ const createAnother = () => {
           <div
             class="form-grid two"
             :class="{
-              disabled: !questionEnabled,
+              disabled:
+                !questionEnabled,
             }"
           >
             <!-- LEVEL -->
 
-            <label class="field">
-              <span> Question Level </span>
+            <label
+              class="field"
+            >
+              <span>
+                Question Level
+              </span>
 
-              <select v-model="questionLevel" :disabled="!questionEnabled">
-                <option value="easy">Easy</option>
+              <select
+                v-model="
+                  questionLevel
+                "
+                :disabled="
+                  !questionEnabled
+                "
+              >
+                <option
+                  value="easy"
+                >
+                  Easy
+                </option>
 
-                <option value="medium">Medium</option>
+                <option
+                  value="medium"
+                >
+                  Medium
+                </option>
 
-                <option value="hard">Hard</option>
+                <option
+                  value="hard"
+                >
+                  Hard
+                </option>
 
-                <option value="mixed">Mixed</option>
+                <option
+                  value="mixed"
+                >
+                  Mixed
+                </option>
               </select>
 
-              <small> Level question pada battle ini. </small>
+              <small>
+                Difficulty question
+                pada battle ini.
+              </small>
             </label>
 
             <!-- QUESTION EVERY -->
 
-            <label class="field">
-              <span> Question Every </span>
+            <label
+              class="field"
+            >
+              <span>
+                Question Every
+              </span>
 
-              <div class="input-suffix">
+              <div
+                class="input-suffix"
+              >
                 <input
-                  v-model.number="questionEveryRounds"
+                  v-model.number="
+                    questionEveryRounds
+                  "
                   type="number"
                   min="1"
-                  :max="totalRounds"
-                  :disabled="!questionEnabled"
+                  :max="
+                    totalRounds
+                  "
+                  :disabled="
+                    !questionEnabled
+                  "
                 />
 
-                <span> rounds </span>
+                <span>
+                  rounds
+                </span>
               </div>
 
               <small>
-                Contoh: 5 berarti challenge setelah setiap 5 round.
+                Contoh: 5 berarti
+                challenge setelah
+                setiap 5 round.
               </small>
             </label>
           </div>
@@ -843,119 +1999,315 @@ const createAnother = () => {
              ERROR
         ================================================ -->
 
-        <div v-if="error" class="error-box">
-          ⚠️
-
-          {{ error }}
+        <div
+          v-if="error"
+          class="error-box"
+        >
+          ⚠️ {{ error }}
         </div>
 
         <!-- ===============================================
              ACTION
         ================================================ -->
 
-        <div class="form-actions">
-          <button type="submit" class="create-button" :disabled="loading">
-            <template v-if="loading">
-              <span class="spinner" />
+        <div
+          class="form-actions"
+        >
+          <button
+            type="submit"
+            class="create-button"
+            :disabled="
+              loading
+            "
+          >
+            <template
+              v-if="
+                loading
+              "
+            >
+              <span
+                class="spinner"
+              />
 
               CREATING BATTLE...
             </template>
 
-            <template v-else> ⚔️ CREATE BATTLE </template>
+            <template v-else>
+              ⚔️ CREATE TCG BATTLE
+            </template>
           </button>
         </div>
       </form>
     </main>
 
     <!-- ===================================================
-         BATTLE CREATED
+         CREATED
     ==================================================== -->
 
-    <main v-else class="created-container">
-      <!-- SUCCESS -->
+    <main
+      v-else
+      class="created-container"
+    >
+      <div
+        class="success-icon"
+      >
+        ✓
+      </div>
 
-      <div class="success-icon">✓</div>
+      <div
+        class="created-label"
+      >
+        BATTLE CREATED
+      </div>
 
-      <div class="created-label">BATTLE CREATED</div>
+      <h1>
+        Ready to Battle
+      </h1>
 
-      <h1>Ready to Battle</h1>
-
-      <p class="created-description">
-        Battle berhasil dibuat. Gunakan link berikut untuk membuka Public Arena
+      <p
+        class="created-description"
+      >
+        Battle TCG V1 berhasil
+        dibuat. Gunakan link berikut
+        untuk membuka Public Arena
         dan Player Battle.
       </p>
 
-      <!-- =================================================
-           CODE
-      ================================================== -->
+      <!-- CODE -->
 
-      <div class="battle-code-card">
-        <span> BATTLE CODE </span>
+      <div
+        class="battle-code-card"
+      >
+        <span>
+          BATTLE CODE
+        </span>
 
         <strong>
-          {{ createdBattle.code }}
+          {{
+            createdBattle.code
+          }}
         </strong>
 
-        <button type="button" @click="copyText(createdBattle.code)">
+        <button
+          type="button"
+          @click="
+            copyText(
+              createdBattle.code,
+            )
+          "
+        >
           COPY CODE
         </button>
       </div>
 
-      <!-- =================================================
-           INFO
-      ================================================== -->
+      <!-- INFO -->
 
-      <div class="battle-info">
+      <div
+        class="battle-info"
+      >
         <div>
-          <span> Starting Player </span>
+          <span>
+            Ruleset
+          </span>
 
           <strong>
             {{
-              createdBattle.starting_player === "p1"
-                ? createdBattle.player1_name
-                : createdBattle.player2_name
+              createdBattle.ruleset
+                ?.toUpperCase()
             }}
           </strong>
         </div>
 
         <div>
-          <span> Rounds </span>
+          <span>
+            Starting Player
+          </span>
 
           <strong>
-            {{ createdBattle.total_rounds }}
+            {{
+              createdBattle
+                .starting_player ===
+              "p1"
+                ? createdBattle
+                    .player1_name
+                : createdBattle
+                    .player2_name
+            }}
           </strong>
         </div>
 
         <div>
-          <span> Question </span>
+          <span>
+            Player HP
+          </span>
 
           <strong>
             {{
-              createdBattle.question_enabled
-                ? createdBattle.question_level
+              createdBattle
+                .player_starting_hp
+            }}
+          </strong>
+        </div>
+
+        <div>
+          <span>
+            Rounds
+          </span>
+
+          <strong>
+            {{
+              createdBattle
+                .total_rounds
+            }}
+          </strong>
+        </div>
+
+        <div>
+          <span>
+            Physical Deck
+          </span>
+
+          <strong>
+            {{
+              createdBattle
+                .deck_size
+            }}
+          </strong>
+        </div>
+
+        <div>
+          <span>
+            Initial Cards
+          </span>
+
+          <strong>
+            {{
+              createdBattle
+                .initial_cards_required
+            }}
+          </strong>
+        </div>
+
+        <div>
+          <span>
+            Destruction
+          </span>
+
+          <strong>
+            {{
+              createdBattle
+                .destruction_damage_enabled
+                ? `${Math.round(
+                    Number(
+                      createdBattle
+                        .destruction_damage_percent,
+                    ) * 100,
+                  )}%`
                 : "Off"
             }}
           </strong>
         </div>
 
         <div>
-          <span> Deck </span>
+          <span>
+            Question
+          </span>
 
           <strong>
-            {{ createdBattle.deck_size }}
+            {{
+              createdBattle
+                .question_enabled
+                ? createdBattle
+                    .question_level
+                : "Off"
+            }}
           </strong>
         </div>
       </div>
 
-      <!-- =================================================
-           PRIMARY ACTION
-      ================================================== -->
+      <!-- DECK READY -->
 
-      <div class="primary-battle-actions">
+      <div
+        class="created-rule-summary"
+      >
+        <div>
+          <span>
+            P1 DECK
+          </span>
+
+          <strong>
+            {{
+              createdBattle
+                .player1_deck_remaining
+            }}
+            /
+            {{
+              createdBattle
+                .player1_starting_deck
+            }}
+          </strong>
+        </div>
+
+        <div>
+          <span>
+            P2 DECK
+          </span>
+
+          <strong>
+            {{
+              createdBattle
+                .player2_deck_remaining
+            }}
+            /
+            {{
+              createdBattle
+                .player2_starting_deck
+            }}
+          </strong>
+        </div>
+
+        <div>
+          <span>
+            TARGET ATTACK
+          </span>
+
+          <strong>
+            {{
+              createdBattle
+                .target_card_enabled
+                ? "ON"
+                : "OFF"
+            }}
+          </strong>
+        </div>
+
+        <div>
+          <span>
+            DIRECT ATTACK
+          </span>
+
+          <strong>
+            {{
+              createdBattle
+                .direct_attack_enabled
+                ? "ON"
+                : "OFF"
+            }}
+          </strong>
+        </div>
+      </div>
+
+      <!-- PRIMARY -->
+
+      <div
+        class="primary-battle-actions"
+      >
         <button
           type="button"
           class="open-public-button"
-          @click="openPublicBattle"
+          @click="
+            openPublicBattle
+          "
         >
           🖥️ OPEN PUBLIC BATTLE
         </button>
@@ -963,109 +2315,204 @@ const createAnother = () => {
         <button
           type="button"
           class="history-secondary-button"
-          @click="openBattleHistory"
+          @click="
+            openBattleHistory
+          "
         >
           ◷ BATTLE HISTORY
         </button>
       </div>
 
-      <!-- =================================================
-           LINKS
-      ================================================== -->
+      <!-- LINKS -->
 
-      <div class="battle-links">
-        <!-- ===============================================
-             PUBLIC
-        ================================================ -->
+      <div
+        class="battle-links"
+      >
+        <!-- PUBLIC -->
 
-        <div class="battle-link-card public">
-          <div class="link-icon">🖥️</div>
+        <div
+          class="battle-link-card public"
+        >
+          <div
+            class="link-icon"
+          >
+            🖥️
+          </div>
 
-          <div class="link-content">
-            <span class="link-label"> PUBLIC BATTLE </span>
+          <div
+            class="link-content"
+          >
+            <span
+              class="link-label"
+            >
+              PUBLIC BATTLE
+            </span>
 
-            <strong> Main Arena / TV </strong>
+            <strong>
+              Main Arena / TV
+            </strong>
 
-            <div class="link-url">
+            <div
+              class="link-url"
+            >
               {{ publicUrl }}
             </div>
           </div>
 
-          <div class="link-actions">
-            <button type="button" @click="copyText(publicUrl)">COPY</button>
-
-            <button type="button" class="primary" @click="openPublicBattle">
-              OPEN
+          <div
+            class="link-actions"
+          >
+            <button
+              type="button"
+              @click="
+                copyText(
+                  publicUrl,
+                )
+              "
+            >
+              COPY
             </button>
-          </div>
-        </div>
-
-        <!-- ===============================================
-             P1
-        ================================================ -->
-
-        <div class="battle-link-card blue">
-          <div class="link-icon">👦🏻</div>
-
-          <div class="link-content">
-            <span class="link-label"> PLAYER 1 </span>
-
-            <strong>
-              {{ createdBattle.player1_name }}
-            </strong>
-
-            <div class="link-url">
-              {{ player1Url }}
-            </div>
-          </div>
-
-          <div class="link-actions">
-            <button type="button" @click="copyText(player1Url)">COPY</button>
 
             <button
               type="button"
-              class="primary blue"
-              @click="openPlayer('p1')"
+              class="primary"
+              @click="
+                openPublicBattle
+              "
             >
               OPEN
             </button>
           </div>
         </div>
 
-        <!-- ===============================================
-             P2
-        ================================================ -->
+        <!-- P1 -->
 
-        <div class="battle-link-card red">
-          <div class="link-icon">🧑🏽‍🦱</div>
+        <div
+          class="battle-link-card blue"
+        >
+          <div
+            class="link-icon"
+          >
+            👦🏻
+          </div>
 
-          <div class="link-content">
-            <span class="link-label"> PLAYER 2 </span>
+          <div
+            class="link-content"
+          >
+            <span
+              class="link-label"
+            >
+              PLAYER 1
+            </span>
 
             <strong>
-              {{ createdBattle.player2_name }}
+              {{
+                createdBattle
+                  .player1_name
+              }}
             </strong>
 
-            <div class="link-url">
+            <div
+              class="link-url"
+            >
+              {{ player1Url }}
+            </div>
+          </div>
+
+          <div
+            class="link-actions"
+          >
+            <button
+              type="button"
+              @click="
+                copyText(
+                  player1Url,
+                )
+              "
+            >
+              COPY
+            </button>
+
+            <button
+              type="button"
+              class="primary blue"
+              @click="
+                openPlayer('p1')
+              "
+            >
+              OPEN
+            </button>
+          </div>
+        </div>
+
+        <!-- P2 -->
+
+        <div
+          class="battle-link-card red"
+        >
+          <div
+            class="link-icon"
+          >
+            🧑🏽‍🦱
+          </div>
+
+          <div
+            class="link-content"
+          >
+            <span
+              class="link-label"
+            >
+              PLAYER 2
+            </span>
+
+            <strong>
+              {{
+                createdBattle
+                  .player2_name
+              }}
+            </strong>
+
+            <div
+              class="link-url"
+            >
               {{ player2Url }}
             </div>
           </div>
 
-          <div class="link-actions">
-            <button type="button" @click="copyText(player2Url)">COPY</button>
+          <div
+            class="link-actions"
+          >
+            <button
+              type="button"
+              @click="
+                copyText(
+                  player2Url,
+                )
+              "
+            >
+              COPY
+            </button>
 
-            <button type="button" class="primary red" @click="openPlayer('p2')">
+            <button
+              type="button"
+              class="primary red"
+              @click="
+                openPlayer('p2')
+              "
+            >
               OPEN
             </button>
           </div>
         </div>
       </div>
 
-      <!-- =================================================
-           CREATE ANOTHER
-      ================================================== -->
-
-      <button type="button" class="another-button" @click="createAnother">
+      <button
+        type="button"
+        class="another-button"
+        @click="
+          createAnother
+        "
+      >
         + CREATE ANOTHER BATTLE
       </button>
     </main>
@@ -1104,7 +2551,11 @@ select {
 
   background: #050a16;
 
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    sans-serif;
 }
 
 /* =========================================================
@@ -1201,7 +2652,8 @@ select {
 
   place-items: center;
 
-  border: 1px solid rgba(70, 193, 255, 0.3);
+  border: 1px solid
+    rgba(70, 193, 255, 0.3);
 
   border-radius: 18px;
 
@@ -1213,7 +2665,9 @@ select {
     rgba(30, 80, 160, 0.04)
   );
 
-  box-shadow: 0 0 30px rgba(0, 165, 255, 0.08);
+  box-shadow:
+    0 0 30px
+    rgba(0, 165, 255, 0.08);
 }
 
 .setup-eyebrow,
@@ -1245,6 +2699,8 @@ select {
   color: #8192aa;
 
   font-size: 12px;
+
+  line-height: 1.6;
 }
 
 /* =========================================================
@@ -1258,13 +2714,15 @@ select {
 
   flex-shrink: 0;
 
-  border: 1px solid rgba(116, 174, 226, 0.18);
+  border: 1px solid
+    rgba(116, 174, 226, 0.18);
 
   border-radius: 9px;
 
   color: #9eb4cc;
 
-  background: rgba(255, 255, 255, 0.025);
+  background:
+    rgba(255, 255, 255, 0.025);
 
   cursor: pointer;
 
@@ -1280,9 +2738,11 @@ select {
 .history-button:hover {
   color: #d8e7fa;
 
-  border-color: rgba(126, 193, 255, 0.3);
+  border-color:
+    rgba(126, 193, 255, 0.3);
 
-  background: rgba(255, 255, 255, 0.045);
+  background:
+    rgba(255, 255, 255, 0.045);
 }
 
 /* =========================================================
@@ -1304,7 +2764,8 @@ select {
 .setup-card {
   padding: 23px;
 
-  border: 1px solid rgba(139, 177, 222, 0.1);
+  border: 1px solid
+    rgba(139, 177, 222, 0.1);
 
   border-radius: 16px;
 
@@ -1314,7 +2775,14 @@ select {
     rgba(4, 12, 29, 0.94)
   );
 
-  box-shadow: 0 15px 45px rgba(0, 0, 0, 0.22);
+  box-shadow:
+    0 15px 45px
+    rgba(0, 0, 0, 0.22);
+}
+
+.tcg-card {
+  border-color:
+    rgba(250, 184, 66, 0.17);
 }
 
 /* =========================================================
@@ -1356,7 +2824,8 @@ select {
 
   border-radius: 10px;
 
-  background: rgba(255, 255, 255, 0.045);
+  background:
+    rgba(255, 255, 255, 0.045);
 }
 
 .section-heading h2 {
@@ -1371,6 +2840,8 @@ select {
   color: #74879f;
 
   font-size: 10px;
+
+  line-height: 1.5;
 }
 
 /* =========================================================
@@ -1384,11 +2855,27 @@ select {
 }
 
 .form-grid.two {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns:
+    repeat(
+      2,
+      minmax(0, 1fr)
+    );
+}
+
+.form-grid.three {
+  grid-template-columns:
+    repeat(
+      3,
+      minmax(0, 1fr)
+    );
 }
 
 .form-grid.four {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns:
+    repeat(
+      4,
+      minmax(0, 1fr)
+    );
 }
 
 .form-grid.disabled {
@@ -1427,7 +2914,8 @@ select {
 
   padding: 0 13px;
 
-  border: 1px solid rgba(121, 166, 220, 0.16);
+  border: 1px solid
+    rgba(121, 166, 220, 0.16);
 
   border-radius: 9px;
 
@@ -1444,14 +2932,19 @@ select {
 
 .field input:focus,
 .field select:focus {
-  border-color: rgba(45, 192, 255, 0.6);
+  border-color:
+    rgba(45, 192, 255, 0.6);
 
-  box-shadow: 0 0 0 3px rgba(25, 156, 255, 0.08);
+  box-shadow:
+    0 0 0 3px
+    rgba(25, 156, 255, 0.08);
 }
 
 .field input:disabled,
 .field select:disabled {
   cursor: not-allowed;
+
+  opacity: 0.65;
 }
 
 .field small {
@@ -1461,7 +2954,7 @@ select {
 
   font-size: 8px;
 
-  line-height: 1.4;
+  line-height: 1.5;
 }
 
 /* =========================================================
@@ -1475,7 +2968,8 @@ select {
 
   overflow: hidden;
 
-  border: 1px solid rgba(121, 166, 220, 0.16);
+  border: 1px solid
+    rgba(121, 166, 220, 0.16);
 
   border-radius: 9px;
 
@@ -1488,7 +2982,7 @@ select {
   border-radius: 0;
 }
 
-.input-suffix span {
+.input-suffix > span {
   padding-right: 13px;
 
   color: #647994;
@@ -1519,19 +3013,242 @@ select {
 
   padding: 7px 10px;
 
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid
+    rgba(255, 255, 255, 0.06);
 
   border-radius: 8px;
 
   color: #71849d;
 
-  background: rgba(255, 255, 255, 0.02);
+  background:
+    rgba(255, 255, 255, 0.02);
 
   font-size: 8px;
 }
 
 .deck-summary strong {
   color: #e4f4ff;
+}
+
+/* =========================================================
+   INFO NOTE
+========================================================= */
+
+.info-note,
+.future-note {
+  margin-top: 16px;
+
+  padding: 12px 14px;
+
+  border: 1px solid
+    rgba(62, 182, 255, 0.13);
+
+  border-radius: 9px;
+
+  color: #7189a4;
+
+  background:
+    rgba(15, 126, 198, 0.05);
+
+  font-size: 9px;
+
+  line-height: 1.6;
+}
+
+.info-note strong,
+.future-note span {
+  margin-right: 8px;
+
+  color: #42cfff;
+
+  font-weight: 950;
+
+  letter-spacing: 0.08em;
+}
+
+/* =========================================================
+   RULESET
+========================================================= */
+
+.ruleset-banner {
+  min-height: 70px;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  gap: 18px;
+
+  margin-bottom: 18px;
+
+  padding: 14px 16px;
+
+  border: 1px solid
+    rgba(255, 194, 77, 0.16);
+
+  border-radius: 11px;
+
+  background: linear-gradient(
+    135deg,
+    rgba(255, 172, 44, 0.08),
+    rgba(255, 255, 255, 0.015)
+  );
+}
+
+.ruleset-banner.compact {
+  min-height: 58px;
+}
+
+.ruleset-banner > div {
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 4px;
+}
+
+.ruleset-banner span {
+  color: #8e9db1;
+
+  font-size: 8px;
+
+  font-weight: 900;
+
+  letter-spacing: 0.12em;
+}
+
+.ruleset-banner strong {
+  color: #ffd57c;
+
+  font-size: 17px;
+
+  letter-spacing: 0.08em;
+}
+
+.ruleset-banner small {
+  color: #71849d;
+
+  font-size: 9px;
+
+  text-align: right;
+}
+
+/* =========================================================
+   RULE OPTIONS
+========================================================= */
+
+.combat-rule-list {
+  display: grid;
+
+  grid-template-columns:
+    repeat(
+      3,
+      minmax(0, 1fr)
+    );
+
+  gap: 12px;
+}
+
+.rule-option {
+  min-height: 105px;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  gap: 14px;
+
+  padding: 14px;
+
+  border: 1px solid
+    rgba(121, 166, 220, 0.11);
+
+  border-radius: 11px;
+
+  background:
+    rgba(255, 255, 255, 0.018);
+}
+
+.rule-option > div {
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 5px;
+}
+
+.rule-option strong {
+  color: #d8e9fa;
+
+  font-size: 10px;
+
+  line-height: 1.4;
+}
+
+.rule-option small {
+  color: #61758f;
+
+  font-size: 8px;
+
+  line-height: 1.5;
+}
+
+.rule-option .toggle {
+  flex-shrink: 0;
+}
+
+.destruction-settings {
+  margin-top: 15px;
+}
+
+/* =========================================================
+   COMBAT PREVIEW
+========================================================= */
+
+.combat-preview {
+  margin-top: 15px;
+
+  padding: 13px 15px;
+
+  border: 1px solid
+    rgba(255, 93, 112, 0.13);
+
+  border-radius: 10px;
+
+  background:
+    rgba(255, 51, 77, 0.035);
+}
+
+.combat-preview > span {
+  color: #ff7d91;
+
+  font-size: 8px;
+
+  font-weight: 950;
+
+  letter-spacing: 0.1em;
+}
+
+.combat-preview strong {
+  margin-left: 8px;
+
+  color: #ffd6dd;
+
+  font-size: 13px;
+}
+
+.combat-preview p {
+  margin: 7px 0 0;
+
+  color: #74869b;
+
+  font-size: 9px;
+
+  line-height: 1.55;
 }
 
 /* =========================================================
@@ -1580,12 +3297,18 @@ select {
   transition: 0.2s ease;
 }
 
-.toggle input:checked + .toggle-track {
+.toggle
+  input:checked
+  + .toggle-track {
   background: #129bd5;
 }
 
-.toggle input:checked + .toggle-track .toggle-dot {
-  transform: translateX(20px);
+.toggle
+  input:checked
+  + .toggle-track
+  .toggle-dot {
+  transform:
+    translateX(20px);
 }
 
 /* =========================================================
@@ -1595,13 +3318,15 @@ select {
 .error-box {
   padding: 13px 15px;
 
-  border: 1px solid rgba(255, 71, 99, 0.3);
+  border: 1px solid
+    rgba(255, 71, 99, 0.3);
 
   border-radius: 10px;
 
   color: #ff93a6;
 
-  background: rgba(255, 43, 78, 0.08);
+  background:
+    rgba(255, 43, 78, 0.08);
 
   font-size: 11px;
 }
@@ -1619,17 +3344,23 @@ select {
 }
 
 .create-button {
-  min-width: 235px;
+  min-width: 260px;
 
   min-height: 49px;
 
-  border: 1px solid rgba(79, 210, 255, 0.5);
+  border: 1px solid
+    rgba(79, 210, 255, 0.5);
 
   border-radius: 11px;
 
   color: #e9fbff;
 
-  background: linear-gradient(135deg, #0779ba, #084a8a);
+  background:
+    linear-gradient(
+      135deg,
+      #0779ba,
+      #084a8a
+    );
 
   cursor: pointer;
 
@@ -1639,7 +3370,9 @@ select {
 
   letter-spacing: 0.1em;
 
-  box-shadow: 0 12px 30px rgba(0, 120, 210, 0.2);
+  box-shadow:
+    0 12px 30px
+    rgba(0, 120, 210, 0.2);
 }
 
 .create-button:disabled {
@@ -1661,7 +3394,8 @@ select {
 
   margin-right: 8px;
 
-  border: 2px solid rgba(255, 255, 255, 0.25);
+  border: 2px solid
+    rgba(255, 255, 255, 0.25);
 
   border-top-color: white;
 
@@ -1669,12 +3403,14 @@ select {
 
   vertical-align: middle;
 
-  animation: spin 0.7s linear infinite;
+  animation:
+    spin 0.7s linear infinite;
 }
 
 @keyframes spin {
   to {
-    transform: rotate(360deg);
+    transform:
+      rotate(360deg);
   }
 }
 
@@ -1683,7 +3419,7 @@ select {
 ========================================================= */
 
 .created-container {
-  max-width: 850px;
+  max-width: 900px;
 
   text-align: center;
 }
@@ -1699,19 +3435,23 @@ select {
 
   place-items: center;
 
-  border: 1px solid rgba(56, 231, 149, 0.35);
+  border: 1px solid
+    rgba(56, 231, 149, 0.35);
 
   border-radius: 50%;
 
   color: #6dffbd;
 
-  background: rgba(33, 195, 120, 0.1);
+  background:
+    rgba(33, 195, 120, 0.1);
 
   font-size: 27px;
 
   font-weight: 950;
 
-  box-shadow: 0 0 35px rgba(42, 221, 142, 0.11);
+  box-shadow:
+    0 0 35px
+    rgba(42, 221, 142, 0.11);
 }
 
 .created-description {
@@ -1731,7 +3471,8 @@ select {
 
   padding: 18px;
 
-  border: 1px solid rgba(44, 195, 255, 0.22);
+  border: 1px solid
+    rgba(44, 195, 255, 0.22);
 
   border-radius: 16px;
 
@@ -1742,42 +3483,46 @@ select {
   );
 }
 
-.battle-code-card span {
+.battle-code-card > span {
   display: block;
 
   margin-bottom: 7px;
 
-  color: #7892ad;
+  color: #6d829b;
 
   font-size: 8px;
 
   font-weight: 900;
 
-  letter-spacing: 0.2em;
+  letter-spacing: 0.16em;
 }
 
-.battle-code-card strong {
+.battle-code-card > strong {
   display: block;
 
-  color: white;
+  margin-bottom: 13px;
 
-  font-size: 38px;
+  color: #55d8ff;
 
-  letter-spacing: 0.17em;
+  font-size: 35px;
+
+  letter-spacing: 0.16em;
 }
 
 .battle-code-card button {
-  margin-top: 11px;
+  min-height: 35px;
 
-  padding: 7px 13px;
+  padding: 0 14px;
 
-  border: 1px solid rgba(74, 202, 255, 0.25);
+  border: 1px solid
+    rgba(63, 200, 255, 0.23);
 
-  border-radius: 7px;
+  border-radius: 8px;
 
-  color: #6bd7ff;
+  color: #9de7ff;
 
-  background: rgba(18, 152, 205, 0.08);
+  background:
+    rgba(31, 156, 216, 0.08);
 
   cursor: pointer;
 
@@ -1787,47 +3532,71 @@ select {
 }
 
 /* =========================================================
-   INFO
+   BATTLE INFO
 ========================================================= */
 
-.battle-info {
+.battle-info,
+.created-rule-summary {
   display: grid;
 
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns:
+    repeat(
+      4,
+      minmax(0, 1fr)
+    );
 
-  gap: 9px;
+  gap: 10px;
 
-  margin-bottom: 22px;
+  margin-bottom: 20px;
 }
 
-.battle-info > div {
-  padding: 13px;
+.battle-info > div,
+.created-rule-summary > div {
+  min-height: 75px;
 
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: center;
+
+  justify-content: center;
+
+  gap: 5px;
+
+  padding: 10px;
+
+  border: 1px solid
+    rgba(121, 166, 220, 0.1);
 
   border-radius: 10px;
 
-  background: rgba(255, 255, 255, 0.025);
+  background:
+    rgba(255, 255, 255, 0.018);
 }
 
-.battle-info span {
-  display: block;
-
-  margin-bottom: 5px;
-
-  color: #6c819b;
+.battle-info span,
+.created-rule-summary span {
+  color: #6a7d95;
 
   font-size: 7px;
 
-  font-weight: 850;
+  font-weight: 900;
+
+  letter-spacing: 0.08em;
 
   text-transform: uppercase;
 }
 
-.battle-info strong {
-  font-size: 11px;
+.battle-info strong,
+.created-rule-summary strong {
+  color: #daeaff;
 
-  text-transform: capitalize;
+  font-size: 11px;
+}
+
+.created-rule-summary {
+  margin-top: -7px;
 }
 
 /* =========================================================
@@ -1841,21 +3610,16 @@ select {
 
   gap: 10px;
 
-  margin-bottom: 23px;
+  margin: 23px 0;
 }
 
-.open-public-button {
-  min-height: 48px;
+.open-public-button,
+.history-secondary-button {
+  min-height: 44px;
 
-  padding: 0 24px;
-
-  border: 1px solid rgba(70, 210, 255, 0.45);
+  padding: 0 19px;
 
   border-radius: 10px;
-
-  color: #eaffff;
-
-  background: linear-gradient(135deg, #087eba, #07518f);
 
   cursor: pointer;
 
@@ -1863,29 +3627,31 @@ select {
 
   font-weight: 950;
 
-  letter-spacing: 0.08em;
+  letter-spacing: 0.05em;
+}
 
-  box-shadow: 0 10px 30px rgba(0, 145, 220, 0.18);
+.open-public-button {
+  border: 1px solid
+    rgba(63, 207, 255, 0.4);
+
+  color: #e8fbff;
+
+  background:
+    linear-gradient(
+      135deg,
+      #0678b9,
+      #08518e
+    );
 }
 
 .history-secondary-button {
-  min-height: 48px;
+  border: 1px solid
+    rgba(151, 178, 211, 0.16);
 
-  padding: 0 18px;
+  color: #9db0c5;
 
-  border: 1px solid rgba(255, 255, 255, 0.1);
-
-  border-radius: 10px;
-
-  color: #8ea5bd;
-
-  background: rgba(255, 255, 255, 0.025);
-
-  cursor: pointer;
-
-  font-size: 8px;
-
-  font-weight: 900;
+  background:
+    rgba(255, 255, 255, 0.025);
 }
 
 /* =========================================================
@@ -1898,43 +3664,47 @@ select {
   flex-direction: column;
 
   gap: 10px;
+
+  margin-top: 22px;
 }
 
 .battle-link-card {
   display: grid;
 
   grid-template-columns:
-    48px
-    1fr
-    auto;
-
-  gap: 13px;
+    auto minmax(0, 1fr) auto;
 
   align-items: center;
 
+  gap: 14px;
+
   padding: 15px;
 
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  border: 1px solid
+    rgba(121, 166, 220, 0.1);
 
-  border-radius: 13px;
+  border-radius: 12px;
 
   text-align: left;
 
-  background: rgba(8, 19, 39, 0.85);
+  background:
+    rgba(255, 255, 255, 0.018);
 }
 
 .battle-link-card.blue {
-  border-color: rgba(45, 183, 255, 0.18);
+  border-color:
+    rgba(52, 178, 255, 0.14);
 }
 
 .battle-link-card.red {
-  border-color: rgba(255, 62, 98, 0.18);
+  border-color:
+    rgba(255, 72, 101, 0.14);
 }
 
 .link-icon {
-  width: 42px;
+  width: 43px;
 
-  height: 42px;
+  height: 43px;
 
   display: grid;
 
@@ -1942,35 +3712,44 @@ select {
 
   border-radius: 10px;
 
-  background: rgba(255, 255, 255, 0.04);
+  background:
+    rgba(255, 255, 255, 0.035);
 
-  font-size: 20px;
+  font-size: 18px;
+}
+
+.link-content {
+  min-width: 0;
 }
 
 .link-label {
   display: block;
 
-  margin-bottom: 3px;
+  margin-bottom: 4px;
 
-  color: #687d97;
+  color: #668098;
 
   font-size: 7px;
 
   font-weight: 900;
 
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
 }
 
 .link-content strong {
+  display: block;
+
+  margin-bottom: 5px;
+
+  color: #dceafa;
+
   font-size: 11px;
 }
 
 .link-url {
-  margin-top: 4px;
-
   overflow: hidden;
 
-  color: #536a84;
+  color: #62758b;
 
   font-size: 8px;
 
@@ -1982,53 +3761,23 @@ select {
 .link-actions {
   display: flex;
 
-  gap: 7px;
+  gap: 6px;
 }
 
 .link-actions button {
-  padding: 8px 11px;
+  min-height: 34px;
 
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0 12px;
 
-  border-radius: 7px;
+  border: 1px solid
+    rgba(126, 166, 209, 0.14);
 
-  color: #a5b5c9;
+  border-radius: 8px;
 
-  background: rgba(255, 255, 255, 0.035);
+  color: #8fa4bb;
 
-  cursor: pointer;
-
-  font-size: 7px;
-
-  font-weight: 900;
-}
-
-.link-actions button.primary {
-  color: #7bdfff;
-
-  border-color: rgba(58, 195, 255, 0.25);
-}
-
-.link-actions button.primary.red {
-  color: #ff849a;
-
-  border-color: rgba(255, 68, 101, 0.25);
-}
-
-/* =========================================================
-   ANOTHER
-========================================================= */
-
-.another-button {
-  margin-top: 21px;
-
-  padding: 10px 15px;
-
-  border: 0;
-
-  color: #7087a2;
-
-  background: transparent;
+  background:
+    rgba(255, 255, 255, 0.025);
 
   cursor: pointer;
 
@@ -2037,68 +3786,192 @@ select {
   font-weight: 900;
 }
 
+.link-actions button.primary {
+  color: #aeeeff;
+
+  border-color:
+    rgba(49, 195, 255, 0.25);
+
+  background:
+    rgba(23, 139, 201, 0.1);
+}
+
+.link-actions button.primary.red {
+  color: #ffc0ca;
+
+  border-color:
+    rgba(255, 76, 108, 0.25);
+
+  background:
+    rgba(210, 36, 68, 0.09);
+}
+
+/* =========================================================
+   ANOTHER
+========================================================= */
+
+.another-button {
+  margin-top: 25px;
+
+  min-height: 40px;
+
+  padding: 0 16px;
+
+  border: 1px solid
+    rgba(133, 167, 207, 0.15);
+
+  border-radius: 9px;
+
+  color: #879ab0;
+
+  background:
+    rgba(255, 255, 255, 0.02);
+
+  cursor: pointer;
+
+  font-size: 8px;
+
+  font-weight: 900;
+
+  letter-spacing: 0.05em;
+}
+
 /* =========================================================
    RESPONSIVE
 ========================================================= */
 
-@media (max-width: 900px) {
-  .setup-background {
-    left: 0;
+@media (
+  max-width: 1100px
+) {
+  .form-grid.four {
+    grid-template-columns:
+      repeat(
+        2,
+        minmax(0, 1fr)
+      );
+  }
+
+  .combat-rule-list {
+    grid-template-columns:
+      1fr;
   }
 }
 
-@media (max-width: 750px) {
+@media (
+  max-width: 850px
+) {
   .setup-page {
-    padding: 30px 14px 45px;
+    padding:
+      30px 18px 50px;
+  }
+
+  .setup-background {
+    inset:
+      76px 0 0 0;
   }
 
   .setup-header {
-    align-items: flex-start;
+    align-items:
+      flex-start;
 
-    flex-direction: column;
-  }
-
-  .setup-header-main {
-    align-items: flex-start;
-  }
-
-  .setup-logo {
-    width: 55px;
-
-    height: 55px;
-  }
-
-  .setup-header h1 {
-    font-size: 27px;
+    flex-direction:
+      column;
   }
 
   .form-grid.two,
+  .form-grid.three,
   .form-grid.four {
-    grid-template-columns: 1fr;
+    grid-template-columns:
+      1fr;
   }
 
-  .battle-info {
-    grid-template-columns: repeat(2, 1fr);
+  .battle-info,
+  .created-rule-summary {
+    grid-template-columns:
+      repeat(
+        2,
+        minmax(0, 1fr)
+      );
+  }
+
+  .ruleset-banner {
+    align-items:
+      flex-start;
+
+    flex-direction:
+      column;
+  }
+
+  .ruleset-banner small {
+    text-align: left;
+  }
+}
+
+@media (
+  max-width: 620px
+) {
+  .setup-page {
+    padding:
+      24px 13px 45px;
+  }
+
+  .setup-header-main {
+    align-items:
+      flex-start;
+  }
+
+  .setup-logo {
+    width: 54px;
+
+    height: 54px;
+
+    border-radius: 14px;
+
+    font-size: 24px;
+  }
+
+  .setup-header h1,
+  .created-container h1 {
+    font-size: 25px;
+  }
+
+  .setup-card {
+    padding: 17px;
+  }
+
+  .battle-info,
+  .created-rule-summary {
+    grid-template-columns:
+      1fr 1fr;
   }
 
   .primary-battle-actions {
-    flex-direction: column;
+    flex-direction:
+      column;
   }
 
   .battle-link-card {
     grid-template-columns:
-      42px
-      1fr;
+      auto minmax(0, 1fr);
   }
 
   .link-actions {
-    grid-column: 1 / -1;
+    grid-column:
+      1 / -1;
 
-    justify-content: flex-end;
+    justify-content:
+      flex-end;
   }
 
-  .battle-code-card strong {
-    font-size: 30px;
+  .battle-code-card
+    > strong {
+    font-size: 27px;
+  }
+
+  .create-button {
+    width: 100%;
+
+    min-width: 0;
   }
 }
 </style>
