@@ -2,6 +2,7 @@
 import { ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { supabase } from "../lib/supabase";
+import QRCode from "qrcode";
 
 // =========================================================
 // ROUTER
@@ -85,6 +86,14 @@ const error = ref(null);
 const createdBattle = ref(null);
 
 // =========================================================
+// PLAYER QR CODE
+// =========================================================
+
+const player1QrDataUrl = ref("");
+const player2QrDataUrl = ref("");
+const qrError = ref(null);
+
+// =========================================================
 // CREATED URLS
 // =========================================================
 
@@ -129,6 +138,49 @@ const player2Url = computed(() => {
     )}`
   );
 });
+
+// =========================================================
+// GENERATE PLAYER QR CODE LOCALLY
+//
+// QR dibuat di browser agar URL player yang berisi token
+// tidak dikirim ke layanan QR pihak ketiga.
+// =========================================================
+
+const generatePlayerQrs = async () => {
+  qrError.value = null;
+  player1QrDataUrl.value = "";
+  player2QrDataUrl.value = "";
+
+  if (!player1Url.value || !player2Url.value) {
+    return;
+  }
+
+  try {
+    const qrOptions = {
+      width: 320,
+      margin: 1,
+      errorCorrectionLevel: "M",
+      color: {
+        dark: "#07111f",
+        light: "#ffffff",
+      },
+    };
+
+    const [p1Qr, p2Qr] = await Promise.all([
+      QRCode.toDataURL(player1Url.value, qrOptions),
+      QRCode.toDataURL(player2Url.value, qrOptions),
+    ]);
+
+    player1QrDataUrl.value = p1Qr;
+    player2QrDataUrl.value = p2Qr;
+  } catch (err) {
+    console.error("Generate Player QR gagal:", err);
+
+    qrError.value =
+      err?.message ??
+      "QR Code player gagal dibuat.";
+  }
+};
 
 // =========================================================
 // DISPLAY
@@ -783,6 +835,8 @@ const createBattle = async () => {
 
     createdBattle.value =
       created;
+
+    await generatePlayerQrs();
   } catch (err) {
     console.error(
       "Create Battle:",
@@ -887,6 +941,10 @@ const openPlayer = (
 const createAnother = () => {
   createdBattle.value =
     null;
+
+  player1QrDataUrl.value = "";
+  player2QrDataUrl.value = "";
+  qrError.value = null;
 
   error.value = null;
 };
@@ -2388,7 +2446,7 @@ const createAnother = () => {
         <!-- P1 -->
 
         <div
-          class="battle-link-card blue"
+          class="battle-link-card blue with-qr"
         >
           <div
             class="link-icon"
@@ -2420,6 +2478,22 @@ const createAnother = () => {
           </div>
 
           <div
+            v-if="player1QrDataUrl"
+            class="player-qr-panel blue"
+          >
+            <div class="qr-frame">
+              <img
+                :src="player1QrDataUrl"
+                :alt="`QR Player 1 - ${createdBattle.player1_name}`"
+              />
+            </div>
+
+            <span>
+              SCAN TO JOIN
+            </span>
+          </div>
+
+          <div
             class="link-actions"
           >
             <button
@@ -2448,7 +2522,7 @@ const createAnother = () => {
         <!-- P2 -->
 
         <div
-          class="battle-link-card red"
+          class="battle-link-card red with-qr"
         >
           <div
             class="link-icon"
@@ -2480,6 +2554,22 @@ const createAnother = () => {
           </div>
 
           <div
+            v-if="player2QrDataUrl"
+            class="player-qr-panel red"
+          >
+            <div class="qr-frame">
+              <img
+                :src="player2QrDataUrl"
+                :alt="`QR Player 2 - ${createdBattle.player2_name}`"
+              />
+            </div>
+
+            <span>
+              SCAN TO JOIN
+            </span>
+          </div>
+
+          <div
             class="link-actions"
           >
             <button
@@ -2503,6 +2593,13 @@ const createAnother = () => {
               OPEN
             </button>
           </div>
+        </div>
+
+        <div
+          v-if="qrError"
+          class="qr-error-box"
+        >
+          ⚠️ {{ qrError }}
         </div>
       </div>
 
@@ -3758,6 +3855,104 @@ select {
   white-space: nowrap;
 }
 
+.battle-link-card.with-qr {
+  grid-template-columns:
+    auto minmax(0, 1fr) 124px auto;
+}
+
+.player-qr-panel {
+  width: 116px;
+
+  padding: 7px;
+
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: center;
+
+  gap: 5px;
+
+  border: 1px solid
+    rgba(79, 180, 239, 0.16);
+
+  border-radius: 11px;
+
+  background:
+    rgba(255, 255, 255, 0.025);
+}
+
+.player-qr-panel.red {
+  border-color:
+    rgba(255, 80, 112, 0.17);
+}
+
+.qr-frame {
+  width: 102px;
+  height: 102px;
+
+  padding: 5px;
+
+  display: grid;
+
+  place-items: center;
+
+  overflow: hidden;
+
+  border-radius: 8px;
+
+  background: #ffffff;
+
+  box-shadow:
+    0 8px 20px
+    rgba(0, 0, 0, 0.22);
+}
+
+.qr-frame img {
+  width: 100%;
+  height: 100%;
+
+  display: block;
+
+  object-fit: contain;
+
+  image-rendering: pixelated;
+}
+
+.player-qr-panel > span {
+  color: #74d8ff;
+
+  font-size: 6px;
+
+  font-weight: 950;
+
+  letter-spacing: 0.12em;
+
+  text-align: center;
+}
+
+.player-qr-panel.red > span {
+  color: #ff9bad;
+}
+
+.qr-error-box {
+  padding: 11px 13px;
+
+  border: 1px solid
+    rgba(255, 101, 125, 0.18);
+
+  border-radius: 9px;
+
+  color: #ff9bad;
+
+  background:
+    rgba(255, 49, 82, 0.055);
+
+  font-size: 8px;
+
+  font-weight: 800;
+}
+
 .link-actions {
   display: flex;
 
@@ -3950,9 +4145,34 @@ select {
       column;
   }
 
-  .battle-link-card {
+  .battle-link-card,
+  .battle-link-card.with-qr {
     grid-template-columns:
       auto minmax(0, 1fr);
+  }
+
+  .player-qr-panel {
+    grid-column:
+      1 / -1;
+
+    width: 100%;
+
+    flex-direction: row;
+
+    justify-content: flex-start;
+
+    gap: 12px;
+  }
+
+  .qr-frame {
+    width: 112px;
+    height: 112px;
+
+    flex: 0 0 auto;
+  }
+
+  .player-qr-panel > span {
+    font-size: 7px;
   }
 
   .link-actions {

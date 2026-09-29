@@ -1549,6 +1549,18 @@ const submitFusion = async () => {
         p_card_id: null,
         p_payload: {
           recipe_id: recipe.recipe_id,
+
+          // Phase 3D.15 - idempotency key.
+          // Double-click atau retry network untuk attempt Fusion yang sama
+          // akan mengirim key logis yang sama ke backend.
+          request_id: [
+            "fusion",
+            battle.value?.id ?? code.value,
+            player.value,
+            recipe.recipe_id,
+            `use-${Math.max(1, Number(recipe?.usage_count ?? 0) + 1)}`,
+            `round-${Math.max(0, Number(battle.value?.round ?? 0))}`,
+          ].join(":"),
         },
       },
     );
