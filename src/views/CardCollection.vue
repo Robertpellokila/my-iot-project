@@ -3,6 +3,7 @@ import {
   ref,
   computed,
   onMounted,
+  watch,
 } from "vue";
 
 import {
@@ -15,6 +16,12 @@ import {
 // =========================================================
 
 const cards =
+  ref([]);
+
+const specialSkills =
+  ref([]);
+
+const cardSkillLinks =
   ref([]);
 
 const loading =
@@ -31,6 +38,9 @@ const selectedElement =
 
 const selectedCard =
   ref(null);
+
+const currentPage = ref(1);
+const pageSize = 12;
 
 
 // =========================================================
@@ -64,35 +74,26 @@ const loadCards =
 
     try {
 
-      const {
-        data,
-        error,
-      } =
-        await supabase
-          .from(
-            "game_cards"
-          )
+      const [cardResult, skillResult, linkResult] = await Promise.all([
+        supabase
+          .from("game_cards")
           .select("*")
-          .order(
-            "name",
-            {
-              ascending:
-                true,
-            }
-          );
+          .order("name", { ascending: true }),
+        supabase
+          .from("special_skills")
+          .select("id, name, description, icon, is_active, metadata")
+          .order("name"),
+        supabase
+          .from("game_card_special_skills")
+          .select("game_card_id, special_skill_id, sort_order, enabled")
+          .eq("enabled", true)
+          .order("sort_order"),
+      ]);
 
-
-      if (
-        error
-      ) {
-
-        throw error;
-
-      }
-
-
-      cards.value =
-        data ?? [];
+      if (cardResult.error) throw cardResult.error;
+      cards.value = cardResult.data ?? [];
+      specialSkills.value = skillResult.error ? [] : (skillResult.data ?? []);
+      cardSkillLinks.value = linkResult.error ? [] : (linkResult.data ?? []);
 
     }
 
@@ -126,6 +127,11 @@ const loadCards =
 // FILTERED CARDS
 // =========================================================
 
+const cardSkillCount = (card) => Math.max(
+  Array.isArray(card?.metadata?.skills) ? card.metadata.skills.length : 0,
+  cardSkillLinks.value.filter((link) => String(link.game_card_id) === String(card?.id) && link.enabled !== false).length,
+);
+
 const filteredCards =
   computed(
     () => {
@@ -136,7 +142,7 @@ const filteredCards =
           .toLowerCase();
 
 
-      return cards.value.filter(
+      const matches = cards.value.filter(
         card => {
 
           const matchesSearch =
@@ -183,8 +189,25 @@ const filteredCards =
         }
       );
 
+      // Album pages represent card names, while repeated RFID registrations
+      // remain available through the detail record count.
+      const uniqueByName = new Map();
+      for (const card of matches) {
+        const key = String(card.name ?? "").trim().toLocaleLowerCase();
+        const previous = uniqueByName.get(key);
+        if (!previous || cardSkillCount(card) > cardSkillCount(previous)) uniqueByName.set(key, card);
+      }
+      return [...uniqueByName.values()];
+
     }
   );
+
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredCards.value.length / pageSize)));
+const pagedCards = computed(() => filteredCards.value.slice((currentPage.value - 1) * pageSize, currentPage.value * pageSize));
+const setPage = (page) => { currentPage.value = Math.min(totalPages.value, Math.max(1, page)); };
+
+watch([search, selectedElement], () => { currentPage.value = 1; });
+watch(totalPages, (pages) => { if (currentPage.value > pages) currentPage.value = pages; });
 
 
 // =========================================================
@@ -193,8 +216,7 @@ const filteredCards =
 
 const totalCards =
   computed(
-    () =>
-      cards.value.length
+    () => new Set(cards.value.map((card) => String(card.name ?? "").trim().toLocaleLowerCase())).size
   );
 
 
@@ -206,12 +228,12 @@ const elementCount =
       "All"
     ) {
 
-      return cards.value.length;
+      return totalCards.value;
 
     }
 
 
-    return cards.value.filter(
+    const matching = cards.value.filter(
       card =>
         String(
           card.element ??
@@ -222,7 +244,8 @@ const elementCount =
           element
         )
           .toLowerCase()
-    ).length;
+    );
+    return new Set(matching.map((card) => String(card.name ?? "").trim().toLocaleLowerCase())).size;
 
   };
 
@@ -239,7 +262,7 @@ const emptySlots =
     () => {
 
       const count =
-        filteredCards.value
+        pagedCards.value
           .length;
 
 
@@ -407,6 +430,32 @@ const openCard =
       card;
 
   };
+
+const skillsForCard = card => {
+  const linked = cardSkillLinks.value
+    .filter(link => String(link.game_card_id) === String(card?.id))
+    .map(link => {
+      const skill = specialSkills.value.find(item => String(item.id) === String(link.special_skill_id));
+      return skill ? { ...skill, sort_order: link.sort_order } : null;
+    })
+    .filter(Boolean);
+  const catalog = Array.isArray(card?.metadata?.skills)
+    ? card.metadata.skills.map((skill, index) => ({
+        ...skill,
+        id: `${card.id}-metadata-skill-${skill.slot ?? index + 1}`,
+        description: skill.description ?? skill.effect ?? "",
+        metadata: {
+          ...skill.metadata,
+          catalog_only: skill.metadata?.catalog_only ?? card.metadata?.seed_version === "2.2-learning-arcs-fusion",
+        },
+      }))
+    : [];
+  const linkedKeys = new Set(linked.map(skill => `${String(skill.name).trim().toLocaleLowerCase()}|${String(skill.description ?? "").trim().toLocaleLowerCase()}`));
+  return [
+    ...linked,
+    ...catalog.filter(skill => !linkedKeys.has(`${String(skill.name).trim().toLocaleLowerCase()}|${String(skill.description ?? "").trim().toLocaleLowerCase()}`)),
+  ].sort((a, b) => Number(a.sort_order ?? a.slot ?? 0) - Number(b.sort_order ?? b.slot ?? 0));
+};
 
 
 const closeCard =
@@ -701,7 +750,7 @@ onMounted(
         <!-- CARD -->
 
         <article
-          v-for="card in filteredCards"
+          v-for="(card, pageIndex) in pagedCards"
           :key="card.id"
           class="album-slot collected"
           @click="
@@ -843,6 +892,18 @@ onMounted(
             </div>
 
 
+            <div v-if="skillsForCard(card).length" class="card-skill-preview">
+              <span>SKILL</span>
+              <small
+                v-for="(skill, skillIndex) in skillsForCard(card).slice(0, 2)"
+                :key="skill.id || skillIndex"
+                :title="skill.description || skill.effect || skill.name"
+              >
+                ✦ {{ skill.name }}
+              </small>
+            </div>
+
+
             <!-- UID -->
 
             <footer>
@@ -867,7 +928,7 @@ onMounted(
           <span class="slot-number">
 
             #{{ String(
-              filteredCards.indexOf(card) + 1
+              (currentPage - 1) * pageSize + pageIndex + 1
             ).padStart(
               3,
               "0"
@@ -904,6 +965,12 @@ onMounted(
         </article>
 
       </div>
+
+      <nav v-if="totalPages > 1" class="album-pagination" aria-label="Navigasi halaman album">
+        <button type="button" :disabled="currentPage === 1" @click="setPage(currentPage - 1)">‹ Sebelumnya</button>
+        <span>Halaman <strong>{{ currentPage }}</strong> / {{ totalPages }}</span>
+        <button type="button" :disabled="currentPage === totalPages" @click="setPage(currentPage + 1)">Berikutnya ›</button>
+      </nav>
 
     </section>
 
@@ -1123,6 +1190,21 @@ onMounted(
               </div>
 
             </div>
+
+
+            <section v-if="skillsForCard(selectedCard).length" class="card-skill-details">
+
+              <span class="eyebrow">CARD SKILLS</span>
+
+              <article v-for="(skill, index) in skillsForCard(selectedCard)" :key="skill.id || index">
+                <div>
+                  <strong>{{ skill.icon || "✦" }} {{ skill.name }}</strong>
+                  <small v-if="skill.metadata?.catalog_only">BELUM AKTIF DI BATTLE</small>
+                </div>
+                <p>{{ skill.description || skill.effect }}</p>
+              </article>
+
+            </section>
 
 
             <div class="detail-row">
@@ -2059,6 +2141,26 @@ input {
     22px;
 }
 
+.album-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 22px 8px 4px;
+  color: #91abc0;
+  font-size: 12px;
+}
+.album-pagination button {
+  border: 1px solid rgba(91, 190, 255, .28);
+  border-radius: 10px;
+  padding: 10px 14px;
+  color: #bceaff;
+  background: rgba(29, 111, 171, .12);
+  cursor: pointer;
+}
+.album-pagination button:disabled { opacity: .4; cursor: default; }
+.album-pagination strong { color: #fff; }
+
 
 .album-slot {
   min-width:
@@ -2464,6 +2566,35 @@ input {
   font-size:
     15px;
 }
+
+
+.card-skill-preview {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+}
+
+.card-skill-preview > span {
+  color: rgba(21, 35, 51, .58);
+  font-size: 6px;
+  font-weight: 900;
+  letter-spacing: .1em;
+}
+
+.card-skill-preview small {
+  overflow: hidden;
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .48);
+  color: #173b23;
+  font-size: 8px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.album-card.dark .card-skill-preview > span { color: #c6d1dc; }
+.album-card.dark .card-skill-preview small { background: rgba(255, 255, 255, .14); color: #f4f7fa; }
 
 
 .album-card > footer {
@@ -3057,6 +3188,54 @@ input {
 
   font-size:
     23px;
+}
+
+
+.card-skill-details {
+  display: grid;
+  gap: 9px;
+  margin: 0 0 18px;
+}
+
+.card-skill-details > .eyebrow {
+  color: #72bf77;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.card-skill-details article {
+  padding: 11px 13px;
+  border: 1px solid rgba(107, 188, 116, 0.23);
+  border-radius: 10px;
+  background: rgba(21, 49, 37, 0.72);
+}
+
+.card-skill-details article > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+
+.card-skill-details strong {
+  color: #f3fff2;
+  font-size: 12px;
+}
+
+.card-skill-details small {
+  color: #f0d98c;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
+.card-skill-details p {
+  margin: 6px 0 0;
+  color: #c2d7c4;
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 

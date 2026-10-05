@@ -1,4 +1,6 @@
 <script setup>
+import SearchableSelect from "../components/SearchableSelect.vue";
+import AdminTable from "../components/AdminTable.vue";
 import {
   computed,
   onMounted,
@@ -247,7 +249,7 @@ onMounted(loadRfids);
         </div>
 
 
-        <select
+        <SearchableSelect
           v-model="selectedType"
           class="filter-select"
         >
@@ -272,14 +274,15 @@ onMounted(loadRfids);
             Other
           </option>
 
-        </select>
+        </SearchableSelect>
 
       </div>
 
 
       <div class="table-wrapper">
 
-        <table class="data-table">
+        <AdminTable>
+          <table class="data-table">
 
           <thead>
 
@@ -452,6 +455,7 @@ onMounted(loadRfids);
           </tbody>
 
         </table>
+          </AdminTable>
 
       </div>
 

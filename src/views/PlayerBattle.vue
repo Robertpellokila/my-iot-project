@@ -10,6 +10,8 @@ import { useBattleSession } from "../composables/battle/useBattleSession";
 import { useBattleUiSync } from "../composables/battle/useBattleUiSync";
 
 import BattleZoneStack from "../components/battle/BattleZoneStack.vue";
+import CardStatusVfx from "../components/battle/CardStatusVfx.vue";
+import { normalizeBattleStatusKey } from "../composables/battle/elementalStatus.js";
 
 // =========================================================
 // ROUTE
@@ -63,6 +65,20 @@ const {
 
   loadBattle,
 } = useBattleSession();
+
+// =========================================================
+// LOADING UX
+// Full-screen loader hanya untuk initial connection.
+// Refresh setelah action (Fusion/Special Skill/etc.) tetap menjaga arena terlihat.
+// =========================================================
+
+const initialBattleLoading = computed(() =>
+  Boolean(loading.value && !battle.value),
+);
+
+const battleRefreshing = computed(() =>
+  Boolean(loading.value && battle.value),
+);
 
 // =========================================================
 // LOCAL
@@ -220,7 +236,8 @@ const activeDropOver = ref(false);
 let graveyardChannel = null;
 
 const getCardId = (card) =>
-  card?.battleId ?? card?.battle_id ?? card?.id ?? card?.uid ?? null;
+  card?.battleId ?? card?.battle_card_id ?? card?.battleCardId ??
+  card?.id ?? card?.battle_id ?? card?.uid ?? null;
 
 const normalizeBattleCard = (card) => ({
   ...card,
@@ -247,6 +264,58 @@ const normalizeBattleCard = (card) => ({
     card?.hp ??
     0,
 });
+
+// =========================================================
+// HP BAR HELPERS
+// =========================================================
+
+const getCardCurrentHp = (card) =>
+  Math.max(
+    0,
+    Number(
+      card?.current_hp ??
+      card?.currentHp ??
+      card?.hp ??
+      0,
+    ) || 0,
+  );
+
+const getCardMaxHp = (card) =>
+  Math.max(
+    1,
+    Number(
+      card?.base_hp ??
+      card?.baseHp ??
+      card?.hp ??
+      1,
+    ) || 1,
+  );
+
+const getCardHpPercent = (card) =>
+  Math.max(
+    0,
+    Math.min(
+      100,
+      (getCardCurrentHp(card) / getCardMaxHp(card)) * 100,
+    ),
+  );
+
+const getHpStateClass = (percent) => {
+  const value = Math.max(0, Math.min(100, Number(percent) || 0));
+
+  if (value <= 25) {
+    return "critical";
+  }
+
+  if (value <= 55) {
+    return "warning";
+  }
+
+  return "healthy";
+};
+
+const getCardHpState = (card) =>
+  getHpStateClass(getCardHpPercent(card));
 
 // =========================================================
 // LIVE PUBLIC UI SYNC
@@ -343,6 +412,441 @@ const warningToast = (title, message = "") => {
 
 const errorToast = (title, message = "") => {
   showToast("error", title, message);
+};
+
+// =========================================================
+// PLAYER BATTLE SOUND SYSTEM
+// =========================================================
+
+const SOUND_FILES = {
+  attack: "/sounds/attack.mp3",
+  hit: "/sounds/hit.mp3",
+  defense: "/sounds/defense.mp3",
+  heal: "/sounds/heal.mp3",
+  ultimate: "/sounds/ultimate.mp3",
+  synergy: "/sounds/synergy.mp3",
+  fusion: "/sounds/synergy.mp3",
+  summon: "/sounds/summon.mp3",
+  bench: "/sounds/bench.mp3",
+  swap: "/sounds/swap.mp3",
+  warning: "/sounds/warning.mp3",
+  question: "/sounds/question.mp3",
+  correct: "/sounds/correct.mp3",
+  wrong: "/sounds/wrong.mp3",
+  win: "/sounds/win.mp3",
+  lose: "/sounds/lose.mp3",
+};
+
+const soundEnabled = ref(true);
+const audioUnlocked = ref(false);
+const audioCache = new Map();
+const soundTimers = new Set();
+const processedSoundEventIds = new Set();
+
+const getAudio = (name) => {
+  if (typeof Audio === "undefined") {
+    return null;
+  }
+
+  const src = SOUND_FILES[name];
+
+  if (!src) {
+    return null;
+  }
+
+  if (!audioCache.has(name)) {
+    const audio = new Audio(src);
+    audio.preload = "auto";
+    audio.playsInline = true;
+    audioCache.set(name, audio);
+  }
+
+  return audioCache.get(name);
+};
+
+const preloadBattleSounds = () => {
+  Object.keys(SOUND_FILES).forEach((name) => {
+    const audio = getAudio(name);
+
+    try {
+      audio?.load?.();
+    } catch {
+      // preload is best effort only
+    }
+  });
+};
+
+const unlockAudio = async () => {
+  if (audioUnlocked.value) {
+    return true;
+  }
+
+  const probe = getAudio("question") ?? getAudio("attack");
+
+  if (!probe) {
+    audioUnlocked.value = true;
+    return true;
+  }
+
+  try {
+    const previousVolume = probe.volume;
+    probe.volume = 0;
+    probe.currentTime = 0;
+
+    const playResult = probe.play();
+
+    if (playResult && typeof playResult.then === "function") {
+      await playResult;
+    }
+
+    probe.pause();
+    probe.currentTime = 0;
+    probe.volume = previousVolume || 1;
+
+    audioUnlocked.value = true;
+    return true;
+  } catch (audioError) {
+    console.debug("Audio masih dikunci browser:", audioError);
+    return false;
+  }
+};
+
+const playSound = async (name, volume = 0.78) => {
+  if (!soundEnabled.value) {
+    return false;
+  }
+
+  if (!audioUnlocked.value) {
+    return false;
+  }
+
+  const audio = getAudio(name);
+
+  if (!audio) {
+    return false;
+  }
+
+  try {
+    audio.pause();
+    audio.currentTime = 0;
+    audio.volume = Math.max(0, Math.min(1, Number(volume) || 0.78));
+
+    const result = audio.play();
+
+    if (result && typeof result.then === "function") {
+      await result;
+    }
+
+    return true;
+  } catch (audioError) {
+    console.debug(`Sound ${name} gagal diputar:`, audioError);
+    return false;
+  }
+};
+
+const scheduleSound = (name, delay = 0, volume = 0.78) => {
+  const timer = setTimeout(() => {
+    soundTimers.delete(timer);
+    void playSound(name, volume);
+  }, Math.max(0, Number(delay) || 0));
+
+  soundTimers.add(timer);
+  return timer;
+};
+
+const clearScheduledSounds = () => {
+  soundTimers.forEach((timer) => clearTimeout(timer));
+  soundTimers.clear();
+};
+
+const stopAllBattleSounds = () => {
+  clearScheduledSounds();
+
+  audioCache.forEach((audio) => {
+    try {
+      audio.pause();
+      audio.currentTime = 0;
+    } catch {
+      // ignore audio cleanup failures
+    }
+  });
+};
+
+const audioUnlockHandler = () => {
+  void unlockAudio();
+};
+
+const registerAudioUnlock = () => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.addEventListener("pointerdown", audioUnlockHandler, { passive: true });
+  window.addEventListener("touchstart", audioUnlockHandler, { passive: true });
+  window.addEventListener("keydown", audioUnlockHandler);
+};
+
+const unregisterAudioUnlock = () => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.removeEventListener("pointerdown", audioUnlockHandler);
+  window.removeEventListener("touchstart", audioUnlockHandler);
+  window.removeEventListener("keydown", audioUnlockHandler);
+};
+
+const toggleBattleSound = async () => {
+  soundEnabled.value = !soundEnabled.value;
+
+  if (!soundEnabled.value) {
+    stopAllBattleSounds();
+    return;
+  }
+
+  const unlocked = await unlockAudio();
+
+  if (unlocked) {
+    void playSound("question", 0.28);
+  }
+};
+
+const battleSoundLabel = computed(() => {
+  if (!soundEnabled.value) {
+    return "SOUND OFF";
+  }
+
+  return audioUnlocked.value ? "SOUND ON" : "TAP FOR SOUND";
+});
+
+const soundEventKey = (event) =>
+  String(
+    event?.id ??
+      `${event?.type ?? "event"}:${event?.created_at ?? ""}:${event?.source_player ?? ""}:${event?.card_id ?? ""}`,
+  );
+
+const rememberSoundEvent = (event) => {
+  const key = soundEventKey(event);
+
+  if (processedSoundEventIds.has(key)) {
+    return false;
+  }
+
+  processedSoundEventIds.add(key);
+
+  if (processedSoundEventIds.size > 300) {
+    const oldest = processedSoundEventIds.values().next().value;
+    processedSoundEventIds.delete(oldest);
+  }
+
+  return true;
+};
+
+const handleBattleSoundEvent = (event) => {
+  if (!event || !rememberSoundEvent(event)) {
+    return;
+  }
+
+  const type = String(event.type ?? "").toLowerCase();
+  const payload =
+    event.payload && typeof event.payload === "object"
+      ? event.payload
+      : {};
+
+  const targetsCurrentPlayer =
+    String(event.target_player ?? payload.target_player ?? "").toLowerCase() ===
+    player.value;
+
+  switch (type) {
+    case "attack": {
+      void playSound("attack", 0.82);
+      scheduleSound("hit", 260, targetsCurrentPlayer ? 0.92 : 0.72);
+      break;
+    }
+
+    case "defense":
+      void playSound("defense", 0.72);
+      break;
+
+    case "ultimate": {
+      void playSound("ultimate", 0.95);
+
+      const targetCount = Math.max(
+        1,
+        Number(payload?.target_count ?? 1) || 1,
+      );
+
+      const hitBursts = Math.min(targetCount, 4);
+
+      for (let index = 0; index < hitBursts; index += 1) {
+        scheduleSound(
+          "hit",
+          300 + index * 125,
+          Math.max(0.58, 0.9 - index * 0.07),
+        );
+      }
+
+      break;
+    }
+
+    case "heal":
+      void playSound("heal", 0.72);
+      break;
+
+    case "synergy":
+      void playSound("synergy", 0.82);
+      break;
+
+    case "special_skill": {
+      const effects = Array.isArray(payload.effects) ? payload.effects : [];
+      const hasDamage = effects.some((effect) =>
+        String(effect?.type ?? "").toLowerCase().includes("damage"),
+      );
+
+      void playSound(hasDamage ? "ultimate" : "synergy", hasDamage ? 0.88 : 0.76);
+
+      if (hasDamage) {
+        scheduleSound("hit", 330, 0.82);
+      }
+      break;
+    }
+
+    case "fusion":
+      void playSound("fusion", 0.9);
+      break;
+
+    case "summon":
+      void playSound("summon", 0.78);
+      break;
+
+    case "bench":
+      void playSound("bench", 0.6);
+      break;
+
+    case "swap":
+      void playSound("swap", 0.68);
+      break;
+
+    case "card_destroyed":
+      scheduleSound("warning", 180, 0.62);
+      break;
+
+    case "graveyard":
+      void playSound("warning", 0.48);
+      break;
+
+    case "rfid_warning":
+      if (event.source_player === player.value) {
+        void playSound("warning", 0.64);
+      }
+      break;
+
+    case "win":
+      if (String(event.source_player ?? "").toLowerCase() === player.value) {
+        void playSound("win", 0.95);
+      } else {
+        void playSound("lose", 0.88);
+      }
+      break;
+
+    case "special_effect": {
+      const effectType = String(payload?.effect_type ?? "").toLowerCase();
+
+      if (effectType === "revive") {
+        void playSound("summon", 0.78);
+      } else if (effectType === "move_zone" && payload?.result?.to_zone === "graveyard") {
+        void playSound("warning", 0.44);
+      }
+      break;
+    }
+
+    default:
+      break;
+  }
+};
+
+// =========================================================
+// PHASE 3C.1 • NECRO SOUL REBIRTH CINEMATIC
+// =========================================================
+
+const necroRebirthCinematic = ref({
+  show: false,
+  phase: "idle",
+  source: null,
+  target: null,
+});
+
+let necroRebirthTimers = [];
+
+const clearNecroRebirthTimers = () => {
+  necroRebirthTimers.forEach((timer) => clearTimeout(timer));
+  necroRebirthTimers = [];
+};
+
+const necroCardImage = (card) =>
+  card?.image_url ?? card?.avatar_url ?? card?.image ?? "";
+
+const necroRestoredHp = (card) =>
+  Math.max(
+    1,
+    Math.round(
+      (Number(card?.base_hp ?? card?.baseHp ?? card?.hp ?? 1) || 1) * 0.5,
+    ),
+  );
+
+const startNecroRebirthCinematic = ({ source, target } = {}) => {
+  if (!source || !target) {
+    return;
+  }
+
+  clearNecroRebirthTimers();
+
+  necroRebirthCinematic.value = {
+    show: true,
+    phase: "sacrifice",
+    source: { ...source },
+    target: { ...target },
+  };
+
+  void playSound("warning", 0.48);
+  vibrateDevice([45, 35, 65]);
+
+  necroRebirthTimers.push(
+    setTimeout(() => {
+      if (!necroRebirthCinematic.value.show) return;
+      necroRebirthCinematic.value.phase = "soul";
+      void playSound("synergy", 0.72);
+    }, 620),
+  );
+
+  necroRebirthTimers.push(
+    setTimeout(() => {
+      if (!necroRebirthCinematic.value.show) return;
+      necroRebirthCinematic.value.phase = "revive";
+      void playSound("summon", 0.86);
+      vibrateDevice([55, 35, 80, 35, 110]);
+    }, 1320),
+  );
+
+  necroRebirthTimers.push(
+    setTimeout(() => {
+      if (!necroRebirthCinematic.value.show) return;
+      necroRebirthCinematic.value.phase = "result";
+      void playSound("heal", 0.62);
+    }, 2050),
+  );
+
+  necroRebirthTimers.push(
+    setTimeout(() => {
+      necroRebirthCinematic.value = {
+        show: false,
+        phase: "idle",
+        source: null,
+        target: null,
+      };
+      necroRebirthTimers = [];
+    }, 3300),
+  );
 };
 
 // =========================================================
@@ -588,6 +1092,15 @@ const questionResult =
 const questionReward =
   ref(null);
 
+const questionRewardChoices =
+  ref([]);
+
+const bonusChoiceRoundId =
+  ref(null);
+
+const bonusChoiceSubmitting =
+  ref(false);
+
 // =========================================================
 // BONUS SKILL
 // =========================================================
@@ -668,6 +1181,801 @@ const enemyActiveCards =
       ? player2Active.value
       : player1Active.value,
   );
+
+
+// =========================================================
+// PHASE 3D.18 • STATUS EFFECT UI
+// Generic battle_status_effects + legacy combat/session flags.
+// =========================================================
+
+const activeStatusEffects = ref([]);
+const statusEffectsLoading = ref(false);
+let firePassiveStatusPoll = null;
+
+const STATUS_REFRESH_EVENT_TYPES = new Set([
+  "attack",
+  "card_destroyed",
+  "damage",
+  "defense",
+  "heal",
+  "ultimate",
+  "synergy",
+  "special_effect",
+  "special_skill",
+  "fusion",
+  "summon",
+  "graveyard",
+  "bench",
+  "swap",
+  "bonus_skill_used",
+  "question_winner",
+  "status_tick",
+  "status_expired",
+  "status_applied",
+  "status_removed",
+  "status_refreshed",
+]);
+
+const STATUS_VISUALS = {
+  defense: { icon: "🛡", label: "DEFENSE", tone: "defense" },
+  water_shield: { icon: "💧", label: "SHIELD", tone: "water" },
+  synergy_shield: { icon: "💧", label: "SHIELD", tone: "water" },
+  shield: { icon: "💧", label: "SHIELD", tone: "water" },
+  attack_debuff: { icon: "❄", label: "ATK DOWN", tone: "debuff" },
+  power_strike: { icon: "⚡", label: "POWER STRIKE", tone: "power" },
+  power_strike_ready: { icon: "⚡", label: "POWER STRIKE", tone: "power" },
+  burn: { icon: "🔥", label: "BURN", tone: "burn" },
+  elemental_burn: { icon: "🔥", label: "FIRE BURN", tone: "burn" },
+  freeze: { icon: "🧊", label: "FREEZE", tone: "freeze" },
+  frozen: { icon: "🧊", label: "FREEZE", tone: "freeze" },
+  regen: { icon: "💚", label: "REGEN", tone: "regen" },
+  regeneration: { icon: "💚", label: "REGEN", tone: "regen" },
+  silence: { icon: "🔒", label: "SILENCE", tone: "silence" },
+  stun: { icon: "💫", label: "STUN", tone: "stun" },
+  poison: { icon: "☠", label: "POISON", tone: "poison" },
+  curse: { icon: "🌑", label: "CURSE", tone: "curse" },
+  bleed: { icon: "🩸", label: "BLEED", tone: "bleed" },
+  invincible: { icon: "✨", label: "INVINCIBLE", tone: "buff" },
+  invulnerability: { icon: "✨", label: "INVINCIBLE", tone: "buff" },
+  cooldown: { icon: "⏳", label: "COOLDOWN", tone: "cooldown" },
+  necro_identity: { icon: "☠", label: "NECRO", tone: "necro" },
+  fusion_identity: { icon: "🧬", label: "FUSION", tone: "fusion" },
+};
+
+const normalizeStatusKey = normalizeBattleStatusKey;
+
+const statusMetadata = (effect) =>
+  effect?.metadata && typeof effect.metadata === "object"
+    ? effect.metadata
+    : {};
+
+const statusVisual = (effect) => {
+  const key = normalizeStatusKey(effect);
+  const meta = statusMetadata(effect);
+  const fallbackLabel = key.replaceAll("_", " ").toUpperCase();
+
+  return {
+    key,
+    icon: String(meta.icon ?? STATUS_VISUALS[key]?.icon ?? "✦"),
+    label: String(meta.label ?? meta.name ?? STATUS_VISUALS[key]?.label ?? fallbackLabel),
+    tone: String(meta.tone ?? STATUS_VISUALS[key]?.tone ?? (effect?.value < 0 ? "debuff" : "buff")),
+  };
+};
+
+const statusPercent = (value) => {
+  const numeric = Number(value ?? 0) || 0;
+  const percent = Math.abs(numeric) <= 1 ? numeric * 100 : numeric;
+  return Math.round(Math.abs(percent));
+};
+
+const statusValueText = (effect) => {
+  const key = normalizeStatusKey(effect);
+  const value = Number(effect?.value ?? 0) || 0;
+  const stacks = Math.max(1, Number(effect?.stacks ?? 1) || 1);
+  const percentKeys = new Set([
+    "defense",
+    "water_shield",
+    "synergy_shield",
+    "shield",
+    "attack_debuff",
+    "power_strike",
+    "power_strike_ready",
+  ]);
+
+  const parts = [];
+  if (percentKeys.has(key) && value !== 0) {
+    parts.push(`${statusPercent(value)}%`);
+  } else if (value !== 0) {
+    parts.push(`${Math.abs(value)}`);
+  }
+
+  if (stacks > 1) {
+    parts.push(`×${stacks}`);
+  }
+
+  return parts.join(" ");
+};
+
+const statusDurationText = (effect) => {
+  const turns = Number(effect?.remaining_turns ?? 0) || 0;
+  const rounds = Number(effect?.remaining_rounds ?? 0) || 0;
+
+  if (turns > 0) return `${turns}T`;
+  if (rounds > 0) return `${rounds}R`;
+  return "";
+};
+
+const enrichStatus = (effect) => ({
+  ...effect,
+  ...statusVisual(effect),
+  valueText: statusValueText(effect),
+  durationText: statusDurationText(effect),
+});
+
+const dedupeStatuses = (items) => {
+  const map = new Map();
+
+  for (const item of items.map(enrichStatus)) {
+    const key = `${item.key}:${item.target_card_id ?? "player"}`;
+    const current = map.get(key);
+
+    if (!current || (!current.valueText && item.valueText)) {
+      map.set(key, item);
+    }
+  }
+
+  return [...map.values()];
+};
+
+const loadStatusEffects = async () => {
+  if (!battle.value?.id) {
+    activeStatusEffects.value = [];
+    return;
+  }
+
+  statusEffectsLoading.value = true;
+
+  try {
+    const { data, error: statusError } = await supabase.rpc(
+      "get_active_battle_status_effects",
+      { p_battle_id: battle.value.id },
+    );
+
+    if (statusError) {
+      throw statusError;
+    }
+
+    activeStatusEffects.value = Array.isArray(data) ? data : [];
+  } catch (statusError) {
+    console.error("Load status effects:", statusError);
+    activeStatusEffects.value = [];
+  } finally {
+    statusEffectsLoading.value = false;
+  }
+};
+
+const legacyPlayerStatuses = (playerKey) => {
+  if (!battle.value) return [];
+
+  const isP1 = playerKey === "p1";
+  const statuses = [];
+  const defending = Boolean(
+    isP1 ? battle.value.player1_defending : battle.value.player2_defending,
+  );
+  const shield = Number(
+    isP1 ? battle.value.player1_synergy_shield : battle.value.player2_synergy_shield,
+  ) || 0;
+  const debuff = Number(
+    isP1 ? battle.value.player1_attack_debuff : battle.value.player2_attack_debuff,
+  ) || 0;
+  const power = Boolean(
+    isP1 ? battle.value.player1_power_strike_ready : battle.value.player2_power_strike_ready,
+  );
+
+  if (defending) {
+    statuses.push({ status_key: "defense", value: 0.5, target_player: playerKey, scope: "player" });
+  }
+  if (shield > 0) {
+    statuses.push({ status_key: "water_shield", value: shield, target_player: playerKey, scope: "player" });
+  }
+  if (debuff > 0) {
+    statuses.push({ status_key: "attack_debuff", value: debuff, target_player: playerKey, scope: "player" });
+  }
+  if (power) {
+    statuses.push({ status_key: "power_strike_ready", value: 0.5, target_player: playerKey, scope: "player" });
+  }
+
+  return statuses;
+};
+
+const getPlayerStatusEffects = (playerKey) =>
+  dedupeStatuses([
+    ...legacyPlayerStatuses(playerKey),
+    ...activeStatusEffects.value.filter(
+      (effect) =>
+        String(effect?.target_player ?? "").toLowerCase() === playerKey &&
+        !effect?.target_card_id,
+    ),
+  ]);
+
+const ownStatusEffects = computed(() => getPlayerStatusEffects(player.value));
+const enemyStatusEffects = computed(() =>
+  getPlayerStatusEffects(player.value === "p1" ? "p2" : "p1"),
+);
+
+const cardHasNecroIdentity = (card) => {
+  const tags = Array.isArray(card?.tags) ? card.tags : [];
+  return tags.some((tag) => String(tag).toLowerCase() === "necro") ||
+    String(card?.element ?? "").toLowerCase() === "necro";
+};
+
+const cardHasFusionIdentity = (card) =>
+  Boolean(card?.is_fusion_result) ||
+  String(card?.origin_type ?? "").toLowerCase() === "fusion" ||
+  String(card?.card_type ?? "").toLowerCase() === "fusion";
+
+const getCardStatusEffects = (card) => {
+  const id = getCardId(card);
+  if (!id) return [];
+
+  const items = activeStatusEffects.value.filter(
+    (effect) => String(effect?.target_card_id ?? "") === String(id),
+  );
+
+  if (cardHasNecroIdentity(card)) {
+    items.unshift({
+      status_key: "necro_identity",
+      metadata: { icon: "☠", label: "NECRO", tone: "necro" },
+      target_card_id: id,
+    });
+  }
+
+  if (cardHasFusionIdentity(card)) {
+    items.unshift({
+      status_key: "fusion_identity",
+      metadata: { icon: "🧬", label: "FUSION", tone: "fusion" },
+      target_card_id: id,
+    });
+  }
+
+  // Bubble temporary Burn above identity statuses in the 3-chip card UI.
+  return dedupeStatuses(items).sort((a, b) =>
+    Number(b.key === "elemental_burn" || b.key === "burn") -
+    Number(a.key === "elemental_burn" || a.key === "burn")
+  );
+};
+
+const getCardFxFlags = (card) => {
+  const keys = new Set(getCardStatusEffects(card).map((status) => status.key));
+  const ownShield = Number(player.value === "p1"
+    ? battle.value?.player1_synergy_shield
+    : battle.value?.player2_synergy_shield) > 0;
+
+  return {
+    defense: keys.has("defense"),
+    shield: keys.has("shield") || keys.has("water_shield") || keys.has("synergy_shield") || ownShield,
+    necro: keys.has("necro_identity"),
+    fusion: keys.has("fusion_identity"),
+    burn: keys.has("burn") || keys.has("elemental_burn"),
+    freeze: keys.has("freeze") || keys.has("frozen"),
+    poison: keys.has("poison"),
+    stun: keys.has("stun"),
+    curse: keys.has("curse"),
+  };
+};
+
+const visualOnlyCardStatuses = new Set([
+  "burn", "elemental_burn", "freeze", "frozen", "stun", "poison", "curse",
+  "shield", "water_shield", "synergy_shield", "defense",
+]);
+
+const visibleCardStatuses = (card) =>
+  getCardStatusEffects(card).filter((status) => !visualOnlyCardStatuses.has(status.key));
+
+const statusTooltip = (status) => {
+  const value = status.valueText ? ` • ${status.valueText}` : "";
+  const duration = status.durationText ? ` • ${status.durationText}` : "";
+  return `${status.icon} ${status.label}${value}${duration}`;
+};
+
+// =========================================================
+// PLAYER INCOMING EVENT FEEDBACK
+// Toast + card shake + screen impact + device vibration.
+// Vibration API is best-effort and only runs on supported browsers/devices.
+// =========================================================
+
+const incomingReactionCardIds = ref([]);
+const incomingImpactActive = ref(false);
+const incomingImpactFlash = ref("");
+const deckReactionActive = ref(false);
+
+let incomingCardTimer = null;
+let incomingImpactTimer = null;
+let incomingFlashTimer = null;
+let deckReactionTimer = null;
+
+const processedIncomingEventIds = new Set();
+
+const canVibrateDevice = () =>
+  typeof navigator !== "undefined" &&
+  typeof navigator.vibrate === "function";
+
+const vibrateDevice = (pattern = 40) => {
+  if (!canVibrateDevice()) {
+    return false;
+  }
+
+  try {
+    return navigator.vibrate(pattern);
+  } catch (vibrationError) {
+    console.debug("Device vibration unavailable:", vibrationError);
+    return false;
+  }
+};
+
+const stopDeviceVibration = () => {
+  if (!canVibrateDevice()) {
+    return;
+  }
+
+  try {
+    navigator.vibrate(0);
+  } catch {
+    // best effort only
+  }
+};
+
+const clearReactionTimer = (timer) => {
+  if (timer) {
+    clearTimeout(timer);
+  }
+};
+
+const triggerDeckReaction = ({ vibrate = false } = {}) => {
+  clearReactionTimer(deckReactionTimer);
+  deckReactionActive.value = false;
+
+  requestAnimationFrame(() => {
+    deckReactionActive.value = true;
+  });
+
+  if (vibrate) {
+    vibrateDevice([25, 30, 25]);
+  }
+
+  deckReactionTimer = setTimeout(() => {
+    deckReactionActive.value = false;
+    deckReactionTimer = null;
+  }, 700);
+};
+
+const triggerIncomingReaction = ({
+  cardId = null,
+  cardIds = [],
+  strength = "medium",
+  flash = "damage",
+  deck = false,
+} = {}) => {
+  clearReactionTimer(incomingCardTimer);
+  clearReactionTimer(incomingImpactTimer);
+  clearReactionTimer(incomingFlashTimer);
+
+  const reactionIds = [
+    ...(Array.isArray(cardIds) ? cardIds : []),
+    cardId,
+  ]
+    .filter((value) => value != null && value !== "")
+    .map((value) => String(value));
+
+  incomingReactionCardIds.value = [...new Set(reactionIds)];
+
+  if (incomingReactionCardIds.value.length) {
+    incomingCardTimer = setTimeout(() => {
+      incomingReactionCardIds.value = [];
+      incomingCardTimer = null;
+    }, strength === "heavy" ? 900 : 700);
+  }
+
+  incomingImpactActive.value = false;
+  incomingImpactFlash.value = "";
+
+  requestAnimationFrame(() => {
+    incomingImpactActive.value = true;
+    incomingImpactFlash.value = flash;
+  });
+
+  incomingImpactTimer = setTimeout(() => {
+    incomingImpactActive.value = false;
+    incomingImpactTimer = null;
+  }, strength === "heavy" ? 620 : 440);
+
+  incomingFlashTimer = setTimeout(() => {
+    incomingImpactFlash.value = "";
+    incomingFlashTimer = null;
+  }, strength === "heavy" ? 720 : 520);
+
+  if (deck) {
+    triggerDeckReaction();
+  }
+
+  const pattern =
+    strength === "heavy"
+      ? [120, 55, 140, 55, 180]
+      : strength === "light"
+        ? [35]
+        : [70, 40, 95];
+
+  vibrateDevice(pattern);
+};
+
+const isIncomingReactionCard = (card) => {
+  const id = getCardId(card);
+
+  return (
+    id != null &&
+    incomingReactionCardIds.value.includes(String(id))
+  );
+};
+
+const findOwnCardById = (cardId) => {
+  if (!cardId) {
+    return null;
+  }
+
+  const allOwnCards = [
+    ...activeCards.value,
+    ...benchCards.value,
+    ...graveyardCards.value,
+  ];
+  const requestedId = String(cardId);
+  const exactBattleCard = allOwnCards.find((card) =>
+    [card?.battleId, card?.battle_card_id, card?.battleCardId]
+      .some((value) => value != null && String(value) === requestedId),
+  );
+  return exactBattleCard ?? null;
+};
+
+const battleEventPayload = (event) =>
+  event?.payload && typeof event.payload === "object"
+    ? event.payload
+    : {};
+
+const battleEventAffectedCardIds = (event) => {
+  const payload = battleEventPayload(event);
+  const ids = [];
+
+  if (Array.isArray(payload?.affected_card_ids)) {
+    ids.push(...payload.affected_card_ids);
+  }
+
+  if (Array.isArray(payload?.targets)) {
+    ids.push(
+      ...payload.targets.map((target) => target?.target_card_id),
+    );
+  }
+
+  ids.push(
+    payload?.target_card_id,
+  );
+
+  if (
+    [
+      "card_destroyed",
+      "graveyard",
+      "bench",
+      "swap",
+      "summon",
+    ].includes(String(event?.type ?? "").toLowerCase())
+  ) {
+    ids.push(event?.card_id);
+  }
+
+  return [...new Set(
+    ids
+      .filter((value) => value != null && value !== "")
+      .map((value) => String(value)),
+  )];
+};
+
+const incomingEventTargetCardId = (event) => {
+  const payload = battleEventPayload(event);
+  const candidates = [
+    payload?.target_card_id,
+    ...(Array.isArray(payload?.targets)
+      ? payload.targets.map((target) => target?.target_card_id)
+      : []),
+    ...(Array.isArray(payload?.affected_card_ids) ? payload.affected_card_ids : []),
+  ].filter((value) => value != null && value !== "");
+  return candidates.find((id) => findOwnCardById(id)) ?? null;
+};
+
+const incomingEventTargetsPlayer = (event) => {
+  const payload =
+    event?.payload && typeof event.payload === "object"
+      ? event.payload
+      : {};
+
+  const playerCandidates = [
+    event?.target_player,
+    payload?.target_player,
+    payload?.player,
+    payload?.owner,
+    payload?.card_player,
+    payload?.target_owner,
+  ]
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase());
+
+  if (playerCandidates.includes(player.value)) {
+    return true;
+  }
+
+  const targetCardIds = battleEventAffectedCardIds(event);
+
+  return targetCardIds.some((cardId) => Boolean(findOwnCardById(cardId)));
+};
+
+const incomingEventKey = (event) =>
+  String(
+    event?.id ??
+      `${event?.type ?? "event"}:${event?.created_at ?? ""}:${event?.source_player ?? ""}:${incomingEventTargetCardId(event) ?? ""}`,
+  );
+
+const rememberIncomingEvent = (event) => {
+  const key = incomingEventKey(event);
+
+  if (processedIncomingEventIds.has(key)) {
+    return false;
+  }
+
+  processedIncomingEventIds.add(key);
+
+  if (processedIncomingEventIds.size > 250) {
+    const oldest = processedIncomingEventIds.values().next().value;
+    processedIncomingEventIds.delete(oldest);
+  }
+
+  return true;
+};
+
+const notifyIncomingBattleEvent = (event) => {
+  if (!event || !rememberIncomingEvent(event)) {
+    return;
+  }
+
+  const payload =
+    event.payload && typeof event.payload === "object"
+      ? event.payload
+      : {};
+
+  const sourcePlayer = String(event.source_player ?? "").toLowerCase();
+  const opponentSource = Boolean(sourcePlayer && sourcePlayer !== player.value);
+  const targetsMe = incomingEventTargetsPlayer(event);
+  const targetCardId = incomingEventTargetCardId(event);
+  const targetCard = findOwnCardById(targetCardId);
+  const targetVisualId = targetCard ? getCardId(targetCard) : targetCardId;
+  const targetName =
+    targetCard?.name ??
+    payload?.target_card_name ??
+    payload?.card_name ??
+    "Kartu kamu";
+
+  const damage = Math.max(
+    0,
+    Number(
+      payload?.final_damage ??
+        payload?.effective_damage ??
+        payload?.damage ??
+        0,
+    ) || 0,
+  );
+
+  if (event.type === "attack" && opponentSource && targetsMe) {
+    const attackMode = String(payload?.attack_mode ?? "").toLowerCase();
+
+    if (attackMode === "direct") {
+      errorToast(
+        "💥 DIRECT HIT",
+        damage > 0
+          ? `${enemyName.value} menyerang langsung. Player HP -${damage}.`
+          : `${enemyName.value} melakukan Direct Attack.`,
+      );
+
+      triggerIncomingReaction({
+        strength: "heavy",
+        flash: "direct",
+      });
+
+      return;
+    }
+
+    const hpBefore = Number(payload?.target_hp_before ?? 0) || 0;
+    const hpAfter = Number(payload?.target_hp_after ?? 0) || 0;
+    const hpText =
+      hpBefore > 0 || hpAfter > 0
+        ? ` • HP ${hpBefore} → ${hpAfter}`
+        : "";
+
+    warningToast(
+      "⚔️ KARTU DISERANG",
+      `${targetName}${damage > 0 ? ` menerima ${damage} damage` : " diserang"}${hpText}.`,
+    );
+
+    triggerIncomingReaction({
+      cardId: targetVisualId,
+      strength: payload?.destroyed ? "heavy" : "medium",
+      flash: payload?.destroyed ? "danger" : "damage",
+    });
+
+    return;
+  }
+
+  if (event.type === "card_destroyed" && opponentSource && targetsMe) {
+    errorToast(
+      "☠️ KARTU HANCUR",
+      `${targetName} dihancurkan dan masuk ke Graveyard.`,
+    );
+
+    triggerIncomingReaction({
+      cardId: targetVisualId,
+      strength: "heavy",
+      flash: "danger",
+      deck: true,
+    });
+
+    return;
+  }
+
+  if (event.type === "ultimate" && opponentSource && targetsMe) {
+    const ultimateTargets = Array.isArray(payload?.targets)
+      ? payload.targets
+      : [];
+
+    const canonicalTargetIds = battleEventAffectedCardIds(event);
+
+    const ownUltimateTargets = ultimateTargets.filter((target) =>
+      findOwnCardById(target?.target_card_id),
+    );
+
+    const targetIds = [
+      ...new Set(
+        [
+          ...ownUltimateTargets.map((target) => target?.target_card_id),
+          ...canonicalTargetIds.filter((cardId) => findOwnCardById(cardId)),
+        ]
+          .filter(Boolean)
+          .map((cardId) => String(getCardId(findOwnCardById(cardId)) ?? cardId)),
+      ),
+    ];
+
+    const hitCount = Math.max(
+      0,
+      Number(payload?.target_count ?? ownUltimateTargets.length) || 0,
+    );
+
+    const destroyedCount = Math.max(
+      0,
+      Number(payload?.destroyed_count ?? 0) || 0,
+    );
+
+    const totalDamage = Math.max(
+      0,
+      Number(payload?.total_effective_damage ?? payload?.damage ?? 0) || 0,
+    );
+
+    errorToast(
+      "💥 ULTIMATE AOE MUSUH",
+      `${enemyName.value} menghantam ${hitCount || targetIds.length || "semua"} Active Card${
+        totalDamage > 0 ? ` • ${totalDamage} total damage` : ""
+      }${destroyedCount > 0 ? ` • ${destroyedCount} hancur` : ""}.`,
+    );
+
+    triggerIncomingReaction({
+      cardIds: targetIds,
+      cardId: targetVisualId,
+      strength: "heavy",
+      flash: "danger",
+    });
+
+    return;
+  }
+
+  if (event.type === "synergy" && opponentSource && targetsMe && damage > 0) {
+    warningToast(
+      "✨ SYNERGY MUSUH",
+      payload?.message ?? `${enemyName.value} mengaktifkan Synergy.`,
+    );
+
+    triggerIncomingReaction({
+      cardId: targetVisualId,
+      strength: "medium",
+      flash: "effect",
+    });
+
+    return;
+  }
+
+  if (event.type === "graveyard" && sourcePlayer === player.value) {
+    const reason = String(payload?.reason ?? "").toLowerCase();
+
+    if (reason && reason !== "destroyed") {
+      warningToast(
+        "☠️ CARD KE GRAVEYARD",
+        payload?.message ?? `${targetName} dipindahkan ke Graveyard.`,
+      );
+
+      triggerIncomingReaction({
+        cardId: event?.card_id ?? targetCardId,
+        strength: "light",
+        flash: "deck",
+        deck: true,
+      });
+    }
+
+    return;
+  }
+
+  if (event.type === "fusion" && opponentSource) {
+    // Toast Fusion sudah ditangani watcher Phase 3D.13.
+    // Di sini cukup beri haptic ringan agar player menyadari perubahan arena.
+    vibrateDevice([30, 30, 45]);
+    return;
+  }
+
+  if (
+    event.type === "special_effect" &&
+    opponentSource &&
+    battleEventEffectType(event) === "revive"
+  ) {
+    const restoredHp = Math.max(
+      0,
+      Number(payload?.result?.restored_hp ?? payload?.restored_hp ?? 0) || 0,
+    );
+
+    successToast(
+      "☠️ OPPONENT REVIVE",
+      restoredHp > 0
+        ? `${enemyName.value} membangkitkan Card dari Graveyard dengan ${restoredHp} HP.`
+        : `${enemyName.value} membangkitkan Card dari Graveyard.`,
+    );
+
+    vibrateDevice([35, 35, 55]);
+    return;
+  }
+
+  const ignoredGenericTypes = new Set([
+    "attack",
+    "card_destroyed",
+    "damage",
+    "ultimate",
+    "synergy",
+    "fusion",
+    "win",
+    "rfid_warning",
+  ]);
+
+  if (
+    opponentSource &&
+    targetsMe &&
+    !ignoredGenericTypes.has(String(event.type ?? "").toLowerCase())
+  ) {
+    const eventLabel = String(event.type ?? "effect")
+      .replaceAll("_", " ")
+      .toUpperCase();
+
+    warningToast(
+      `⚠️ ${eventLabel}`,
+      payload?.message ?? `${enemyName.value} memberi effect ke kamu.`,
+    );
+
+    triggerIncomingReaction({
+      cardId: targetVisualId,
+      strength: "medium",
+      flash: "effect",
+      deck: Boolean(targetCardId),
+    });
+  }
+};
 
 const ownDeckRemaining =
   computed(() =>
@@ -941,6 +2249,14 @@ const enemyHpPercent =
     ),
   );
 
+const ownHpState = computed(() =>
+  getHpStateClass(ownHpPercent.value),
+);
+
+const enemyHpState = computed(() =>
+  getHpStateClass(enemyHpPercent.value),
+);
+
 // =========================================================
 // SKILL
 // =========================================================
@@ -997,19 +2313,8 @@ const ownDebuff =
   );
 
 // =========================================================
-// ONE-TIME / PERSISTENT ACTION STATE
+// PERSISTENT ACTION STATE / LEGACY FLAGS
 // =========================================================
-
-const ownUltimateUsed =
-  computed(() =>
-    Boolean(
-      player.value === "p1"
-        ? battle.value
-            ?.player1_ultimate_used
-        : battle.value
-            ?.player2_ultimate_used,
-    ),
-  );
 
 const ownHealUsed =
   computed(() =>
@@ -1119,6 +2424,71 @@ const isMyTurn =
       !battleFinished.value
     );
   });
+
+const turnClockNow = ref(Date.now());
+const turnClockServerOffsetMs = ref(0);
+const turnTimerVisible = computed(() => {
+  const current = battle.value;
+  return Boolean(
+    current?.status === "battle" &&
+    !current?.question_active &&
+    !questionActive.value &&
+    !battleFinished.value &&
+    current?.turn_deadline_at,
+  );
+});
+const turnSecondsRemaining = computed(() => {
+  if (!turnTimerVisible.value) return null;
+  const deadline = Date.parse(battle.value?.turn_deadline_at ?? "");
+  if (!Number.isFinite(deadline)) return null;
+  return Math.max(0, Math.ceil((deadline - (turnClockNow.value + turnClockServerOffsetMs.value)) / 1000));
+});
+const turnClockUrgent = computed(() => (turnSecondsRemaining.value ?? 99) <= 10);
+
+let turnClockTickInterval = null;
+let turnClockSyncInterval = null;
+let turnClockSyncPending = false;
+let lastTurnClockNotice = "";
+
+const syncBattleTurnClock = async () => {
+  if (!code.value || !player.value || !token.value || turnClockSyncPending) return;
+  turnClockSyncPending = true;
+
+  try {
+    const { data, error: syncError } = await supabase.rpc("tcg_sync_battle_turn", {
+      p_code: code.value,
+      p_player: player.value,
+      p_token: token.value,
+    });
+
+    if (syncError) throw syncError;
+    if (!data?.ok) return;
+
+    if (data.server_now) {
+      turnClockServerOffsetMs.value = Date.parse(data.server_now) - Date.now();
+    }
+
+    const noticeKey = `${data.timed_player ?? ""}:${data.turn_deadline_at ?? ""}:${data.grace_granted ? "grace" : data.timed_out ? "expired" : ""}`;
+    if (noticeKey !== lastTurnClockNotice && data.grace_granted && data.timed_player === player.value) {
+      lastTurnClockNotice = noticeKey;
+      warningToast("WAKTU SAMBUNG ULANG", "Kamu mendapat tambahan 10 detik untuk menyambungkan kembali.");
+    } else if (noticeKey !== lastTurnClockNotice && data.timed_out && data.timed_player === player.value) {
+      lastTurnClockNotice = noticeKey;
+      warningToast("GILIRAN BERAKHIR", "Waktu habis, giliran sudah berpindah ke lawan.");
+    }
+  } catch (syncError) {
+    console.warn("Sinkronisasi countdown giliran gagal:", syncError);
+  } finally {
+    turnClockSyncPending = false;
+  }
+};
+
+const onTurnClockVisibilityChange = () => {
+  if (document.visibilityState === "visible") {
+    turnClockNow.value = Date.now();
+    void syncBattleTurnClock();
+  }
+};
 
 // =========================================================
 // TURN TEXT
@@ -1589,10 +2959,14 @@ const submitFusion = async () => {
     attackTargetMode.value = false;
     selectedTargetCardId.value = null;
 
-    await loadBattle(code.value);
-    await Promise.all([
+    // Phase 3D.16.1 - Fast post-Fusion refresh.
+    // Jangan jalankan refresh besar secara serial; itu membuat PlayerBattle
+    // terlihat seperti reconnect penuh. Semua sumber penting direfresh paralel.
+    await Promise.allSettled([
+      loadBattle(code.value),
       loadGraveyardCards(),
       loadPlayerFusions(),
+      loadFusionHistory(),
     ]);
   } catch (err) {
     console.error("Fusion:", err);
@@ -2314,9 +3688,9 @@ const canUltimateUi =
       Boolean(
         selectedCard.value,
       ) &&
+      enemyActiveCards.value.length > 0 &&
       ownSkill.value >=
-        100 &&
-      !ownUltimateUsed.value,
+        100,
   );
 
 const canHealUi =
@@ -2383,14 +3757,12 @@ const skillLockText =
     if (
       type === "ultimate"
     ) {
-      if (
-        ownUltimateUsed.value
-      ) {
-        return "USED";
-      }
-
       if (!selectedCard.value) {
         return "SELECT CARD";
+      }
+
+      if (!enemyActiveCards.value.length) {
+        return "NO ENEMY ACTIVE";
       }
 
       if (
@@ -2563,7 +3935,7 @@ const skillInfoItems =
             ? attackModifiers.join(
                 " • ",
               )
-            : "Attack berakhir dengan perpindahan turn.",
+            : "Attack berakhir dengan perpindahan turn. Normal Attack memberi +10 Ultimate Gauge ke attacker; player yang diserang mendapat +5. Electric Synergy dan skill gauge tetap dapat mengisi jauh lebih cepat.",
       },
 
       {
@@ -2581,30 +3953,29 @@ const skillInfoItems =
         effect:
           "Next incoming damage ×0.50 (-50%).",
         detail:
-          "Memberi +10 Ultimate Gauge. Defense dikonsumsi saat serangan lawan mengenainya.",
+          "Memberi +5 Ultimate Gauge. Defense dikonsumsi saat serangan lawan mengenainya.",
       },
 
       {
         key: "ultimate",
         icon: "⚡",
-        title: "ULTIMATE",
+        title: "ULTIMATE AOE",
         status:
-          ownUltimateUsed.value
-            ? "USED"
-            : !card
-              ? "SELECT CARD"
-              : ownSkill.value >=
-                  100
+          !card
+            ? "SELECT CARD"
+            : !enemyActiveCards.value.length
+              ? "NO ENEMY ACTIVE"
+              : ownSkill.value >= 100
                 ? "READY"
                 : `${ownSkill.value}% / 100%`,
         ready:
           canUltimateUi.value,
         effect:
           card
-            ? `Selected Card ATK ×2 → ${ultimateBase} base damage.`
+            ? `Semua Enemy Active Card menerima ATK ×2 → ${ultimateBase} raw damage per card.`
             : "Pilih Active Card untuk menghitung Ultimate.",
         detail:
-          "Membutuhkan 100% Ultimate Gauge, gauge kembali ke 0, dan hanya 1× per battle. Attack Debuff, Defense, dan Water Shield dapat mengubah final damage.",
+          "Membutuhkan 100% Ultimate Gauge lalu gauge kembali ke 0. Ultimate dapat dipakai lagi setiap gauge penuh, mengabaikan Card DEF, menghapus Defense/Water Shield musuh, dan tidak memberi direct damage ke Player HP.",
       },
 
       {
@@ -2841,6 +4212,14 @@ const submitSpecialSkill = async () => {
     ? getCardId(selectedSpecialTarget.value)
     : null;
 
+  const skillCode = String(skill?.skill_code ?? skill?.code ?? "").toLowerCase();
+  const isSoulRebirth = skillCode === "soul_rebirth";
+  const soulRebirthSourceSnapshot = isSoulRebirth ? { ...source } : null;
+  const soulRebirthTargetSnapshot =
+    isSoulRebirth && selectedSpecialTarget.value
+      ? { ...selectedSpecialTarget.value }
+      : null;
+
   actionLoading.value = true;
 
   try {
@@ -2880,10 +4259,24 @@ const submitSpecialSkill = async () => {
       parts.push(`+${heal} heal`);
     }
 
-    successToast(
-      `${skill.icon || "✨"} ${String(skill.name ?? skill.skill_code ?? "SPECIAL").toUpperCase()}`,
-      data?.message ?? (parts.length ? parts.join(" • ") : "Special Skill berhasil digunakan."),
-    );
+    if (isSoulRebirth && soulRebirthTargetSnapshot) {
+      const restoredHp = necroRestoredHp(soulRebirthTargetSnapshot);
+
+      successToast(
+        "☠️ SOUL REBIRTH",
+        `${soulRebirthTargetSnapshot.name ?? "Card"} bangkit ke Active dengan ${restoredHp} HP. ${soulRebirthSourceSnapshot?.name ?? "Necro Card"} dikorbankan.`,
+      );
+
+      startNecroRebirthCinematic({
+        source: soulRebirthSourceSnapshot,
+        target: soulRebirthTargetSnapshot,
+      });
+    } else {
+      successToast(
+        `${skill.icon || "✨"} ${String(skill.name ?? skill.skill_code ?? "SPECIAL").toUpperCase()}`,
+        data?.message ?? (parts.length ? parts.join(" • ") : "Special Skill berhasil digunakan."),
+      );
+    }
 
     closeSpecialSkillModal(true);
 
@@ -2891,7 +4284,11 @@ const submitSpecialSkill = async () => {
       selectedCardId.value = null;
     }
 
-    await loadBattle(code.value);
+    await Promise.all([
+      loadBattle(code.value),
+      loadGraveyardCards(),
+    ]);
+
     await loadSelectedCardSpecialSkills();
   } catch (err) {
     console.error("Special Skill:", err);
@@ -3606,6 +5003,20 @@ const submitAction =
     if (
       actionType ===
         "ultimate" &&
+      !enemyActiveCards.value.length
+    ) {
+      warningToast(
+        "ULTIMATE TIDAK PUNYA TARGET",
+
+        "Musuh tidak memiliki Active Card yang dapat terkena Ultimate.",
+      );
+
+      return;
+    }
+
+    if (
+      actionType ===
+        "ultimate" &&
       ownSkill.value < 100
     ) {
       warningToast(
@@ -3722,12 +5133,30 @@ const submitAction =
       selectedTargetCardId.value =
         null;
 
-      successToast(
-        `${actionType.toUpperCase()} SUCCESS`,
+      if (actionType === "ultimate") {
+        const hitCount = Math.max(
+          0,
+          Number(data?.ultimate_target_count ?? 0) || 0,
+        );
+        const destroyedCount = Math.max(
+          0,
+          Number(data?.ultimate_destroyed_count ?? 0) || 0,
+        );
 
-        data?.message ??
-          "Action berhasil diproses.",
-      );
+        successToast(
+          "⚡ ULTIMATE AOE SUCCESS",
+          `${hitCount} Active Card terkena Ultimate${
+            destroyedCount > 0 ? ` • ${destroyedCount} hancur` : ""
+          }. Gauge kembali ke 0%.`,
+        );
+      } else {
+        successToast(
+          `${actionType.toUpperCase()} SUCCESS`,
+
+          data?.message ??
+            "Action berhasil diproses.",
+        );
+      }
     } catch (err) {
       console.error(
         "Submit action:",
@@ -3872,8 +5301,134 @@ const questionInteractionLocked =
       Boolean(
         questionResult.value,
       ) ||
+      (questionTimeLimitSeconds.value > 0 && questionSecondsRemaining.value === 0) ||
       !questionReady.value,
   );
+
+const questionTimeLimitSeconds = computed(() =>
+  Math.max(0, Number(battle.value?.question_time_limit_seconds ?? 0) || 0),
+);
+const questionImageUrl = computed(() => {
+  const question = currentQuestion.value;
+  if (!question) return "";
+  // The score-debugging seed previously pointed at a generic logic image.
+  // Use its matching illustration while keeping every other supplied image.
+  if (question.id === "3e41c09d-1a15-5628-aa58-c78f2ad6f29b") {
+    return "/images/questions/score-increment.svg";
+  }
+  return question.image_url ?? "";
+});
+const questionCodeLines = computed(() => {
+  const snippet = String(currentQuestion.value?.code_snippet ?? "")
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "\n")
+    .replace(/\r\n?/g, "\n");
+  return snippet ? snippet.split("\n") : [];
+});
+const questionLearningEnabled = computed(() =>
+  battle.value?.question_learning_enabled !== false,
+);
+const questionSecondsRemaining = ref(null);
+const questionHintStep = ref(0);
+const questionCorrectOption = ref("");
+const questionBlockOrder = ref([]);
+const questionDraggingBlock = ref(null);
+const timedOutQuestionRound = ref(null);
+let questionClockInterval = null;
+
+const updateQuestionClock = () => {
+  const limit = questionTimeLimitSeconds.value;
+  const createdAt = currentQuestionRound.value?.created_at;
+  if (!limit || !createdAt || !questionActive.value || currentQuestionRound.value?.winner_player) {
+    questionSecondsRemaining.value = null;
+    return;
+  }
+  const deadline = new Date(createdAt).getTime() + limit * 1000;
+  questionSecondsRemaining.value = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+  if (questionSecondsRemaining.value === 0) void expireQuestionRound();
+};
+
+const expireQuestionRound = async () => {
+  const roundId = effectiveQuestionRoundId.value;
+  if (!roundId || timedOutQuestionRound.value === roundId || !token.value) return;
+  timedOutQuestionRound.value = roundId;
+  try {
+    const { data, error: timeoutError } = await supabase.rpc("finish_battle_question_timeout", {
+      p_code: code.value,
+      p_player: player.value,
+      p_token: token.value,
+      p_question_round_id: roundId,
+    });
+    if (timeoutError) throw timeoutError;
+    if (data?.timed_out) {
+      questionResult.value = "timeout";
+      void playSound("warning", 0.65);
+    }
+  } catch (timeoutError) {
+    timedOutQuestionRound.value = null;
+    console.error("Question timeout:", timeoutError);
+  }
+};
+
+const initializeQuestionBlocks = () => {
+  const blocks = Array.isArray(currentQuestion.value?.blocks)
+    ? currentQuestion.value.blocks
+    : [];
+  questionBlockOrder.value = blocks
+    .map((text, originalIndex) => ({ text: String(text), originalIndex }))
+    .sort(() => Math.random() - 0.5);
+  questionHintStep.value = 0;
+  questionDraggingBlock.value = null;
+};
+
+const moveQuestionBlock = (index, offset) => {
+  const nextIndex = index + offset;
+  if (nextIndex < 0 || nextIndex >= questionBlockOrder.value.length) return;
+  const items = [...questionBlockOrder.value];
+  const [item] = items.splice(index, 1);
+  items.splice(nextIndex, 0, item);
+  questionBlockOrder.value = items;
+};
+
+const dropQuestionBlock = (index) => {
+  const from = questionDraggingBlock.value;
+  questionDraggingBlock.value = null;
+  if (from == null || from === index) return;
+  const items = [...questionBlockOrder.value];
+  const [item] = items.splice(from, 1);
+  items.splice(index, 0, item);
+  questionBlockOrder.value = items;
+};
+
+const submitQuestionBlockOrder = () => {
+  void answerQuestion(0, {
+    order: questionBlockOrder.value.map((block) => block.originalIndex),
+  });
+};
+
+const revealNextQuestionHint = () => {
+  questionHintStep.value = Math.min(questionHints.value.length, questionHintStep.value + 1);
+};
+
+const questionRecommendation = computed(() => {
+  const topic = String(currentQuestion.value?.learning_topic ?? currentQuestion.value?.category ?? "coding dasar")
+    .replaceAll("_", " ");
+  const links = {
+    scratch: "https://scratch.mit.edu/ideas",
+    block_coding: "https://scratch.mit.edu/ideas",
+    programming_basics: "https://developer.mozilla.org/en-US/docs/Learn",
+  };
+  return {
+    topic,
+    url: currentQuestion.value?.learning_url || links[currentQuestion.value?.category] || "",
+  };
+});
+const questionHints = computed(() =>
+  [currentQuestion.value?.hint_1, currentQuestion.value?.hint_2]
+    .map((hint) => String(hint ?? "").trim())
+    .filter(Boolean),
+);
 
 const resetQuestionInteraction =
   () => {
@@ -3889,12 +5444,20 @@ const resetQuestionInteraction =
     questionReward.value =
       null;
 
+    questionRewardChoices.value =
+      [];
+
+    bonusChoiceRoundId.value =
+      null;
+
+    questionCorrectOption.value = "";
+
     questionSubmissionRoundId.value =
       null;
   };
 
 const answerQuestion =
-  async (index) => {
+  async (index, interactiveAnswer = null) => {
     if (
       questionInteractionLocked
         .value
@@ -3936,30 +5499,26 @@ const answerQuestion =
       questionRoundId;
 
     try {
-      const {
-        data,
-        error: rpcError,
-      } =
-        await supabase.rpc(
-          "submit_battle_question_answer",
-
-          {
-            p_code:
-              code.value,
-
-            p_player:
-              player.value,
-
-            p_token:
-              token.value,
-
-            p_question_round_id:
-              questionRoundId,
-
-            p_answer_index:
-              index,
-          },
-        );
+      const { data, error: rpcError } = await supabase.rpc(
+        interactiveAnswer
+          ? "submit_battle_interactive_question_answer"
+          : "submit_battle_question_answer",
+        interactiveAnswer
+          ? {
+              p_code: code.value,
+              p_player: player.value,
+              p_token: token.value,
+              p_question_round_id: questionRoundId,
+              p_interactive_answer: interactiveAnswer,
+            }
+          : {
+              p_code: code.value,
+              p_player: player.value,
+              p_token: token.value,
+              p_question_round_id: questionRoundId,
+              p_answer_index: index,
+            },
+      );
 
       if (rpcError) {
         throw rpcError;
@@ -3994,11 +5553,28 @@ const answerQuestion =
         return;
       }
 
+      questionCorrectOption.value = String(data?.correct_option ?? "");
+
+      if (data?.timed_out === true) {
+        questionResult.value = "timeout";
+        return;
+      }
+
       if (
         data?.correct === true
       ) {
         questionResult.value =
           "correct";
+
+        questionRewardChoices.value =
+          Array.isArray(data?.reward_choices)
+            ? data.reward_choices
+            : [];
+
+        bonusChoiceRoundId.value =
+          questionRewardChoices.value.length
+            ? questionRoundId
+            : null;
 
         questionReward.value =
           data?.reward ??
@@ -4006,14 +5582,16 @@ const answerQuestion =
 
         await loadBonusSkills();
 
+        void playSound("correct", 0.86);
+
         successToast(
           "🏆 FIRST CORRECT!",
 
-          data?.reward
-            ? `Bonus skill: ${bonusLabel(
-                data.reward,
-              )}`
-            : "Jawaban benar!",
+          questionRewardChoices.value.length
+            ? "Pilih satu dari tiga bonus skill untuk melanjutkan battle."
+            : data?.reward
+              ? `Bonus skill: ${bonusLabel(data.reward)}`
+              : "Jawaban benar!",
         );
 
         return;
@@ -4025,6 +5603,8 @@ const answerQuestion =
       ) {
         questionResult.value =
           "lost";
+
+        void playSound("warning", 0.62);
 
         warningToast(
           "TOO LATE",
@@ -4042,6 +5622,8 @@ const answerQuestion =
        */
       questionResult.value =
         "wrong";
+
+      void playSound("wrong", 0.8);
 
       warningToast(
         "JAWABAN SALAH",
@@ -4144,19 +5726,19 @@ const bonusDescription =
   (skill) => {
     const descriptions = {
       power_strike:
-        "Next Attack damage ×1.50 (+50%). Dikonsumsi setelah serangan.",
+        "Serangan basic berikutnya memberi +50% damage dan habis setelah digunakan.",
 
       iron_guard:
-        "Aktifkan Defense: next incoming damage ×0.50 (-50%).",
+        "Defense aktif; damage dari serangan berikutnya berkurang 50%.",
 
       recovery:
-        "Restore 25% Max Player HP.",
+        "Memulihkan 25% HP maksimum pemain.",
 
       overcharge:
-        "Ultimate Gauge +50%, maksimum 100%.",
+        "Menambah 50 poin Ultimate Gauge, maksimal 100.",
 
       cleanse:
-        "Menghapus Attack Debuff yang sedang aktif.",
+        "Menghapus efek penurunan Attack yang sedang aktif.",
     };
 
     return (
@@ -4168,6 +5750,83 @@ const bonusDescription =
 // =========================================================
 // LOAD BONUS
 // =========================================================
+
+const loadPendingBonusChoice =
+  async () => {
+    if (!battle.value?.id || !token.value) return null;
+
+    const { data, error: choiceError } = await supabase.rpc(
+      "get_battle_question_bonus_choice",
+      {
+        p_code: code.value,
+        p_player: player.value,
+        p_token: token.value,
+      },
+    );
+
+    if (choiceError || data?.ok === false) {
+      if (choiceError) console.warn("Load quiz skill choices:", choiceError);
+      return null;
+    }
+
+    const choices = Array.isArray(data?.choices) ? data.choices : [];
+    if (!data?.pending || choices.length !== 3) return null;
+
+    bonusChoiceRoundId.value = data.question_round_id;
+    questionRewardChoices.value = choices;
+    questionReward.value = null;
+    questionResult.value = "correct";
+    selectedQuestionAnswer.value = Number.isInteger(data.winner_answer)
+      ? data.winner_answer
+      : null;
+    return data;
+  };
+
+const chooseQuestionBonus =
+  async (skillType) => {
+    const roundId = bonusChoiceRoundId.value;
+    if (
+      !roundId ||
+      bonusChoiceSubmitting.value ||
+      !questionRewardChoices.value.includes(skillType)
+    ) return;
+
+    bonusChoiceSubmitting.value = true;
+    try {
+      const { data, error: choiceError } = await supabase.rpc(
+        "choose_battle_question_bonus",
+        {
+          p_code: code.value,
+          p_player: player.value,
+          p_token: token.value,
+          p_question_round_id: roundId,
+          p_skill_type: skillType,
+        },
+      );
+
+      if (choiceError) throw choiceError;
+      if (data?.ok === false) {
+        warningToast("PILIHAN SKILL DITOLAK", data?.message ?? "Skill belum dapat dipilih.");
+        return;
+      }
+
+      const selectedSkill = data?.skill_type ?? skillType;
+      questionReward.value = selectedSkill;
+      questionRewardChoices.value = [];
+      bonusChoiceRoundId.value = null;
+      await loadBonusSkills();
+      void playSound("correct", 0.72);
+      successToast(
+        `${bonusIcon(selectedSkill)} ${bonusLabel(selectedSkill).toUpperCase()}`,
+        "Skill sudah masuk ke panel Bonus Skills. Gunakan saat giliranmu.",
+      );
+    } catch (err) {
+      console.error("Pilih bonus skill:", err);
+      errorToast("SKILL ERROR", err?.message ?? "Pilihan skill gagal disimpan.");
+    } finally {
+      bonusChoiceSubmitting.value = false;
+    }
+  };
 
 const loadBonusSkills =
   async () => {
@@ -4425,6 +6084,47 @@ watch(
 );
 
 watch(
+  () => currentQuestionRound.value?.winner_player,
+  (winner) => {
+    if (!winner) return;
+    if (winner === player.value) {
+      void loadPendingBonusChoice();
+    } else {
+      questionResult.value = "lost";
+    }
+  },
+);
+
+watch(
+  () => currentQuestion.value?.id,
+  () => {
+    initializeQuestionBlocks();
+    timedOutQuestionRound.value = null;
+  },
+);
+
+watch(
+  [
+    questionActive,
+    effectiveQuestionRoundId,
+    () => currentQuestionRound.value?.created_at,
+    () => currentQuestionRound.value?.winner_player,
+    questionTimeLimitSeconds,
+  ],
+  ([active, roundId, , winner]) => {
+    if (questionClockInterval) {
+      window.clearInterval(questionClockInterval);
+      questionClockInterval = null;
+    }
+    questionSecondsRemaining.value = null;
+    if (!active || !roundId || winner || questionTimeLimitSeconds.value <= 0) return;
+    updateQuestionClock();
+    questionClockInterval = window.setInterval(updateQuestionClock, 250);
+  },
+  { immediate: true },
+);
+
+watch(
   questionActive,
 
   (
@@ -4551,6 +6251,43 @@ watch(
           ? "Kamu mendapatkan turn pertama."
           : `${enemyName.value} mendapatkan turn pertama.`,
       );
+    }
+  },
+);
+
+// =========================================================
+// PHASE 3D.16 • EVENT CONTRACT HELPERS
+// =========================================================
+
+const battleEventContractVersion = (event) =>
+  String(battleEventPayload(event)?.event_contract ?? "legacy");
+
+const battleEventEffectType = (event) =>
+  String(
+    battleEventPayload(event)?.effect_type ??
+      battleEventPayload(event)?.effect?.type ??
+      "",
+  ).toLowerCase();
+
+// =========================================================
+// PHASE 3D.18 • STATUS REFRESH
+// =========================================================
+
+watch(
+  latestBattleEvent,
+  (event) => {
+    const type = String(event?.type ?? "").toLowerCase();
+    if (STATUS_REFRESH_EVENT_TYPES.has(type)) {
+      void loadStatusEffects();
+    }
+  },
+);
+
+watch(
+  () => battle.value?.id,
+  (battleId, previousBattleId) => {
+    if (battleId && battleId !== previousBattleId) {
+      void loadStatusEffects();
     }
   },
 );
@@ -4691,19 +6428,67 @@ watch(
     }
 
     if (
-      event.type ===
-        "graveyard" ||
-      event.type ===
-        "bench" ||
-      event.type ===
-        "swap" ||
-      event.type ===
-        "summon" ||
-      event.type ===
-        "card_destroyed"
+      [
+        "graveyard",
+        "bench",
+        "swap",
+        "summon",
+        "card_destroyed",
+        "ultimate",
+        "special_effect",
+        "special_skill",
+        "fusion",
+      ].includes(String(event.type ?? "").toLowerCase())
     ) {
       void loadGraveyardCards();
     }
+  },
+);
+
+// =========================================================
+// REALTIME BATTLE SOUND
+// =========================================================
+
+watch(
+  latestBattleEvent,
+  (event) => {
+    handleBattleSoundEvent(event);
+  },
+);
+
+watch(
+  questionActive,
+  (active, previous) => {
+    if (active && !previous) {
+      void playSound("question", 0.74);
+    }
+  },
+);
+
+// =========================================================
+// INCOMING PLAYER NOTIFICATION / HAPTIC
+// =========================================================
+
+watch(
+  latestBattleEvent,
+  (event) => {
+    notifyIncomingBattleEvent(event);
+  },
+);
+
+watch(
+  ownDeckRemaining,
+  (current, previous) => {
+    if (
+      previous == null ||
+      Number(current) >= Number(previous)
+    ) {
+      return;
+    }
+
+    // Deck count turun: beri visual pulse.
+    // Toast Summon tetap memakai flow existing agar tidak duplicate.
+    triggerDeckReaction({ vibrate: true });
   },
 );
 
@@ -4801,15 +6586,19 @@ watch(
         "bench",
         "swap",
         "card_destroyed",
+        "ultimate",
+        "special_effect",
+        "special_skill",
         "fusion",
-      ].includes(event.type)
+      ].includes(String(event.type ?? "").toLowerCase())
     ) {
       void loadPlayerFusions();
     }
 
     if (event.type === "fusion") {
       void loadFusionHistory();
-      void loadGraveyardCards();
+      // Graveyard refresh sudah ditangani watcher zone/event di atas.
+      // Jangan request data yang sama dua kali untuk satu event Fusion.
 
       // The acting player already gets the direct submitFusion toast.
       // Show a realtime notification mainly for the opponent.
@@ -4853,25 +6642,48 @@ watch(
 
 onMounted(
   async () => {
+    preloadBattleSounds();
+    registerAudioUnlock();
+
     if (!code.value) {
       return;
     }
 
     await loadBattle(
       code.value,
+      { requireActive: true },
     );
 
     if (
       battle.value
     ) {
+      turnClockNow.value = Date.now();
+      void syncBattleTurnClock();
+      turnClockTickInterval = window.setInterval(() => {
+        turnClockNow.value = Date.now();
+      }, 1000);
+      turnClockSyncInterval = window.setInterval(() => {
+        void syncBattleTurnClock();
+      }, 3000);
+      document.addEventListener("visibilitychange", onTurnClockVisibilityChange);
+
+      if (!firePassiveStatusPoll) {
+        firePassiveStatusPoll = window.setInterval(() => {
+          if (battle.value?.id) void loadStatusEffects();
+        }, 2500);
+      }
       await Promise.all([
         loadBonusSkills(),
+
+        loadPendingBonusChoice(),
 
         loadGraveyardCards(),
 
         loadPlayerFusions(),
 
         loadFusionHistory(),
+
+        loadStatusEffects(),
       ]);
 
       subscribeBonusSkills();
@@ -4908,6 +6720,23 @@ onMounted(
 
 onUnmounted(
   async () => {
+    if (turnClockTickInterval) {
+      window.clearInterval(turnClockTickInterval);
+      turnClockTickInterval = null;
+    }
+    if (turnClockSyncInterval) {
+      window.clearInterval(turnClockSyncInterval);
+      turnClockSyncInterval = null;
+    }
+    document.removeEventListener("visibilitychange", onTurnClockVisibilityChange);
+    if (questionClockInterval) {
+      window.clearInterval(questionClockInterval);
+      questionClockInterval = null;
+    }
+    if (firePassiveStatusPoll) {
+      window.clearInterval(firePassiveStatusPoll);
+      firePassiveStatusPoll = null;
+    }
     try {
       await disconnectBattleUi();
     } catch (
@@ -4925,6 +6754,21 @@ onUnmounted(
         toastTimer,
       );
     }
+
+    clearReactionTimer(incomingCardTimer);
+    clearReactionTimer(incomingImpactTimer);
+    clearReactionTimer(incomingFlashTimer);
+    clearReactionTimer(deckReactionTimer);
+    clearNecroRebirthTimers();
+    necroRebirthCinematic.value = {
+      show: false,
+      phase: "idle",
+      source: null,
+      target: null,
+    };
+    stopDeviceVibration();
+    unregisterAudioUnlock();
+    stopAllBattleSounds();
 
     if (
       bonusChannel
@@ -4956,8 +6800,108 @@ onUnmounted(
 <template>
   <main
     class="player-battle-ui"
-    :class="player"
+    :class="[
+      player,
+      {
+        'incoming-impact': incomingImpactActive,
+        'deck-reacting': deckReactionActive,
+      },
+    ]"
   >
+    <!-- INCOMING IMPACT FLASH -->
+
+    <Transition name="impact-flash">
+      <div
+        v-if="incomingImpactFlash"
+        class="incoming-impact-flash"
+        :class="incomingImpactFlash"
+      />
+    </Transition>
+
+    <!-- PHASE 3C.1 • NECRO SOUL REBIRTH -->
+
+    <Transition name="necro-rebirth">
+      <div
+        v-if="necroRebirthCinematic.show"
+        class="necro-rebirth-overlay"
+        :class="`phase-${necroRebirthCinematic.phase}`"
+      >
+        <div class="necro-rebirth-vignette" />
+
+        <section class="necro-rebirth-stage">
+          <article class="necro-rebirth-card sacrifice-card">
+            <div class="necro-card-aura" />
+            <img
+              v-if="necroCardImage(necroRebirthCinematic.source)"
+              :src="necroCardImage(necroRebirthCinematic.source)"
+              :alt="necroRebirthCinematic.source?.name"
+            />
+            <div v-else class="necro-card-placeholder">☠</div>
+            <strong>{{ necroRebirthCinematic.source?.name ?? "Necro Card" }}</strong>
+            <small>SACRIFICE</small>
+          </article>
+
+          <div class="necro-soul-core">
+            <span>☠</span>
+            <i />
+            <b>SOUL</b>
+          </div>
+
+          <article class="necro-rebirth-card revived-card">
+            <div class="necro-card-aura" />
+            <img
+              v-if="necroCardImage(necroRebirthCinematic.target)"
+              :src="necroCardImage(necroRebirthCinematic.target)"
+              :alt="necroRebirthCinematic.target?.name"
+            />
+            <div v-else class="necro-card-placeholder">✦</div>
+            <strong>{{ necroRebirthCinematic.target?.name ?? "Revived Card" }}</strong>
+            <small>REVIVE • {{ necroRestoredHp(necroRebirthCinematic.target) }} HP</small>
+          </article>
+        </section>
+
+        <div class="necro-rebirth-copy">
+          <small>NECRO SPECIAL SKILL</small>
+          <h2>SOUL REBIRTH</h2>
+          <p>One soul falls. Another returns.</p>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- PLAYER SOUND CONTROL -->
+
+    <button
+      type="button"
+      class="battle-sound-toggle"
+      :class="{
+        muted: !soundEnabled,
+        locked: soundEnabled && !audioUnlocked,
+      }"
+      @click.stop="toggleBattleSound"
+    >
+      <span class="battle-sound-icon">
+        {{ soundEnabled && audioUnlocked ? "🔊" : "🔇" }}
+      </span>
+
+      <span class="battle-sound-copy">
+        {{ battleSoundLabel }}
+      </span>
+    </button>
+
+    <!-- NON-BLOCKING BATTLE REFRESH -->
+
+    <Transition name="battle-sync">
+      <div
+        v-if="battleRefreshing"
+        class="battle-sync-chip"
+        role="status"
+        aria-live="polite"
+      >
+        <span class="battle-sync-spinner" />
+        <span>SYNCING</span>
+      </div>
+    </Transition>
+
     <!-- TOAST -->
 
     <Transition name="toast">
@@ -5033,7 +6977,7 @@ onUnmounted(
     <!-- LOADING -->
 
     <section
-      v-if="loading"
+      v-if="initialBattleLoading"
       class="state-screen"
     >
       <div class="loading-ring" />
@@ -5134,6 +7078,7 @@ onUnmounted(
           <div class="hud-hp-track">
             <div
               class="hud-hp-fill"
+              :class="ownHpState"
               :style="{
                 width:
                   `${ownHpPercent}%`,
@@ -5160,6 +7105,24 @@ onUnmounted(
                   )}%`,
               }"
             />
+          </div>
+
+          <div v-if="ownStatusEffects.length" class="hud-status-strip">
+            <span
+              v-for="status in ownStatusEffects.slice(0, 4)"
+              :key="`own-${status.key}`"
+              class="battle-status-chip"
+              :class="status.tone"
+              :title="statusTooltip(status)"
+            >
+              <b>{{ status.icon }}</b>
+              <em>{{ status.label }}</em>
+              <small v-if="status.valueText">{{ status.valueText }}</small>
+              <small v-if="status.durationText">{{ status.durationText }}</small>
+            </span>
+            <span v-if="ownStatusEffects.length > 4" class="status-more">
+              +{{ ownStatusEffects.length - 4 }}
+            </span>
           </div>
         </section>
 
@@ -5218,6 +7181,16 @@ onUnmounted(
                 "-"
               }}
             </span>
+
+            <span
+              v-if="turnTimerVisible && turnSecondsRemaining !== null"
+              class="turn-countdown"
+              :class="{ urgent: turnClockUrgent }"
+              :aria-label="`${turnSecondsRemaining} detik ${isMyTurn ? 'tersisa untuk giliranmu' : 'tersisa untuk giliran lawan'}`"
+            >
+              <b>◷ {{ turnSecondsRemaining }}s</b>
+              <small>{{ isMyTurn ? "SISA GILIRANMU" : "WAKTU GILIRAN LAWAN" }}</small>
+            </span>
           </div>
 
           <span class="turn-arrow">
@@ -5242,11 +7215,28 @@ onUnmounted(
           <div class="enemy-mini-track">
             <div
               class="enemy-mini-fill"
+              :class="enemyHpState"
               :style="{
                 width:
                   `${enemyHpPercent}%`,
               }"
             />
+          </div>
+
+          <div v-if="enemyStatusEffects.length" class="enemy-status-strip">
+            <span
+              v-for="status in enemyStatusEffects.slice(0, 3)"
+              :key="`enemy-${status.key}`"
+              class="battle-status-chip compact"
+              :class="status.tone"
+              :title="statusTooltip(status)"
+            >
+              <b>{{ status.icon }}</b>
+              <small>{{ status.valueText || status.label }}</small>
+            </span>
+            <span v-if="enemyStatusEffects.length > 3" class="status-more">
+              +{{ enemyStatusEffects.length - 3 }}
+            </span>
           </div>
         </section>
       </header>
@@ -5490,7 +7480,12 @@ onUnmounted(
             </div>
 
             <div class="active-header-meta">
-              <span class="deck-remaining-chip">
+              <span
+                class="deck-remaining-chip"
+                :class="{
+                  'incoming-deck-hit': deckReactionActive,
+                }"
+              >
                 DECK
                 {{ ownDeckRemaining }}
                 /
@@ -5523,17 +7518,33 @@ onUnmounted(
                 cyber-card
                 active-draggable-card
               "
-              :class="{
-                selected:
-                  selectedCardId ===
-                  (
-                    card.battleId ??
-                    card.id
-                  ),
+              :class="[
+                {
+                  selected:
+                    selectedCardId ===
+                    (
+                      card.battleId ??
+                      card.id
+                    ),
 
-                exhausted:
-                  card.exhausted,
-              }"
+                  exhausted:
+                    card.exhausted,
+
+                  'incoming-hit':
+                    isIncomingReactionCard(card),
+                },
+                {
+                  'fx-defense-active': getCardFxFlags(card).defense,
+                  'fx-shield-active': getCardFxFlags(card).shield,
+                  'fx-necro-active': getCardFxFlags(card).necro,
+                  'fx-fusion-active': getCardFxFlags(card).fusion,
+                  'fx-burn-active': getCardFxFlags(card).burn,
+                  'fx-freeze-active': getCardFxFlags(card).freeze,
+                  'fx-poison-active': getCardFxFlags(card).poison,
+                  'fx-stun-active': getCardFxFlags(card).stun,
+                  'fx-curse-active': getCardFxFlags(card).curse,
+                },
+              ]"
               :draggable="
                 isMyTurn &&
                 !actionLoading &&
@@ -5560,6 +7571,20 @@ onUnmounted(
                 ⋮⋮
               </div>
 
+              <div class="card-fx-stack" aria-hidden="true">
+                <i v-if="getCardFxFlags(card).fusion" class="card-fx-layer fx-fusion-layer"></i>
+                <i v-if="getCardFxFlags(card).necro" class="card-fx-layer fx-necro-layer"></i>
+              </div>
+              <CardStatusVfx
+                :shield="getCardFxFlags(card).shield"
+                :defense="getCardFxFlags(card).defense"
+                :burn="getCardFxFlags(card).burn"
+                :freeze="getCardFxFlags(card).freeze"
+                :stun="getCardFxFlags(card).stun"
+                :poison="getCardFxFlags(card).poison"
+                :curse="getCardFxFlags(card).curse"
+              />
+
               <div class="cyber-card-inner">
                 <header>
                   <strong>
@@ -5574,25 +7599,53 @@ onUnmounted(
                   </span>
                 </header>
 
-                <small>
-                  CARD HP
+                <div
+                  v-if="visibleCardStatuses(card).length"
+                  class="card-status-row"
+                >
+                  <span
+                    v-for="status in visibleCardStatuses(card).slice(0, 3)"
+                    :key="`${getCardId(card)}-${status.key}`"
+                    class="card-status-badge"
+                    :class="status.tone"
+                    :title="statusTooltip(status)"
+                  >
+                    <b>{{ status.icon }}</b>
+                    <em>{{ status.label }}</em>
+                    <small v-if="status.valueText">{{ status.valueText }}</small>
+                    <small v-if="status.durationText">{{ status.durationText }}</small>
+                  </span>
+                  <span
+                    v-if="visibleCardStatuses(card).length > 3"
+                    class="card-status-badge more"
+                  >
+                    +{{ visibleCardStatuses(card).length - 3 }}
+                  </span>
+                </div>
 
-                  {{
-                    card.current_hp ??
-                    card.currentHp ??
-                    card.hp ??
-                    0
-                  }}
+                <div class="card-hp-block">
+                  <div class="card-hp-copy">
+                    <span>CARD HP</span>
 
-                  /
+                    <strong>
+                      {{ getCardCurrentHp(card) }}
+                      /
+                      {{ getCardMaxHp(card) }}
+                    </strong>
+                  </div>
 
-                  {{
-                    card.base_hp ??
-                    card.baseHp ??
-                    card.hp ??
-                    0
-                  }}
-                </small>
+                  <div class="card-hp-track">
+                    <div
+                      class="card-hp-fill"
+                      :class="getCardHpState(card)"
+                      :style="{
+                        width: `${getCardHpPercent(card)}%`,
+                      }"
+                    >
+                      <span class="card-hp-shine" />
+                    </div>
+                  </div>
+                </div>
 
                 <div class="cyber-card-image">
                   <img
@@ -5899,25 +7952,25 @@ onUnmounted(
                   </small>
 
                   <div class="target-card-hp">
-                    <span>HP</span>
+                    <div class="target-card-hp-copy">
+                      <span>HP</span>
 
-                    <b>
-                      {{
-                        card.current_hp ??
-                        card.currentHp ??
-                        card.hp ??
-                        0
-                      }}
+                      <b>
+                        {{ getCardCurrentHp(card) }}
+                        /
+                        {{ getCardMaxHp(card) }}
+                      </b>
+                    </div>
 
-                      /
-
-                      {{
-                        card.base_hp ??
-                        card.baseHp ??
-                        card.hp ??
-                        0
-                      }}
-                    </b>
+                    <div class="target-card-hp-track">
+                      <div
+                        class="target-card-hp-fill"
+                        :class="getCardHpState(card)"
+                        :style="{
+                          width: `${getCardHpPercent(card)}%`,
+                        }"
+                      />
+                    </div>
                   </div>
 
                   <div class="target-card-stats">
@@ -7242,13 +9295,11 @@ onUnmounted(
 
           <small>
             {{
-              ownUltimateUsed
-                ? "USED"
-                : canUltimateUi
-                  ? "ATK ×2 • READY"
-                  : skillLockText(
-                      "ultimate",
-                    )
+              canUltimateUi
+                ? "AOE ×2 • READY"
+                : skillLockText(
+                    "ultimate",
+                  )
             }}
           </small>
         </button>
@@ -7474,8 +9525,14 @@ onUnmounted(
             @click.stop
             @pointerdown.stop
           >
+            <div class="question-modal-topline">
+              <span class="question-round-label">🧠 QUIZ ROUND {{ currentQuestionRound?.round_number ?? battle.round }}</span>
+              <span v-if="questionSecondsRemaining !== null" class="question-countdown" :class="{ urgent: questionSecondsRemaining <= 8 }">
+                ⏱ {{ questionSecondsRemaining }} detik
+              </span>
+            </div>
             <span class="hud-label">
-              CODING CHALLENGE
+              {{ questionLearningEnabled ? "CHALLENGE & BELAJAR" : "CODING CHALLENGE" }}
             </span>
 
             <h2>
@@ -7524,15 +9581,12 @@ onUnmounted(
                 }}
               </div>
 
+              <img v-if="questionImageUrl" class="question-illustration" :src="questionImageUrl" alt="Ilustrasi untuk pertanyaan" />
+
               <pre
-                v-if="
-                  currentQuestion
-                    .code
-                "
-                class="
-                  question-code
-                "
-              ><code>{{ currentQuestion.code }}</code></pre>
+                v-if="currentQuestion.question_type !== 'find_bug' && currentQuestion.code_snippet"
+                class="question-code"
+              ><code>{{ currentQuestion.code_snippet }}</code></pre>
 
               <div
                 v-if="
@@ -7558,6 +9612,42 @@ onUnmounted(
               </div>
 
               <div
+                v-if="currentQuestion.question_type === 'block_order'"
+                class="question-block-order"
+              >
+                <div class="question-interaction-heading">
+                  <strong>Susun blok sesuai urutan program</strong>
+                  <small>Seret blok atau gunakan tombol panah.</small>
+                </div>
+                <div
+                  v-for="(block, index) in questionBlockOrder"
+                  :key="block.originalIndex"
+                  class="question-block-item"
+                  draggable="true"
+                  @dragstart="questionDraggingBlock = index"
+                  @dragover.prevent
+                  @drop.prevent="dropQuestionBlock(index)"
+                  @dragend="questionDraggingBlock = null"
+                >
+                  <span class="block-grip">⠿</span>
+                  <code>{{ block.text }}</code>
+                  <div class="block-move-controls">
+                    <button type="button" aria-label="Pindahkan ke atas" :disabled="index === 0 || questionInteractionLocked" @click="moveQuestionBlock(index, -1)">↑</button>
+                    <button type="button" aria-label="Pindahkan ke bawah" :disabled="index === questionBlockOrder.length - 1 || questionInteractionLocked" @click="moveQuestionBlock(index, 1)">↓</button>
+                  </div>
+                </div>
+                <button class="question-submit-button" type="button" :disabled="questionInteractionLocked || questionBlockOrder.length < 2" @click="submitQuestionBlockOrder">KIRIM URUTAN</button>
+              </div>
+
+              <div v-else-if="currentQuestion.question_type === 'find_bug'" class="question-code-choice">
+                <div v-for="(line, index) in questionCodeLines" :key="index" class="question-code-line">
+                  <span>{{ index + 1 }}</span>
+                  <button type="button" :class="{ selected: selectedQuestionAnswer === index, correct: questionResult === 'correct' && selectedQuestionAnswer === index, wrong: questionResult === 'wrong' && selectedQuestionAnswer === index }" :disabled="questionInteractionLocked || index > 3" @click="answerQuestion(index, { line_index: index })"><code>{{ line }}</code><b>↗</b></button>
+                </div>
+              </div>
+
+              <div
+                v-else-if="currentQuestion.question_type === 'choice'"
                 class="
                   question-options
                 "
@@ -7611,6 +9701,46 @@ onUnmounted(
                   {{ option }}
                 </button>
               </div>
+
+              <div v-if="questionLearningEnabled && !questionResult && (currentQuestion.hint_1 || currentQuestion.hint_2)" class="question-hints">
+                <div v-for="(hint, index) in questionHints.slice(0, questionHintStep)" :key="index"><span>Petunjuk {{ index + 1 }}</span><p>{{ hint }}</p></div>
+                <button v-if="questionHintStep < questionHints.length" type="button" @click="revealNextQuestionHint">{{ questionHintStep ? "LIHAT PETUNJUK BERIKUTNYA" : "MINTA PETUNJUK" }}</button>
+              </div>
+
+              <section v-if="questionResult" class="question-learning-feedback" :class="questionResult">
+                <strong>{{ questionResult === 'correct' ? 'Benar! Pelajari alasannya' : questionResult === 'wrong' ? 'Belum tepat — mari pahami konsepnya' : questionResult === 'lost' ? 'Pemain lain menjawab lebih dahulu' : 'Waktu menjawab habis' }}</strong>
+                <p v-if="questionLearningEnabled && currentQuestion.explanation">{{ currentQuestion.explanation }}</p>
+                <p v-if="questionLearningEnabled && questionResult === 'wrong' && questionCorrectOption"><b>Jawaban yang benar:</b> {{ questionCorrectOption }}</p>
+                <div v-if="questionLearningEnabled && questionResult === 'wrong'" class="recommended-material">
+                  <span>Materi untuk dipelajari</span>
+                  <strong>{{ questionRecommendation.topic }}</strong>
+                  <a v-if="questionRecommendation.url" :href="questionRecommendation.url" target="_blank" rel="noopener noreferrer">BUKA MATERI ↗</a>
+                </div>
+                <div v-if="questionResult === 'correct' && questionRewardChoices.length" class="question-bonus-choice">
+                  <div>
+                    <strong>Pilih 1 bonus skill</strong>
+                    <span>Battle akan dilanjutkan setelah pilihanmu disimpan.</span>
+                  </div>
+                  <div class="question-bonus-options">
+                    <button
+                      v-for="skill in questionRewardChoices"
+                      :key="skill"
+                      type="button"
+                      :disabled="bonusChoiceSubmitting"
+                      @click="chooseQuestionBonus(skill)"
+                    >
+                      <span class="question-bonus-icon">{{ bonusIcon(skill) }}</span>
+                      <span class="question-bonus-copy">
+                        <b>{{ bonusLabel(skill) }}</b>
+                        <small>{{ bonusDescription(skill) }}</small>
+                      </span>
+                      <span class="question-bonus-action">{{ bonusChoiceSubmitting ? "MENYIMPAN…" : "PILIH" }}</span>
+                    </button>
+                  </div>
+                </div>
+                <small v-else-if="questionResult === 'correct' && questionReward">Bonus skill dari server: {{ bonusLabel(questionReward) }}. Pilihan tiga skill belum tersedia.</small>
+                <small v-else-if="questionResult === 'correct' && battle?.question_bonus_enabled === false">Bonus skill tidak diaktifkan untuk battle ini.</small>
+              </section>
             </template>
           </section>
         </div>
@@ -7717,6 +9847,444 @@ button {
 .player-battle-ui.p2 {
   --player-accent: #ed567c;
   --player-accent-soft: #ff98b1;
+}
+
+/* =========================================================
+   PLAYER SOUND CONTROL
+========================================================= */
+
+.battle-sound-toggle {
+  position: fixed;
+  right: 18px;
+  top: 92px;
+  z-index: 12050;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: 1px solid rgba(74, 198, 255, 0.34);
+  border-radius: 999px;
+  color: #c8efff;
+  background: rgba(7, 18, 34, 0.82);
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.2),
+    inset 0 0 12px rgba(43, 197, 255, 0.06);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.battle-sound-toggle:hover {
+  transform: translateY(-1px);
+  border-color: rgba(74, 198, 255, 0.7);
+}
+
+.battle-sound-toggle.muted {
+  opacity: 0.62;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.battle-sound-toggle.locked {
+  animation: soundUnlockPulse 1.8s ease-in-out infinite;
+}
+
+/* Phase 3D.16.1 • non-blocking refresh indicator */
+.battle-sync-chip {
+  position: fixed;
+  top: 134px;
+  right: 18px;
+  z-index: 11020;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  border: 1px solid rgba(67, 154, 210, 0.2);
+  border-radius: 999px;
+  background: rgba(239, 249, 255, 0.88);
+  box-shadow: 0 8px 26px rgba(42, 93, 124, 0.14);
+  backdrop-filter: blur(12px);
+  color: #24485f;
+  font-size: 7px;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  pointer-events: none;
+}
+
+.battle-sync-spinner {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid rgba(66, 149, 202, 0.2);
+  border-top-color: rgba(41, 135, 196, 0.95);
+  animation: battleSyncSpin 0.7s linear infinite;
+}
+
+.battle-sync-enter-active,
+.battle-sync-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.battle-sync-enter-from,
+.battle-sync-leave-to {
+  opacity: 0;
+  transform: translateY(-5px);
+}
+
+@keyframes battleSyncSpin {
+  to { transform: rotate(360deg); }
+}
+
+
+.battle-sound-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.battle-sound-copy {
+  font-size: 7px;
+  font-weight: 1000;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+@keyframes soundUnlockPulse {
+  0%,
+  100% {
+    box-shadow:
+      0 8px 22px rgba(0, 0, 0, 0.2),
+      0 0 0 rgba(45, 203, 255, 0);
+  }
+
+  50% {
+    box-shadow:
+      0 8px 22px rgba(0, 0, 0, 0.2),
+      0 0 18px rgba(45, 203, 255, 0.34);
+  }
+}
+
+@media (max-width: 760px) {
+  .battle-sound-toggle {
+    top: 82px;
+    right: 10px;
+    min-height: 30px;
+    padding: 5px 8px;
+  }
+
+  .battle-sound-copy {
+    font-size: 6px;
+  }
+
+  .battle-sync-chip {
+    top: 120px;
+    right: 10px;
+  }
+}
+
+/* =========================================================
+   INCOMING EVENT FEEDBACK
+========================================================= */
+
+.player-battle-ui.incoming-impact {
+  animation: playerIncomingImpact 0.44s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+@keyframes playerIncomingImpact {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  18% {
+    transform: translate3d(-5px, 1px, 0);
+  }
+
+  36% {
+    transform: translate3d(5px, -1px, 0);
+  }
+
+  54% {
+    transform: translate3d(-3px, 0, 0);
+  }
+
+  72% {
+    transform: translate3d(3px, 1px, 0);
+  }
+}
+
+.incoming-impact-flash {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.incoming-impact-flash.damage {
+  background:
+    radial-gradient(
+      circle at center,
+      rgba(255, 255, 255, 0.1),
+      rgba(255, 75, 88, 0.18) 68%,
+      rgba(189, 24, 48, 0.34) 100%
+    );
+}
+
+.incoming-impact-flash.danger,
+.incoming-impact-flash.direct {
+  background:
+    radial-gradient(
+      circle at center,
+      rgba(255, 255, 255, 0.14),
+      rgba(255, 61, 78, 0.26) 62%,
+      rgba(132, 8, 31, 0.5) 100%
+    );
+}
+
+.incoming-impact-flash.effect {
+  background:
+    radial-gradient(
+      circle at center,
+      rgba(255, 255, 255, 0.08),
+      rgba(118, 91, 255, 0.18) 64%,
+      rgba(62, 31, 142, 0.3) 100%
+    );
+}
+
+.incoming-impact-flash.deck {
+  background:
+    radial-gradient(
+      circle at center,
+      rgba(255, 255, 255, 0.08),
+      rgba(255, 174, 51, 0.14) 65%,
+      rgba(196, 105, 10, 0.24) 100%
+    );
+}
+
+.impact-flash-enter-active {
+  animation: incomingFlash 0.52s ease-out;
+}
+
+.impact-flash-leave-active {
+  transition: opacity 0.14s ease;
+}
+
+.impact-flash-leave-to {
+  opacity: 0;
+}
+
+@keyframes incomingFlash {
+  0% {
+    opacity: 0;
+  }
+
+  22% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+.cyber-card.incoming-hit {
+  z-index: 12;
+  border-color: rgba(255, 62, 83, 0.95);
+  box-shadow:
+    0 0 0 4px rgba(255, 67, 87, 0.17),
+    0 0 30px rgba(255, 47, 73, 0.52),
+    0 18px 38px rgba(80, 25, 38, 0.24);
+  animation: incomingCardShake 0.66s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+@keyframes incomingCardShake {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+
+  12% {
+    transform: translate3d(-8px, 1px, 0) rotate(-1.1deg);
+  }
+
+  24% {
+    transform: translate3d(8px, -1px, 0) rotate(1deg);
+  }
+
+  36% {
+    transform: translate3d(-7px, 0, 0) rotate(-0.8deg);
+  }
+
+  48% {
+    transform: translate3d(6px, 1px, 0) rotate(0.7deg);
+  }
+
+  62% {
+    transform: translate3d(-4px, 0, 0) rotate(-0.4deg);
+  }
+
+  78% {
+    transform: translate3d(3px, 0, 0) rotate(0.25deg);
+  }
+}
+
+.deck-remaining-chip.incoming-deck-hit {
+  color: #9b4d00;
+  background: rgba(255, 220, 154, 0.94);
+  box-shadow:
+    0 0 0 4px rgba(255, 178, 45, 0.15),
+    0 0 20px rgba(255, 150, 22, 0.34);
+  animation: incomingDeckPulse 0.68s ease-out;
+}
+
+@keyframes incomingDeckPulse {
+  0% {
+    transform: scale(1);
+  }
+
+  30% {
+    transform: scale(1.13);
+  }
+
+  58% {
+    transform: scale(0.97);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-battle-ui.incoming-impact,
+  .cyber-card.incoming-hit,
+  .deck-remaining-chip.incoming-deck-hit,
+  .impact-flash-enter-active {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+
+/* =========================================================
+   PHASE 3D.18 • STATUS EFFECT UI
+========================================================= */
+
+.hud-status-strip,
+.enemy-status-strip,
+.card-status-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.hud-status-strip {
+  margin-top: 6px;
+}
+
+.enemy-status-strip {
+  justify-content: flex-end;
+  margin-top: 5px;
+}
+
+.battle-status-chip,
+.card-status-badge {
+  --status-bg: rgba(92, 118, 138, 0.12);
+  --status-border: rgba(92, 118, 138, 0.28);
+  --status-text: #355468;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid var(--status-border);
+  background: var(--status-bg);
+  color: var(--status-text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.battle-status-chip {
+  min-height: 20px;
+  padding: 3px 6px;
+  border-radius: 999px;
+}
+
+.battle-status-chip b,
+.card-status-badge b {
+  font-style: normal;
+  line-height: 1;
+}
+
+.battle-status-chip em,
+.card-status-badge em {
+  font-style: normal;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+}
+
+.battle-status-chip em { font-size: 5.8px; }
+.battle-status-chip small { font-size: 5.5px; font-weight: 900; }
+.battle-status-chip.compact em { display: none; }
+.status-more { font-size: 6px; font-weight: 950; color: #718999; }
+
+.card-status-row {
+  min-height: 19px;
+  margin: 4px 0 6px;
+}
+
+.card-status-badge {
+  min-height: 18px;
+  padding: 2px 5px;
+  border-radius: 7px;
+  max-width: 100%;
+}
+
+.card-status-badge em {
+  max-width: 76px;
+  overflow: hidden;
+  font-size: 5.7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-status-badge small { font-size: 5.3px; font-weight: 950; }
+.card-status-badge.more { font-size: 6px; font-weight: 950; }
+
+.battle-status-chip.defense,
+.card-status-badge.defense { --status-bg: rgba(62, 139, 220, 0.12); --status-border: rgba(62, 139, 220, 0.38); --status-text: #286ea7; }
+.battle-status-chip.water,
+.card-status-badge.water { --status-bg: rgba(44, 172, 220, 0.12); --status-border: rgba(44, 172, 220, 0.38); --status-text: #187ca7; }
+.battle-status-chip.power,
+.card-status-badge.power { --status-bg: rgba(240, 176, 42, 0.14); --status-border: rgba(240, 176, 42, 0.42); --status-text: #9b6900; }
+.battle-status-chip.debuff,
+.card-status-badge.debuff,
+.battle-status-chip.freeze,
+.card-status-badge.freeze { --status-bg: rgba(96, 143, 218, 0.12); --status-border: rgba(96, 143, 218, 0.38); --status-text: #536eae; }
+.battle-status-chip.burn,
+.card-status-badge.burn { --status-bg: rgba(238, 92, 58, 0.12); --status-border: rgba(238, 92, 58, 0.38); --status-text: #bd4c2f; }
+.battle-status-chip.regen,
+.card-status-badge.regen,
+.battle-status-chip.buff,
+.card-status-badge.buff { --status-bg: rgba(57, 185, 118, 0.12); --status-border: rgba(57, 185, 118, 0.4); --status-text: #288456; }
+.battle-status-chip.silence,
+.card-status-badge.silence,
+.battle-status-chip.stun,
+.card-status-badge.stun,
+.battle-status-chip.cooldown,
+.card-status-badge.cooldown { --status-bg: rgba(115, 102, 148, 0.12); --status-border: rgba(115, 102, 148, 0.36); --status-text: #69598d; }
+.battle-status-chip.poison,
+.card-status-badge.poison,
+.battle-status-chip.necro,
+.card-status-badge.necro { --status-bg: rgba(110, 71, 137, 0.13); --status-border: rgba(110, 71, 137, 0.42); --status-text: #674080; }
+.battle-status-chip.bleed,
+.card-status-badge.bleed { --status-bg: rgba(192, 58, 79, 0.12); --status-border: rgba(192, 58, 79, 0.38); --status-text: #a43850; }
+
+@media (max-width: 680px) {
+  .battle-status-chip em { display: none; }
+  .card-status-badge em { max-width: 52px; }
 }
 
 /* BACKGROUND */
@@ -8152,19 +10720,7 @@ button {
 
 .hud-hp-fill {
   height: 100%;
-
-  border-radius:
-    inherit;
-
-  background:
-    linear-gradient(
-      90deg,
-      #28aefe,
-      #62e2b8
-    );
-
-  transition:
-    width 0.3s ease;
+  border-radius: inherit;
 }
 
 .hud-skill-fill {
@@ -8295,6 +10851,46 @@ button {
   font-size: 8px;
 
   font-weight: 800;
+}
+
+.turn-core div .turn-countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 5px 9px;
+  border: 1px solid #cbe5cf;
+  border-radius: 999px;
+  color: #176e32;
+  background: #f2fbf3;
+  font-variant-numeric: tabular-nums;
+}
+
+.turn-core .turn-countdown b {
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.turn-core .turn-countdown small {
+  color: #5b8063;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .07em;
+}
+
+.turn-core div .turn-countdown.urgent {
+  border-color: #efc5b8;
+  color: #b33b2f;
+  background: #fff1ed;
+  animation: turnClockPulse .85s ease-in-out infinite alternate;
+}
+
+.turn-core .turn-countdown.urgent small {
+  color: #9a4a3c;
+}
+
+@keyframes turnClockPulse {
+  to { box-shadow: 0 0 0 4px rgba(197, 62, 44, .09); }
 }
 
 .turn-arrow {
@@ -9015,6 +11611,185 @@ button {
   gap: 18px;
 }
 
+/* =========================================================
+   PHASE 3D.19 • CARD STATUS VISUAL FX
+   Visual-only. Battle logic remains server-authoritative.
+========================================================= */
+
+.card-fx-stack,
+.card-fx-layer {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.card-fx-stack {
+  z-index: 24;
+  overflow: hidden;
+}
+
+.card-fx-layer {
+  display: block;
+}
+
+/* Fusion: neon rotating energy frame */
+.fx-fusion-layer {
+  inset: -20%;
+  background:
+    conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      rgba(75, 219, 255, 0.22) 65deg,
+      rgba(151, 82, 255, 0.34) 135deg,
+      transparent 210deg,
+      rgba(244, 91, 205, 0.24) 285deg,
+      transparent 360deg
+    );
+  filter: blur(15px);
+  animation: cardFxFusionSpin 6.5s linear infinite;
+}
+
+.cyber-card.fx-fusion-active {
+  border-color: rgba(132, 83, 235, 0.72);
+  box-shadow:
+    0 0 0 2px rgba(93, 203, 255, 0.14),
+    0 0 24px rgba(131, 77, 230, 0.28),
+    0 14px 30px rgba(50, 91, 153, 0.14);
+}
+
+/* Necro: violet soul mist */
+.fx-necro-layer {
+  background:
+    radial-gradient(circle at 15% 90%, rgba(121, 36, 190, 0.28), transparent 34%),
+    radial-gradient(circle at 85% 16%, rgba(78, 24, 145, 0.22), transparent 30%),
+    radial-gradient(circle at 50% 110%, rgba(38, 7, 75, 0.32), transparent 46%);
+  filter: saturate(1.18);
+  animation: cardFxNecroPulse 2.8s ease-in-out infinite;
+}
+
+.cyber-card.fx-necro-active {
+  box-shadow:
+    0 0 0 2px rgba(133, 71, 185, 0.14),
+    0 0 22px rgba(101, 49, 157, 0.26),
+    0 12px 30px rgba(58, 36, 91, 0.16);
+}
+
+/* Defense: blue protective pulse */
+.fx-defense-layer {
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 55%, rgba(76, 184, 255, .08), transparent 68%);
+  box-shadow:
+    inset 0 -14px 24px -23px rgba(50, 168, 255, .58);
+  animation: cardFxDefensePulse 1.55s ease-in-out infinite;
+}
+
+/* Shield: transparent glass barrier above card content */
+.fx-shield-layer {
+  z-index: 4;
+  background:
+    linear-gradient(135deg, rgba(186, 239, 255, 0.13), rgba(255,255,255,0.025) 42%, rgba(109, 209, 245, 0.12));
+  box-shadow:
+    inset 0 0 0 2px rgba(190, 239, 255, 0.46),
+    inset 0 0 26px rgba(91, 207, 255, 0.10),
+    0 0 18px rgba(80, 196, 246, 0.20);
+  backdrop-filter: blur(1.2px) saturate(1.08);
+}
+
+.fx-shield-layer::before {
+  content: "";
+  position: absolute;
+  top: -35%;
+  left: -55%;
+  width: 46%;
+  height: 175%;
+  transform: rotate(20deg);
+  background: linear-gradient(to right, transparent, rgba(255,255,255,0.30), transparent);
+  animation: cardFxShieldSweep 2.7s ease-in-out infinite;
+}
+
+/* Burn: ember edge + rising glow */
+.fx-burn-layer {
+  background:
+    radial-gradient(circle at 18% 100%, rgba(255, 83, 20, 0.34), transparent 26%),
+    radial-gradient(circle at 52% 108%, rgba(255, 164, 24, 0.28), transparent 32%),
+    radial-gradient(circle at 86% 100%, rgba(223, 50, 18, 0.30), transparent 26%);
+  animation: cardFxBurnFlicker 0.85s ease-in-out infinite alternate;
+}
+
+.cyber-card.fx-burn-active {
+  filter: saturate(1.12);
+}
+
+/* Freeze: frost vignette */
+.fx-freeze-layer {
+  background:
+    linear-gradient(135deg, rgba(177, 233, 255, 0.20), transparent 32%, rgba(113, 193, 239, 0.14) 72%, rgba(220, 249, 255, 0.18)),
+    radial-gradient(circle at 0 0, rgba(233, 252, 255, 0.35), transparent 28%),
+    radial-gradient(circle at 100% 100%, rgba(186, 231, 255, 0.28), transparent 30%);
+  box-shadow: inset 0 0 24px rgba(133, 212, 255, 0.24);
+}
+
+.cyber-card.fx-freeze-active {
+  filter: saturate(0.82) brightness(1.03);
+}
+
+/* Poison: toxic haze */
+.fx-poison-layer {
+  background:
+    radial-gradient(circle at 20% 78%, rgba(101, 194, 77, 0.20), transparent 25%),
+    radial-gradient(circle at 72% 22%, rgba(137, 57, 173, 0.20), transparent 28%),
+    radial-gradient(circle at 82% 86%, rgba(79, 164, 61, 0.18), transparent 22%);
+  animation: cardFxPoisonDrift 2.4s ease-in-out infinite alternate;
+}
+
+.cyber-card.fx-poison-active {
+  filter: saturate(1.08);
+}
+
+/* Stun: electric flashing overlay */
+.fx-stun-layer {
+  background:
+    repeating-linear-gradient(
+      118deg,
+      transparent 0 24px,
+      rgba(255, 217, 73, 0.16) 25px 27px,
+      transparent 28px 52px
+    );
+  mix-blend-mode: multiply;
+  animation: cardFxStunFlash 0.72s steps(2, end) infinite;
+}
+
+.cyber-card.fx-stun-active {
+  filter: brightness(1.04);
+}
+
+.fx-curse-layer {
+  background: radial-gradient(ellipse at 50% 55%, rgba(65, 40, 105, .22), transparent 62%),
+    linear-gradient(145deg, transparent 36%, rgba(20, 16, 43, .18) 50%, transparent 68%);
+  animation: cardFxCurseDrift 2.8s ease-in-out infinite alternate;
+}
+.cyber-card.fx-curse-active { filter: saturate(.92) brightness(.98); }
+
+@keyframes cardFxFusionSpin { to { transform: rotate(360deg); } }
+@keyframes cardFxNecroPulse { 0%,100% { opacity:.62; transform:scale(1); } 50% { opacity:1; transform:scale(1.035); } }
+@keyframes cardFxDefensePulse { 0%,100% { opacity:.62; } 50% { opacity:1; box-shadow: inset 0 0 22px rgba(76,184,255,.20),0 0 24px rgba(50,168,255,.32); } }
+@keyframes cardFxDefenseSpin { to { transform: rotate(360deg); } }
+@keyframes cardFxShieldSweep { 0% { transform:translateX(0) rotate(20deg); opacity:0; } 20% { opacity:.8; } 100% { transform:translateX(360%) rotate(20deg); opacity:0; } }
+@keyframes cardFxBurnFlicker { from { opacity:.58; filter:brightness(.92); } to { opacity:1; filter:brightness(1.15); } }
+@keyframes cardFxPoisonDrift { from { transform:translate3d(-2px,2px,0) scale(1); opacity:.62; } to { transform:translate3d(3px,-3px,0) scale(1.04); opacity:.92; } }
+@keyframes cardFxStunFlash { 0%,100% { opacity:.22; } 50% { opacity:.82; } }
+@keyframes cardFxCurseDrift { from { opacity:.35; transform:translateY(2px); } to { opacity:.78; transform:translateY(-3px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .card-fx-layer,
+  .card-fx-layer::before,
+  .card-fx-layer::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
 /* CARD */
 
 .cyber-card {
@@ -9185,17 +11960,109 @@ button {
     uppercase;
 }
 
-.cyber-card-inner
-> small {
-  display: block;
+.card-hp-block {
+  margin-bottom: 9px;
+}
 
-  margin-bottom: 8px;
+.card-hp-copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+}
 
+.card-hp-copy span {
   color: #6c879a;
+  font-size: 7px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+}
 
+.card-hp-copy strong {
+  color: #244b66;
   font-size: 10px;
+  font-weight: 950;
+}
 
-  font-weight: 700;
+.card-hp-track,
+.target-card-hp-track {
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(72, 119, 148, 0.12);
+  border-radius: 999px;
+  background: rgba(78, 117, 142, 0.14);
+  box-shadow: inset 0 1px 2px rgba(15, 40, 56, 0.08);
+}
+
+.card-hp-fill,
+.target-card-hp-fill,
+.hud-hp-fill,
+.enemy-mini-fill {
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  border-radius: inherit;
+  transition:
+    width 0.38s cubic-bezier(0.2, 0.8, 0.2, 1),
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.card-hp-fill.healthy,
+.target-card-hp-fill.healthy,
+.hud-hp-fill.healthy,
+.enemy-mini-fill.healthy {
+  background: linear-gradient(90deg, #18c873, #62e2b8);
+  box-shadow: 0 0 8px rgba(38, 210, 137, 0.34);
+}
+
+.card-hp-fill.warning,
+.target-card-hp-fill.warning,
+.hud-hp-fill.warning,
+.enemy-mini-fill.warning {
+  background: linear-gradient(90deg, #f0a620, #ffd95e);
+  box-shadow: 0 0 8px rgba(244, 177, 38, 0.32);
+}
+
+.card-hp-fill.critical,
+.target-card-hp-fill.critical,
+.hud-hp-fill.critical,
+.enemy-mini-fill.critical {
+  background: linear-gradient(90deg, #df3f5e, #ff6b6b);
+  box-shadow: 0 0 9px rgba(229, 58, 89, 0.38);
+  animation: hpCriticalPulse 0.9s ease-in-out infinite alternate;
+}
+
+.card-hp-shine {
+  width: 28%;
+  height: 100%;
+  position: absolute;
+  left: -35%;
+  top: 0;
+  transform: skewX(-22deg);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.72), transparent);
+  animation: cardHpShine 2.4s ease-in-out infinite;
+}
+
+@keyframes cardHpShine {
+  0%, 58% { left: -35%; }
+  100% { left: 120%; }
+}
+
+@keyframes hpCriticalPulse {
+  from { filter: brightness(0.92); }
+  to { filter: brightness(1.22); }
+}
+
+.cyber-card.incoming-hit .card-hp-track {
+  animation: cardHpHitFlash 0.55s ease;
+}
+
+@keyframes cardHpHitFlash {
+  0%, 100% { box-shadow: inset 0 1px 2px rgba(15, 40, 56, 0.08); }
+  45% { box-shadow: 0 0 0 3px rgba(255, 72, 91, 0.18), 0 0 18px rgba(255, 72, 91, 0.45); }
 }
 
 .cyber-card-image {
@@ -10013,29 +12880,23 @@ button {
 
 .target-card-hp {
   display: flex;
-
-  align-items: center;
-
-  justify-content:
-    space-between;
-
-  gap: 7px;
-
+  flex-direction: column;
+  gap: 6px;
   margin-top: 9px;
-
-  padding:
-    6px
-    7px;
-
+  padding: 6px 7px;
   border-radius: 7px;
+  background: rgba(232, 244, 250, 0.76);
+}
 
-  background:
-    rgba(
-      232,
-      244,
-      250,
-      0.76
-    );
+.target-card-hp-copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+.target-card-hp-track {
+  height: 6px;
 }
 
 .target-card-hp span,
@@ -12930,6 +15791,70 @@ small {
     );
 }
 
+.question-modal-topline { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.question-round-label { color:#18803a; font-size:10px; font-weight:900; letter-spacing:.12em; }
+.question-countdown { padding:7px 11px; border-radius:999px; color:#13732f; background:#eaf7ec; font-size:12px; font-weight:900; font-variant-numeric:tabular-nums; }
+.question-countdown.urgent { color:#b23a2f; background:#fff0ec; animation:questionTimerPulse .8s ease-in-out infinite alternate; }
+@keyframes questionTimerPulse { to { transform:scale(1.06); } }
+.question-illustration { display:block; width:min(100%,460px); max-height:230px; margin:14px auto; border:1px solid #e2ede3; border-radius:14px; object-fit:contain; background:#f8fcf8; }
+.question-card .hud-label { color:#23813e; }
+.question-block-order,.question-code-choice { display:grid; gap:9px; margin-top:15px; }
+.question-interaction-heading { display:grid; gap:4px; margin-bottom:2px; color:#174d2b; }
+.question-interaction-heading strong { font-size:13px; }
+.question-interaction-heading small { color:#6e8574; font-size:10px; }
+.question-block-item { display:flex; align-items:center; gap:10px; min-height:46px; padding:7px 9px; border:1px solid #d9e9dc; border-radius:11px; color:#225536; background:#f5fbf5; cursor:grab; }
+.question-block-item code { flex:1; overflow-wrap:anywhere; font-size:12px; }
+.block-grip { color:#78927e; font-size:18px; }
+.block-move-controls { display:flex; gap:4px; }
+.block-move-controls button { width:28px; height:28px; border:1px solid #cde2d0; border-radius:8px; color:#126d2b; background:#fff; cursor:pointer; }
+.block-move-controls button:disabled { opacity:.35; cursor:default; }
+.question-submit-button { min-height:42px; margin-top:5px; border:0; border-radius:11px; color:#fff; background:#159a39; font-size:11px; font-weight:900; letter-spacing:.08em; cursor:pointer; }
+.question-submit-button:disabled { opacity:.5; cursor:default; }
+.question-code-choice { padding:10px; border:1px solid #e1ebe2; border-radius:13px; background:#f7faf7; }
+.question-code-line { display:grid; grid-template-columns:28px minmax(0,1fr); align-items:center; gap:7px; }
+.question-code-line > span { color:#768b7b; text-align:right; font:11px ui-monospace,monospace; }
+.question-code-line button { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:35px; padding:7px 9px; border:1px solid transparent; border-radius:8px; color:#284e36; text-align:left; background:transparent; cursor:pointer; }
+.question-code-line button:hover:not(:disabled),.question-code-line button.selected { border-color:#a7d7ae; background:#e9f7eb; }
+.question-code-line button.correct { color:#0a7b2d; background:#dff4e2; }
+.question-code-line button.wrong { color:#a74236; background:#fff0ec; }
+.question-code-line button:disabled { cursor:default; }
+.question-code-line code { overflow-wrap:anywhere; font:12px ui-monospace,SFMono-Regular,Menlo,monospace; }
+.question-hints,.question-learning-feedback { margin-top:15px; padding:13px 14px; border:1px solid #d9e9dc; border-radius:13px; color:#28553a; background:#f6fbf6; }
+.question-hints > div { margin:0 0 8px; }
+.question-hints > div span,.recommended-material > span { color:#598066; font-size:9px; font-weight:900; letter-spacing:.09em; text-transform:uppercase; }
+.question-hints p,.question-learning-feedback p { margin:4px 0 0; color:#3d5f48; font-size:12px; line-height:1.5; }
+.question-hints > button,.recommended-material a { display:inline-flex; align-items:center; min-height:31px; padding:0 10px; border:1px solid #c5e0ca; border-radius:8px; color:#13712d; background:#fff; font-size:9px; font-weight:900; letter-spacing:.06em; text-decoration:none; cursor:pointer; }
+.question-learning-feedback > strong { color:#167b34; font-size:13px; }
+.question-learning-feedback.wrong { border-color:#ead8b6; background:#fffbf2; }
+.question-learning-feedback.wrong > strong { color:#98611a; }
+.question-learning-feedback.lost,.question-learning-feedback.timeout { border-color:#dfe6dc; background:#f5f7f3; }
+.recommended-material { display:grid; justify-items:start; gap:5px; margin-top:11px; padding-top:10px; border-top:1px solid #dfe9df; }
+.recommended-material strong { color:#1a5f30; font-size:12px; text-transform:capitalize; }
+.question-learning-feedback > small { display:block; margin-top:8px; color:#4c7655; font-weight:700; }
+.question-bonus-choice { display:grid; gap:10px; margin-top:13px; padding-top:12px; border-top:1px solid #dcebdc; }
+.question-bonus-choice > div:first-child { display:grid; gap:3px; }
+.question-bonus-choice > div:first-child strong { color:#176d2e; font-size:12px; }
+.question-bonus-choice > div:first-child span { color:#607865; font-size:10px; line-height:1.45; }
+.question-bonus-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.question-bonus-options > button { display:grid; grid-template-columns:32px minmax(0,1fr); align-items:start; gap:8px; min-width:0; padding:10px; border:1px solid #cce4ce; border-radius:11px; color:#245230; text-align:left; background:linear-gradient(145deg,#fff,#f0f9f0); cursor:pointer; transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease; }
+.question-bonus-options > button:hover:not(:disabled) { transform:translateY(-2px); border-color:#5bb568; box-shadow:0 7px 17px #16852c1a; }
+.question-bonus-options > button:disabled { opacity:.65; cursor:wait; }
+.question-bonus-icon { display:grid; place-items:center; width:32px; height:32px; border-radius:9px; background:#e0f3e2; font-size:18px; }
+.question-bonus-copy { display:grid; gap:4px; min-width:0; }
+.question-bonus-copy b { color:#1d6731; font-size:11px; }
+.question-bonus-copy small { color:#607865; font-size:9px; line-height:1.4; }
+.question-bonus-action { grid-column:2; color:#16812f; font-size:8px; font-weight:900; letter-spacing:.08em; }
+@media(max-width:620px) {
+  .question-card { padding:18px; border-radius:18px; }
+  .question-card h2 { margin-bottom:14px; font-size:20px; }
+  .question-text { font-size:15px; }
+  .question-illustration { max-height:170px; }
+  .question-bonus-options { grid-template-columns:1fr; }
+  .question-bonus-options > button { grid-template-columns:36px minmax(0,1fr) auto; align-items:center; }
+  .question-bonus-icon { width:36px; height:36px; }
+  .question-bonus-action { grid-column:auto; }
+}
+
 .question-state {
   padding:
     50px
@@ -14755,5 +17680,292 @@ h2 {
       center;
   }
 }
+
+
+
+/* =========================================================
+   PHASE 3C.1 • NECRO SOUL REBIRTH CINEMATIC
+========================================================= */
+.necro-rebirth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 17000;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  pointer-events: none;
+  background: rgba(19, 12, 30, 0.28);
+  backdrop-filter: blur(3px);
+}
+
+.necro-rebirth-vignette {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 52%, rgba(178, 100, 255, 0.18), transparent 24%),
+    radial-gradient(circle at 50% 50%, transparent 25%, rgba(22, 12, 31, 0.55) 78%);
+}
+
+.necro-rebirth-stage {
+  width: min(760px, 86vw);
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) 150px minmax(150px, 1fr);
+  align-items: center;
+  gap: 28px;
+}
+
+.necro-rebirth-card {
+  min-width: 0;
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  transition: all 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.necro-rebirth-card img,
+.necro-card-placeholder {
+  width: clamp(130px, 17vw, 190px);
+  aspect-ratio: 2 / 3;
+  position: relative;
+  z-index: 2;
+  object-fit: cover;
+  border: 3px solid rgba(238, 221, 255, 0.9);
+  border-radius: 18px;
+  background: #1d1428;
+  box-shadow: 0 22px 60px rgba(23, 10, 34, 0.46);
+}
+
+.necro-card-placeholder {
+  display: grid;
+  place-items: center;
+  color: #efe0ff;
+  font-size: 62px;
+}
+
+.necro-rebirth-card strong {
+  max-width: 210px;
+  overflow: hidden;
+  color: #fff;
+  font-size: 14px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.necro-rebirth-card small {
+  color: #d8baf4;
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: 0.13em;
+}
+
+.necro-card-aura {
+  width: 72%;
+  aspect-ratio: 1;
+  position: absolute;
+  top: 32%;
+  z-index: 1;
+  border-radius: 50%;
+  background: rgba(164, 82, 225, 0.36);
+  filter: blur(30px);
+  transform: translateY(-50%) scale(0.7);
+  opacity: 0;
+  transition: all 0.5s ease;
+}
+
+.necro-soul-core {
+  width: 132px;
+  height: 132px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(218, 180, 255, 0.48);
+  border-radius: 50%;
+  color: #f3e7ff;
+  background: radial-gradient(circle, rgba(125, 58, 179, 0.86), rgba(42, 22, 57, 0.88) 66%, transparent 68%);
+  box-shadow: 0 0 55px rgba(147, 75, 210, 0.38);
+}
+
+.necro-soul-core span {
+  font-size: 48px;
+}
+
+.necro-soul-core b {
+  position: absolute;
+  bottom: -24px;
+  font-size: 7px;
+  letter-spacing: 0.3em;
+}
+
+.necro-soul-core i {
+  position: absolute;
+  inset: -13px;
+  border: 2px dashed rgba(218, 180, 255, 0.48);
+  border-radius: 50%;
+  animation: necroSoulSpin 2.6s linear infinite;
+}
+
+.necro-rebirth-copy {
+  position: absolute;
+  left: 50%;
+  bottom: max(36px, 7vh);
+  z-index: 3;
+  transform: translateX(-50%);
+  text-align: center;
+  color: #fff;
+}
+
+.necro-rebirth-copy small {
+  color: #cfa9ef;
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: 0.2em;
+}
+
+.necro-rebirth-copy h2 {
+  margin: 5px 0 2px;
+  font-size: clamp(24px, 4vw, 46px);
+  letter-spacing: 0.08em;
+  text-shadow: 0 0 30px rgba(181, 102, 242, 0.58);
+}
+
+.necro-rebirth-copy p {
+  margin: 0;
+  color: #dcc8eb;
+  font-size: 11px;
+}
+
+.phase-sacrifice .sacrifice-card {
+  animation: necroSacrificeShake 0.62s ease both;
+}
+
+.phase-sacrifice .sacrifice-card .necro-card-aura,
+.phase-soul .sacrifice-card .necro-card-aura {
+  opacity: 1;
+  transform: translateY(-50%) scale(1.2);
+}
+
+.phase-soul .sacrifice-card {
+  transform: translateX(74px) scale(0.72);
+  opacity: 0.18;
+  filter: grayscale(0.8) brightness(0.6);
+}
+
+.revived-card {
+  opacity: 0.08;
+  transform: translateX(-38px) scale(0.78);
+  filter: brightness(0.35);
+}
+
+.phase-revive .revived-card,
+.phase-result .revived-card {
+  opacity: 1;
+  transform: translateX(0) scale(1);
+  filter: brightness(1);
+}
+
+.phase-revive .revived-card .necro-card-aura,
+.phase-result .revived-card .necro-card-aura {
+  opacity: 1;
+  background: rgba(103, 219, 170, 0.34);
+  transform: translateY(-50%) scale(1.25);
+}
+
+.phase-revive .necro-soul-core {
+  animation: necroSoulBurst 0.72s ease-out both;
+}
+
+.phase-result .sacrifice-card {
+  opacity: 0;
+  transform: translateX(100px) scale(0.55);
+}
+
+@keyframes necroSoulSpin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes necroSacrificeShake {
+  0%, 100% { transform: translateX(0) rotate(0); }
+  20% { transform: translateX(-7px) rotate(-1deg); }
+  40% { transform: translateX(8px) rotate(1deg); }
+  60% { transform: translateX(-5px) rotate(-0.6deg); }
+  80% { transform: translateX(4px) rotate(0.5deg); }
+}
+
+@keyframes necroSoulBurst {
+  0% { transform: scale(1); filter: brightness(1); }
+  40% { transform: scale(1.35); filter: brightness(1.8); }
+  100% { transform: scale(0.84); filter: brightness(0.9); }
+}
+
+.necro-rebirth-enter-active,
+.necro-rebirth-leave-active {
+  transition: opacity 0.22s ease;
+}
+
+.necro-rebirth-enter-from,
+.necro-rebirth-leave-to {
+  opacity: 0;
+}
+
+@media (max-width: 720px) {
+  .necro-rebirth-stage {
+    width: 92vw;
+    grid-template-columns: minmax(90px, 1fr) 80px minmax(90px, 1fr);
+    gap: 10px;
+  }
+
+  .necro-soul-core {
+    width: 72px;
+    height: 72px;
+  }
+
+  .necro-soul-core span {
+    font-size: 30px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .necro-rebirth-card,
+  .necro-soul-core,
+  .necro-soul-core i {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Quiz reward and skill text follow the Timedoor light battle palette. */
+.question-card,
+.question-card :is(h2, .question-text, .question-learning-feedback, .question-bonus-choice, .question-bonus-copy, .question-bonus-action) {
+  color: #21472b;
+}
+.question-card h2 { color: #193d24; }
+.question-card .question-text { color: #2c5133; }
+.question-card .question-learning-feedback,
+.question-card .question-hints { border-color: #d6e8d6; background: #f5faf3; color: #36583c; }
+.question-card .question-learning-feedback p,
+.question-card .question-hints p,
+.question-card .question-bonus-copy small,
+.question-card .question-bonus-choice > div:first-child span { color: #536f58; }
+.question-card .question-bonus-options > button {
+  border-color: #cfe4cf;
+  background: linear-gradient(145deg, #fff, #f2f9ef);
+  color: #21472b;
+}
+.question-card .question-bonus-options > button b { color: #176d2e; }
+.question-card .question-bonus-options > button small { color: #536f58; }
+.question-card .question-bonus-action { color: #16812f; }
+.bonus-panel { border-color: #dce9db; background: #fff; }
+.bonus-panel .panel-heading h2,
+.bonus-item,
+.bonus-item strong { color: #193d24; }
+.bonus-description,
+.bonus-item small { color: #607865; }
+.bonus-item { border-color: #cfe4cf; background: linear-gradient(145deg, #fff, #f2f9ef); }
+.bonus-item-icon { background: #e6f5e5; }
+
 
 </style>

@@ -55,6 +55,87 @@ const {
 } = useBattleSession();
 
 const activeFieldRef = ref(null);
+const publicPageRef = ref(null);
+const fullscreenActive = ref(false);
+let statusPollTimer = null;
+let latestStatusRequest = 0;
+
+const syncFullscreenState = () => {
+  fullscreenActive.value = document.fullscreenElement === publicPageRef.value;
+};
+const togglePublicFullscreen = async () => {
+  try {
+    if (document.fullscreenElement === publicPageRef.value) {
+      await document.exitFullscreen();
+    } else if (publicPageRef.value?.requestFullscreen) {
+      await publicPageRef.value.requestFullscreen();
+    }
+  } catch (fullscreenError) {
+    console.warn('[PUBLIC BATTLE] Fullscreen not available:', fullscreenError);
+  }
+  syncFullscreenState();
+};
+
+
+// =========================================================
+// PHASE 3D.18 • STATUS EFFECT UI DATA
+// =========================================================
+
+const activeStatusEffects = ref([]);
+
+const STATUS_REFRESH_EVENT_TYPES = new Set([
+  "attack",
+  "card_destroyed",
+  "damage",
+  "defense",
+  "heal",
+  "ultimate",
+  "synergy",
+  "special_effect",
+  "special_skill",
+  "fusion",
+  "summon",
+  "graveyard",
+  "bench",
+  "swap",
+  "bonus_skill_used",
+  "question_winner",
+  "status_tick",
+  "status_expired",
+  "status_applied",
+  "status_added",
+  "status_refreshed",
+  "status_removed",
+  "status_stack_changed",
+  "turn_changed",
+  "turn_ended",
+]);
+
+// RPC is the source of truth; polling is an intentional fallback when the
+// spectator only receives the last battle event of an event burst.
+const loadStatusEffects = async () => {
+  const battleId = battle.value?.id;
+  const requestId = ++latestStatusRequest;
+  if (!battleId) {
+    activeStatusEffects.value = [];
+    return;
+  }
+  try {
+    const { data, error: statusError } = await supabase.rpc(
+      "get_active_battle_status_effects",
+      { p_battle_id: battleId },
+    );
+    if (statusError) throw statusError;
+    // Ignore stale RPC responses when multiple status updates arrive together.
+    if (requestId !== latestStatusRequest || battle.value?.id !== battleId) return;
+    activeStatusEffects.value = Array.isArray(data) ? data : [];
+  } catch (statusError) {
+    // Keep the last valid snapshot instead of making FX flicker on transient errors.
+    if (requestId === latestStatusRequest) {
+      console.error("[PUBLIC BATTLE] load status effects:", statusError);
+    }
+  }
+};
 
 const {
   players: liveUi,
@@ -63,6 +144,167 @@ const {
 
   disconnect: disconnectBattleUi,
 } = useBattleUiSync();
+
+const liveTurnPlayer = computed(() => {
+  if (String(battle.value?.status ?? "").toLowerCase() !== "battle") return null;
+  const turn = String(battle.value?.current_turn ?? "").trim().toLowerCase();
+  if (["p1", "player1", "player_1"].includes(turn)) return "p1";
+  if (["p2", "player2", "player_2"].includes(turn)) return "p2";
+  return null;
+});
+
+/* =========================================================
+   SOUND SYSTEM
+   Restored from the older battle arena.
+========================================================= */
+
+const SOUND_FILES = {
+  attack: "/sounds/attack.mp3",
+  hit: "/sounds/hit.mp3",
+  defense: "/sounds/defense.mp3",
+  heal: "/sounds/heal.mp3",
+  ultimate: "/sounds/ultimate.mp3",
+  synergy: "/sounds/synergy.mp3",
+  summon: "/sounds/summon.mp3",
+  bench: "/sounds/bench.mp3",
+  swap: "/sounds/swap.mp3",
+  warning: "/sounds/warning.mp3",
+  question: "/sounds/question.mp3",
+  correct: "/sounds/correct.mp3",
+  wrong: "/sounds/wrong.mp3",
+  win: "/sounds/win.mp3",
+  lose: "/sounds/lose.mp3",
+
+  // Tidak membutuhkan asset baru untuk Phase 3D.13.
+  // Nanti boleh diganti menjadi /sounds/fusion.mp3 jika kamu punya file khusus.
+  fusion: "/sounds/synergy.mp3",
+};
+
+const soundEnabled = ref(true);
+const audioUnlocked = ref(false);
+const audioCache = new Map();
+
+let endSoundPlayed = false;
+
+const getAudio = (name) => {
+  if (typeof Audio === "undefined") {
+    return null;
+  }
+
+  const source = SOUND_FILES[name];
+
+  if (!source) {
+    return null;
+  }
+
+  if (!audioCache.has(name)) {
+    const audio = new Audio(source);
+
+    audio.preload = "auto";
+
+    audio.addEventListener("error", () => {
+      console.warn(`[PUBLIC BATTLE AUDIO] gagal memuat ${name}: ${source}`);
+    });
+
+    audioCache.set(name, audio);
+  }
+
+  return audioCache.get(name);
+};
+
+const unlockAudio = async () => {
+  if (audioUnlocked.value) {
+    return true;
+  }
+
+  // Harus dipanggil dari interaksi user karena autoplay policy browser.
+  audioUnlocked.value = true;
+
+  const probe = getAudio("attack");
+
+  if (!probe) {
+    return true;
+  }
+
+  const previousMuted = probe.muted;
+  const previousVolume = probe.volume;
+
+  try {
+    probe.muted = true;
+    probe.volume = 0;
+    probe.currentTime = 0;
+
+    await probe.play();
+
+    probe.pause();
+    probe.currentTime = 0;
+  } catch (audioError) {
+    // Interaksi user berikutnya masih boleh mencoba memutar audio lagi.
+    console.debug("[PUBLIC BATTLE AUDIO] unlock probe:", audioError);
+  } finally {
+    probe.muted = previousMuted;
+    probe.volume = previousVolume;
+  }
+
+  return true;
+};
+
+const playSound = async (name, volume = 0.85) => {
+  if (!soundEnabled.value || !audioUnlocked.value) {
+    return;
+  }
+
+  const audio = getAudio(name);
+
+  if (!audio) {
+    return;
+  }
+
+  try {
+    audio.pause();
+    audio.currentTime = 0;
+    audio.volume = Math.max(0, Math.min(1, Number(volume) || 0));
+
+    await audio.play();
+  } catch (audioError) {
+    console.debug(`[PUBLIC BATTLE AUDIO] ${name}:`, audioError);
+  }
+};
+
+const toggleSound = async () => {
+  if (!audioUnlocked.value) {
+    await unlockAudio();
+    soundEnabled.value = true;
+
+    // Feedback kecil agar operator tahu audio sudah aktif.
+    void playSound("question", 0.28);
+
+    return;
+  }
+
+  soundEnabled.value = !soundEnabled.value;
+
+  if (soundEnabled.value) {
+    void playSound("question", 0.28);
+  }
+};
+
+const handleAudioUnlockInteraction = () => {
+  void unlockAudio();
+};
+
+const cleanupAudio = () => {
+  for (const audio of audioCache.values()) {
+    try {
+      audio.pause();
+      audio.currentTime = 0;
+    } catch {
+      // ignore cleanup error
+    }
+  }
+
+  audioCache.clear();
+};
 
 /* =========================================================
 
@@ -85,6 +327,51 @@ const normalizeBattleCard = (card) => ({
 
   baseHp: Number(card?.base_hp ?? card?.baseHp ?? card?.hp ?? 0),
 });
+
+/* =========================================================
+   PHASE 3D.16 • CANONICAL BATTLE EVENT CONTRACT
+========================================================= */
+
+const publicEventPayload = (event) =>
+  event?.payload && typeof event.payload === "object"
+    ? event.payload
+    : {};
+
+const publicEventAffectedCardIds = (event) => {
+  const payload = publicEventPayload(event);
+  const ids = [];
+
+  if (Array.isArray(payload?.affected_card_ids)) {
+    ids.push(...payload.affected_card_ids);
+  }
+
+  if (Array.isArray(payload?.targets)) {
+    ids.push(...payload.targets.map((target) => target?.target_card_id));
+  }
+
+  ids.push(payload?.target_card_id, payload?.battle_card_id);
+
+  if (
+    ["card_destroyed", "graveyard", "bench", "swap", "summon"].includes(
+      String(event?.type ?? "").toLowerCase(),
+    )
+  ) {
+    ids.push(event?.card_id);
+  }
+
+  return [...new Set(
+    ids
+      .filter((value) => value != null && value !== "")
+      .map((value) => String(value)),
+  )];
+};
+
+const publicEventEffectType = (event) =>
+  String(
+    publicEventPayload(event)?.effect_type ??
+      publicEventPayload(event)?.effect?.type ??
+      "",
+  ).toLowerCase();
 
 /* =========================================================
 
@@ -212,6 +499,8 @@ const showFusionAnnouncement = (event) => {
     return;
   }
 
+  void playSound("fusion", 0.92);
+
   fusionAnnouncement.value = event;
 
   if (fusionAnnouncementTimer) {
@@ -227,6 +516,91 @@ const showFusionAnnouncement = (event) => {
 
     4200,
   );
+};
+
+
+/* =========================================================
+   PHASE 3D.16 • GENERIC EVENT ANNOUNCEMENT
+========================================================= */
+
+const eventAnnouncement = ref(null);
+let eventAnnouncementTimer = null;
+const processedAnnouncementEvents = new Set();
+
+const showEventAnnouncement = ({
+  event = null,
+  icon = "✦",
+  eyebrow = "BATTLE EVENT",
+  title = "EVENT",
+  message = "",
+  tone = "info",
+} = {}) => {
+  const key = String(
+    event?.id ??
+      `${event?.type ?? title}:${event?.created_at ?? ""}:${event?.source_player ?? ""}`,
+  );
+
+  if (event && processedAnnouncementEvents.has(key)) {
+    return;
+  }
+
+  if (event) {
+    processedAnnouncementEvents.add(key);
+
+    if (processedAnnouncementEvents.size > 200) {
+      const oldest = processedAnnouncementEvents.values().next().value;
+      processedAnnouncementEvents.delete(oldest);
+    }
+  }
+
+  eventAnnouncement.value = {
+    icon,
+    eyebrow,
+    title,
+    message,
+    tone,
+  };
+
+  if (eventAnnouncementTimer) {
+    clearTimeout(eventAnnouncementTimer);
+  }
+
+  eventAnnouncementTimer = setTimeout(() => {
+    eventAnnouncement.value = null;
+    eventAnnouncementTimer = null;
+  }, 3600);
+};
+
+// Fire passive events come from Supabase (never simulate damage in Vue).
+// Fire status UI is visual-only. The active card burns via PublicActiveField.
+// Damage stays server-authoritative; no BURN banners or textual popups.
+const handleFirePassiveEvent = (event) => {
+  const payload = publicEventPayload(event);
+  const kind = String(event?.type ?? "").toLowerCase();
+  if (String(payload?.status_key ?? "").toLowerCase() === "elemental_burn" && kind === "status_tick") {
+    void playSound("hit", 0.55);
+  }
+};
+
+const showReviveAnnouncement = async (event) => {
+  const payload = publicEventPayload(event);
+  const targetCardId = publicEventAffectedCardIds(event)[0] ?? null;
+  const targetCard = targetCardId ? await fetchBattleCardById(targetCardId) : null;
+  const restoredHp = Math.max(
+    0,
+    Number(payload?.result?.restored_hp ?? payload?.restored_hp ?? 0) || 0,
+  );
+
+  showEventAnnouncement({
+    event,
+    icon: "☠️",
+    eyebrow: `${String(event?.source_player ?? "PLAYER").toUpperCase()} • NECRO EFFECT`,
+    title: "CARD REVIVED",
+    message: `${targetCard?.name ?? "A Graveyard Card"} kembali ke Active${
+      restoredHp > 0 ? ` dengan ${restoredHp} HP` : ""
+    }.`,
+    tone: "necro",
+  });
 };
 
 const loadGraveyards = async () => {
@@ -569,6 +943,195 @@ const resetCombatAnimation = () => {
 
     waterShieldPercent: 0,
   };
+};
+
+
+/* =========================================================
+   PHASE 3D.16 • ULTIMATE AOE CINEMATIC
+   Fusion cinematic remains intentionally postponed (3D.14).
+========================================================= */
+
+const ultimateAnimation = ref({
+  active: false,
+  phase: "idle",
+  sourcePlayer: null,
+  targetPlayer: null,
+  sourceCardId: null,
+  sourceCard: null,
+  sourceRect: null,
+  targets: [],
+  totalDamage: 0,
+  destroyedCount: 0,
+  perCardDamage: 0,
+});
+
+let ultimateTimers = [];
+const processedUltimateEvents = new Set();
+
+const resetUltimateAnimation = () => {
+  ultimateTimers.forEach(clearTimeout);
+  ultimateTimers = [];
+
+  ultimateAnimation.value = {
+    active: false,
+    phase: "idle",
+    sourcePlayer: null,
+    targetPlayer: null,
+    sourceCardId: null,
+    sourceCard: null,
+    sourceRect: null,
+    targets: [],
+    totalDamage: 0,
+    destroyedCount: 0,
+    perCardDamage: 0,
+  };
+};
+
+const queueUltimatePhase = (delay, phase) => {
+  ultimateTimers.push(
+    setTimeout(() => {
+      if (ultimateAnimation.value.active) {
+        ultimateAnimation.value.phase = phase;
+      }
+    }, delay),
+  );
+};
+
+const ultimateTargetStyle = (target) => ({
+  left: `${target?.rect?.centerX ?? window.innerWidth / 2}px`,
+  top: `${target?.rect?.centerY ?? window.innerHeight / 2}px`,
+});
+
+const ultimateSourceStyle = computed(() => {
+  const rect = ultimateAnimation.value.sourceRect;
+
+  if (!rect) {
+    return {};
+  }
+
+  return {
+    left: `${rect.centerX}px`,
+    top: `${rect.centerY}px`,
+  };
+});
+
+const startUltimateAoeAnimation = async (event) => {
+  if (!event || String(event.type ?? "").toLowerCase() !== "ultimate") {
+    return false;
+  }
+
+  const payload = publicEventPayload(event);
+  const attackMode = String(payload?.attack_mode ?? "").toLowerCase();
+
+  if (attackMode !== "ultimate_aoe") {
+    return false;
+  }
+
+  const eventKey = String(event.id ?? event.created_at ?? "ultimate");
+
+  if (processedUltimateEvents.has(eventKey)) {
+    return true;
+  }
+
+  processedUltimateEvents.add(eventKey);
+
+  if (processedUltimateEvents.size > 120) {
+    const oldest = processedUltimateEvents.values().next().value;
+    processedUltimateEvents.delete(oldest);
+  }
+
+  const sourcePlayer = String(event.source_player ?? "").toLowerCase();
+  const targetPlayer = String(
+    event.target_player ?? (sourcePlayer === "p1" ? "p2" : "p1"),
+  ).toLowerCase();
+
+  const sourceCardId =
+    payload?.source_card_id ?? payload?.attacker_card_id ?? event.card_id ?? null;
+
+  const rawTargets = Array.isArray(payload?.targets) ? payload.targets : [];
+  const affectedIds = publicEventAffectedCardIds(event);
+
+  await nextTick();
+  activeFieldRef.value?.captureCardRects?.();
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+
+  const sourceRect = sourceCardId
+    ? activeFieldRef.value?.getCardRect?.(sourcePlayer, sourceCardId) ??
+      fallbackRect(sourcePlayer, "card")
+    : fallbackRect(sourcePlayer, "card");
+
+  const normalizedTargets = (
+    rawTargets.length
+      ? rawTargets
+      : affectedIds.map((targetCardId) => ({ target_card_id: targetCardId }))
+  ).map((target, index) => {
+    const targetCardId = target?.target_card_id ?? affectedIds[index] ?? null;
+    const rect = targetCardId
+      ? activeFieldRef.value?.getCardRect?.(targetPlayer, targetCardId) ??
+        fallbackRect(targetPlayer, "card")
+      : fallbackRect(targetPlayer, "card");
+
+    return {
+      ...target,
+      target_card_id: targetCardId,
+      rect,
+      effective_damage: Math.max(
+        0,
+        Number(target?.effective_damage ?? payload?.per_card_damage ?? 0) || 0,
+      ),
+      hp_before: Math.max(0, Number(target?.hp_before ?? 0) || 0),
+      hp_after: Math.max(0, Number(target?.hp_after ?? 0) || 0),
+      destroyed: Boolean(target?.destroyed),
+    };
+  });
+
+  const sourceCard = sourceCardId ? await fetchBattleCardById(sourceCardId) : null;
+
+  resetUltimateAnimation();
+
+  ultimateAnimation.value = {
+    active: true,
+    phase: "charge",
+    sourcePlayer,
+    targetPlayer,
+    sourceCardId,
+    sourceCard,
+    sourceRect,
+    targets: normalizedTargets,
+    totalDamage: Math.max(
+      0,
+      Number(payload?.total_effective_damage ?? payload?.damage ?? 0) || 0,
+    ),
+    destroyedCount: Math.max(0, Number(payload?.destroyed_count ?? 0) || 0),
+    perCardDamage: Math.max(0, Number(payload?.per_card_damage ?? 0) || 0),
+  };
+
+  void playSound("ultimate", 0.96);
+
+  queueUltimatePhase(620, "burst");
+  queueUltimatePhase(1120, "impact");
+  queueUltimatePhase(1850, "result");
+  queueUltimatePhase(3050, "exit");
+
+  const burstCount = Math.min(Math.max(normalizedTargets.length, 1), 5);
+
+  for (let index = 0; index < burstCount; index += 1) {
+    ultimateTimers.push(
+      setTimeout(() => {
+        if (ultimateAnimation.value.active) {
+          void playSound("hit", Math.max(0.54, 0.9 - index * 0.07));
+        }
+      }, 1050 + index * 115),
+    );
+  }
+
+  ultimateTimers.push(
+    setTimeout(() => {
+      resetUltimateAnimation();
+    }, 3600),
+  );
+
+  return true;
 };
 
 /* =========================================================
@@ -926,6 +1489,16 @@ const queueCombatPhase = (
   );
 };
 
+const queueCombatSound = (delay, name, volume = 0.85) => {
+  combatTimers.push(
+    setTimeout(() => {
+      if (combatAnimation.value.active) {
+        void playSound(name, volume);
+      }
+    }, delay),
+  );
+};
+
 /* =========================================================
 
    START ATTACK
@@ -1064,6 +1637,20 @@ const startCombatAnimation = async (event) => {
       Number(payload.water_shield_reduction_percent ?? 0) || 0,
   };
 
+  // Attack cue dimulai bersamaan dengan cinematic.
+  void playSound("attack", combatAnimation.value.powerStrikeApplied ? 1 : 0.82);
+
+  // Defense / Water Shield cue ketika charge muncul.
+  if (
+    combatAnimation.value.defenseApplied ||
+    combatAnimation.value.waterShieldApplied
+  ) {
+    queueCombatSound(430, "defense", 0.75);
+  }
+
+  // Impact cue tepat sebelum phase impact.
+  queueCombatSound(1320, "hit", combatAnimation.value.destroyed ? 1 : 0.9);
+
   queueCombatPhase(
     420,
 
@@ -1135,6 +1722,14 @@ const subscribeCombatEvents = () => {
         if (event?.type === "attack") {
           void startCombatAnimation(event);
         }
+        if (event?.type === 'status_applied' || event?.type === 'status_tick') {
+          void loadStatusEffects();
+          handleFirePassiveEvent(event);
+        }
+
+        if (event?.type === "ultimate") {
+          void startUltimateAoeAnimation(event);
+        }
       },
     )
 
@@ -1143,6 +1738,7 @@ const subscribeCombatEvents = () => {
 
 const unsubscribeCombatEvents = async () => {
   resetCombatAnimation();
+  resetUltimateAnimation();
 
   if (!combatChannel) {
     return;
@@ -1182,6 +1778,25 @@ const questionLevel = computed(() =>
   String(currentQuestion.value?.difficulty ?? "").toUpperCase(),
 );
 
+watch(
+  showQuestion,
+  (active, previous) => {
+    if (active && !previous) {
+      void playSound("question", 0.78);
+    }
+  },
+);
+
+watch(
+  () => [battle.value?.status, battle.value?.winner],
+  ([status, winner]) => {
+    if ((status === "finished" || winner) && !endSoundPlayed) {
+      endSoundPlayed = true;
+      void playSound("win", 0.95);
+    }
+  },
+);
+
 /* =========================================================
 
    CONNECT
@@ -1214,6 +1829,8 @@ const loadCurrentBattle = async () => {
 
     loadFusionHistory(),
 
+    loadStatusEffects(),
+
     connectPublicLiveUi(),
   ]);
 
@@ -1230,22 +1847,78 @@ watch(
       return;
     }
 
+    const eventType = String(event.type ?? "").toLowerCase();
+
+    if (STATUS_REFRESH_EVENT_TYPES.has(eventType)) {
+      void loadStatusEffects();
+    }
+    if (eventType === 'status_applied' || eventType === 'status_tick') {
+      handleFirePassiveEvent(event);
+    }
+
     if (
       [
         "graveyard",
-
         "bench",
-
         "swap",
-
         "summon",
-
         "card_destroyed",
-
+        "ultimate",
+        "special_effect",
+        "special_skill",
         "fusion",
-      ].includes(event.type)
+      ].includes(String(event.type ?? "").toLowerCase())
     ) {
       void loadGraveyards();
+    }
+
+    if (event.type === "summon") {
+      void playSound("summon", 0.82);
+    }
+
+    if (event.type === "bench") {
+      void playSound("bench", 0.72);
+    }
+
+    if (event.type === "swap") {
+      void playSound("swap", 0.78);
+    }
+
+    if (event.type === "defense") {
+      void playSound("defense", 0.78);
+    }
+
+    if (event.type === "heal") {
+      void playSound("heal", 0.82);
+    }
+
+    if (event.type === "ultimate") {
+      const handledAoe = startUltimateAoeAnimation(event);
+
+      void Promise.resolve(handledAoe).then((handled) => {
+        if (!handled) {
+          void playSound("ultimate", 0.92);
+        }
+      });
+    }
+
+    if (event.type === "synergy") {
+      void playSound("synergy", 0.86);
+    }
+
+    if (event.type === "special_effect") {
+      const effectType = publicEventEffectType(event);
+
+      if (effectType === "revive") {
+        void showReviveAnnouncement(event);
+        void playSound("summon", 0.82);
+        setTimeout(() => void playSound("heal", 0.68), 260);
+      } else if (
+        effectType === "move_zone" &&
+        String(publicEventPayload(event)?.result?.to_zone ?? "").toLowerCase() === "graveyard"
+      ) {
+        void playSound("warning", 0.52);
+      }
     }
 
     if (event.type === "fusion") {
@@ -1261,10 +1934,43 @@ watch(
 );
 
 onMounted(() => {
+  document.body.classList.add('public-tv-mode');
+  document.addEventListener('fullscreenchange', syncFullscreenState);
+  // Sync every 2.5s even when battle events are coalesced or missed.
+  statusPollTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible' && battle.value?.id &&
+        battle.value.status !== 'finished') void loadStatusEffects();
+  }, 2500);
+  // Browser mengizinkan audio setelah minimal satu interaksi user.
+  window.addEventListener("pointerdown", handleAudioUnlockInteraction, {
+    once: true,
+    capture: true,
+  });
+
+  window.addEventListener("keydown", handleAudioUnlockInteraction, {
+    once: true,
+    capture: true,
+  });
+
   void loadCurrentBattle();
 });
 
 onUnmounted(async () => {
+  ++latestStatusRequest;
+  if (statusPollTimer !== null) window.clearInterval(statusPollTimer);
+  statusPollTimer = null;
+  document.body.classList.remove('public-tv-mode');
+  document.removeEventListener('fullscreenchange', syncFullscreenState);
+  window.removeEventListener("pointerdown", handleAudioUnlockInteraction, true);
+  window.removeEventListener("keydown", handleAudioUnlockInteraction, true);
+
+  cleanupAudio();
+
+  if (eventAnnouncementTimer) {
+    clearTimeout(eventAnnouncementTimer);
+    eventAnnouncementTimer = null;
+  }
+
   if (fusionAnnouncementTimer) {
     clearTimeout(fusionAnnouncementTimer);
 
@@ -1282,7 +1988,7 @@ onUnmounted(async () => {
 </script>
 
 <template>
-  <main class="public-battle-page">
+  <main ref="publicPageRef" class="public-battle-page">
     <div v-if="loading" class="public-state">Loading Battle...</div>
 
     <div v-else-if="error" class="public-state error">
@@ -1290,6 +1996,52 @@ onUnmounted(async () => {
     </div>
 
     <template v-else-if="battle">
+      <!-- =================================================
+           PUBLIC BATTLE SOUND CONTROL
+      ================================================== -->
+
+      <button
+        type="button"
+        class="public-sound-control"
+        :class="{
+          enabled: soundEnabled && audioUnlocked,
+          locked: !audioUnlocked,
+        }"
+        :title="
+          !audioUnlocked
+            ? 'Klik untuk mengaktifkan sound effect'
+            : soundEnabled
+              ? 'Sound effect aktif'
+              : 'Sound effect dimatikan'
+        "
+        @click="toggleSound"
+      >
+        <span>
+          {{ soundEnabled && audioUnlocked ? "🔊" : "🔇" }}
+        </span>
+
+        <strong>
+          {{
+            !audioUnlocked
+              ? "ENABLE SOUND"
+              : soundEnabled
+                ? "SOUND ON"
+                : "SOUND OFF"
+          }}
+        </strong>
+      </button>
+
+      <button
+        type="button"
+        class="public-fullscreen-control"
+        :aria-label="fullscreenActive ? 'Keluar dari fullscreen' : 'Tampilkan fullscreen TV'"
+        :title="fullscreenActive ? 'Exit fullscreen' : 'Fullscreen untuk TV'"
+        @click="togglePublicFullscreen"
+      >
+        <span aria-hidden="true">{{ fullscreenActive ? '⤡' : '⛶' }}</span>
+        <strong>{{ fullscreenActive ? 'EXIT FULLSCREEN' : 'TV FULLSCREEN' }}</strong>
+      </button>
+
       <!-- =================================================
            PHASE 3D.13 • FUSION EVENT ANNOUNCEMENT
       ================================================== -->
@@ -1319,6 +2071,28 @@ onUnmounted(async () => {
               →
               {{ fusionAnnouncement.payload?.result?.name ?? "Fusion Result" }}
             </span>
+          </div>
+        </div>
+      </Transition>
+
+      <!-- =================================================
+           PHASE 3D.16 • NORMALIZED EVENT ANNOUNCEMENT
+      ================================================== -->
+
+      <Transition name="event-pop">
+        <div
+          v-if="eventAnnouncement"
+          class="battle-event-toast"
+          :class="eventAnnouncement.tone"
+        >
+          <div class="battle-event-toast-icon">
+            {{ eventAnnouncement.icon }}
+          </div>
+
+          <div class="battle-event-toast-copy">
+            <small>{{ eventAnnouncement.eyebrow }}</small>
+            <strong>{{ eventAnnouncement.title }}</strong>
+            <span>{{ eventAnnouncement.message }}</span>
           </div>
         </div>
       </Transition>
@@ -1500,7 +2274,7 @@ onUnmounted(async () => {
             :allow-drop="false"
             :draggable-cards="false"
             :mirror-only="true"
-            :viewer-open="liveUi.p1.viewerZone === 'bench'"
+            :viewer-open="liveTurnPlayer === 'p1' && liveUi.p1.viewerZone === 'bench'"
             :viewer-index="liveUi.p1.viewerIndex"
           />
 
@@ -1523,7 +2297,7 @@ onUnmounted(async () => {
             :cards="player1Graveyard"
             :readonly="true"
             :mirror-only="true"
-            :viewer-open="liveUi.p1.viewerZone === 'graveyard'"
+            :viewer-open="liveTurnPlayer === 'p1' && liveUi.p1.viewerZone === 'graveyard'"
             :viewer-index="liveUi.p1.viewerIndex"
           />
         </aside>
@@ -1539,6 +2313,7 @@ onUnmounted(async () => {
             :player1-bench-count="player1Bench.length"
             :player2-bench-count="player2Bench.length"
             :combat-fx="fieldCombatFx"
+            :status-effects="activeStatusEffects"
           />
         </section>
 
@@ -1561,7 +2336,7 @@ onUnmounted(async () => {
             :max="Number(battle.max_bench ?? 4)"
             :readonly="true"
             :mirror-only="true"
-            :viewer-open="liveUi.p2.viewerZone === 'bench'"
+            :viewer-open="liveTurnPlayer === 'p2' && liveUi.p2.viewerZone === 'bench'"
             :viewer-index="liveUi.p2.viewerIndex"
           />
 
@@ -1584,11 +2359,81 @@ onUnmounted(async () => {
             :cards="player2Graveyard"
             :readonly="true"
             :mirror-only="true"
-            :viewer-open="liveUi.p2.viewerZone === 'graveyard'"
+            :viewer-open="liveTurnPlayer === 'p2' && liveUi.p2.viewerZone === 'graveyard'"
             :viewer-index="liveUi.p2.viewerIndex"
           />
         </aside>
       </div>
+
+      <!-- =================================================
+           PHASE 3D.16 • ULTIMATE AOE CINEMATIC
+      ================================================== -->
+
+      <Transition name="ultimate-aoe">
+        <div
+          v-if="ultimateAnimation.active"
+          class="ultimate-aoe-overlay"
+          :class="[
+            `phase-${ultimateAnimation.phase}`,
+            ultimateAnimation.sourcePlayer,
+          ]"
+        >
+          <div class="ultimate-aoe-backdrop" />
+
+          <div class="ultimate-aoe-title">
+            <small>
+              {{ String(ultimateAnimation.sourcePlayer ?? 'PLAYER').toUpperCase() }}
+              • ALL ACTIVE TARGETS
+            </small>
+            <h2>ULTIMATE AOE</h2>
+            <p>DEF IGNORED • DEFENSE & SHIELD BROKEN</p>
+          </div>
+
+          <div
+            class="ultimate-source-card"
+            :style="ultimateSourceStyle"
+          >
+            <img
+              v-if="cardImage(ultimateAnimation.sourceCard)"
+              :src="cardImage(ultimateAnimation.sourceCard)"
+              :alt="ultimateAnimation.sourceCard?.name"
+            />
+            <div v-else>⚡</div>
+          </div>
+
+          <div class="ultimate-energy-core">
+            <span>⚡</span>
+            <b>×2 ATK</b>
+          </div>
+
+          <div
+            v-for="target in ultimateAnimation.targets"
+            :key="target.target_card_id ?? target.name"
+            class="ultimate-target-impact"
+            :class="{ destroyed: target.destroyed }"
+            :style="ultimateTargetStyle(target)"
+          >
+            <span>✦</span>
+            <strong>-{{ target.effective_damage }}</strong>
+            <small>
+              {{ target.hp_before }} → {{ target.hp_after }} HP
+            </small>
+            <em v-if="target.destroyed">☠ DESTROYED</em>
+          </div>
+
+          <div class="ultimate-aoe-summary">
+            <span>
+              {{ ultimateAnimation.targets.length }} TARGETS
+            </span>
+            <strong>
+              {{ ultimateAnimation.totalDamage }} TOTAL DAMAGE
+            </strong>
+            <b v-if="ultimateAnimation.destroyedCount > 0">
+              {{ ultimateAnimation.destroyedCount }} DESTROYED
+            </b>
+          </div>
+        </div>
+      </Transition>
 
       <!-- =================================================
 
@@ -1790,6 +2635,78 @@ onUnmounted(async () => {
   );
 
   font-family: Inter, system-ui, sans-serif;
+}
+
+/* =========================================================
+   SOUND CONTROL
+========================================================= */
+
+.public-sound-control {
+  position: fixed;
+  left: 50%;
+  bottom: 12px;
+  z-index: 9500;
+  transform: translateX(-50%);
+
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+
+  padding: 0 12px;
+  border: 1px solid rgba(73, 135, 173, 0.24);
+  border-radius: 999px;
+
+  color: #526f82;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 8px 24px rgba(45, 77, 96, 0.14);
+  backdrop-filter: blur(10px);
+
+  cursor: pointer;
+  user-select: none;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
+}
+
+.public-sound-control:hover {
+  transform: translateX(-50%) translateY(-2px);
+  border-color: rgba(41, 174, 231, 0.46);
+  box-shadow: 0 12px 28px rgba(45, 77, 96, 0.2);
+}
+
+.public-sound-control span {
+  font-size: 14px;
+}
+
+.public-sound-control strong {
+  font-size: 7px;
+  font-weight: 1000;
+  letter-spacing: 0.08em;
+}
+
+.public-sound-control.enabled {
+  color: #087ba4;
+  border-color: rgba(25, 171, 223, 0.35);
+  background: rgba(232, 250, 255, 0.94);
+}
+
+.public-sound-control.locked {
+  animation: soundControlPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes soundControlPulse {
+  0%, 100% {
+    box-shadow: 0 8px 24px rgba(45, 77, 96, 0.14);
+  }
+
+  50% {
+    box-shadow:
+      0 8px 24px rgba(45, 77, 96, 0.16),
+      0 0 0 5px rgba(43, 192, 239, 0.1);
+  }
 }
 
 /* =========================================================
@@ -3094,4 +4011,460 @@ onUnmounted(async () => {
     transform: rotate(90deg);
   }
 }
+
+
+/* =========================================================
+   PHASE 3D.16 • NORMALIZED EVENT TOAST
+========================================================= */
+
+.battle-event-toast {
+  position: fixed;
+  top: 88px;
+  left: 50%;
+  z-index: 12550;
+  transform: translateX(-50%);
+
+  min-width: min(520px, 82vw);
+  max-width: min(720px, 90vw);
+
+  display: flex;
+  align-items: center;
+  gap: 14px;
+
+  padding: 12px 16px;
+  border: 1px solid rgba(75, 112, 135, 0.18);
+  border-radius: 18px;
+  background: rgba(250, 253, 255, 0.96);
+  box-shadow: 0 18px 48px rgba(25, 48, 65, 0.22);
+  backdrop-filter: blur(18px);
+}
+
+.battle-event-toast.fire {
+  border-color: rgba(255, 141, 48, 0.82);
+  background: linear-gradient(120deg, rgba(99, 24, 6, .98), rgba(184, 53, 13, .96));
+  color: #fff4d8;
+  box-shadow: 0 0 36px rgba(243, 104, 18, .55), 0 12px 35px rgba(78, 15, 2, .42);
+}
+.battle-event-toast.fire .battle-event-toast-copy small,
+.battle-event-toast.fire .battle-event-toast-copy span { color: #ffe6bb; }
+.battle-event-toast.fire .battle-event-toast-icon {
+  background: rgba(255, 210, 100, .18);
+}
+
+.battle-event-toast.necro {
+  border-color: rgba(116, 76, 170, 0.34);
+  background:
+    linear-gradient(135deg, rgba(250, 248, 255, 0.97), rgba(238, 248, 255, 0.96));
+  box-shadow:
+    0 18px 48px rgba(55, 34, 92, 0.24),
+    0 0 34px rgba(118, 80, 178, 0.14);
+}
+
+.battle-event-toast-icon {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: rgba(106, 82, 172, 0.10);
+  font-size: 22px;
+}
+
+.battle-event-toast-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.battle-event-toast-copy small {
+  color: #8b78b7;
+  font-size: 7px;
+  font-weight: 950;
+  letter-spacing: 0.09em;
+}
+
+.battle-event-toast-copy strong {
+  color: #29495f;
+  font-size: 14px;
+}
+
+.battle-event-toast-copy span {
+  color: #6f8797;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.event-pop-enter-active,
+.event-pop-leave-active {
+  transition: opacity 0.24s ease, transform 0.24s ease;
+}
+
+.event-pop-enter-from,
+.event-pop-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -16px) scale(0.96);
+}
+
+/* =========================================================
+   PHASE 3D.16 • ULTIMATE AOE CINEMATIC
+========================================================= */
+
+.ultimate-aoe-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12450;
+  overflow: hidden;
+  pointer-events: none;
+  color: #fff;
+}
+
+.ultimate-aoe-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at center, rgba(132, 89, 255, 0.20), transparent 42%),
+    rgba(11, 11, 27, 0.72);
+  backdrop-filter: blur(3px);
+  opacity: 0;
+  animation: ultimateBackdropIn 0.45s ease forwards;
+}
+
+.ultimate-aoe-title {
+  position: absolute;
+  top: 7vh;
+  left: 50%;
+  z-index: 4;
+  transform: translateX(-50%);
+  text-align: center;
+  text-shadow: 0 6px 22px rgba(0, 0, 0, 0.55);
+}
+
+.ultimate-aoe-title small {
+  display: block;
+  margin-bottom: 4px;
+  color: #d4c8ff;
+  font-size: clamp(8px, 0.7vw, 11px);
+  font-weight: 950;
+  letter-spacing: 0.14em;
+}
+
+.ultimate-aoe-title h2 {
+  margin: 0;
+  font-size: clamp(30px, 4.2vw, 68px);
+  line-height: 0.92;
+  letter-spacing: 0.02em;
+}
+
+.ultimate-aoe-title p {
+  margin: 8px 0 0;
+  color: #d9d0f6;
+  font-size: clamp(8px, 0.8vw, 12px);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.ultimate-source-card {
+  position: fixed;
+  z-index: 5;
+  width: clamp(82px, 8vw, 132px);
+  aspect-ratio: 0.58;
+  transform: translate(-50%, -50%) scale(0.78);
+  border: 2px solid rgba(210, 190, 255, 0.88);
+  border-radius: 14px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: rgba(37, 25, 70, 0.92);
+  box-shadow:
+    0 0 34px rgba(149, 105, 255, 0.68),
+    0 0 80px rgba(109, 74, 220, 0.38);
+  opacity: 0;
+}
+
+.ultimate-source-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.phase-charge .ultimate-source-card,
+.phase-burst .ultimate-source-card,
+.phase-impact .ultimate-source-card,
+.phase-result .ultimate-source-card {
+  animation: ultimateSourceCharge 1.05s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.ultimate-energy-core {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 3;
+  width: clamp(100px, 12vw, 190px);
+  height: clamp(100px, 12vw, 190px);
+  transform: translate(-50%, -50%) scale(0.2);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.98) 0 8%, rgba(177, 143, 255, 0.95) 24%, rgba(111, 67, 226, 0.52) 54%, transparent 72%);
+  filter: drop-shadow(0 0 36px rgba(162, 120, 255, 0.86));
+  opacity: 0;
+}
+
+.ultimate-energy-core span {
+  font-size: clamp(34px, 5vw, 78px);
+  filter: drop-shadow(0 0 15px rgba(255,255,255,.9));
+}
+
+.ultimate-energy-core b {
+  position: absolute;
+  bottom: 2px;
+  color: #fff;
+  font-size: clamp(8px, 0.8vw, 12px);
+  letter-spacing: 0.08em;
+}
+
+.phase-burst .ultimate-energy-core,
+.phase-impact .ultimate-energy-core,
+.phase-result .ultimate-energy-core {
+  animation: ultimateCoreBurst 1.1s ease-out forwards;
+}
+
+.ultimate-target-impact {
+  position: fixed;
+  z-index: 6;
+  transform: translate(-50%, -50%) scale(0.25);
+  min-width: 112px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  opacity: 0;
+}
+
+.phase-impact .ultimate-target-impact,
+.phase-result .ultimate-target-impact {
+  animation: ultimateTargetHit 0.68s cubic-bezier(0.18, 0.82, 0.22, 1) forwards;
+}
+
+.ultimate-target-impact > span {
+  position: absolute;
+  font-size: clamp(62px, 8vw, 130px);
+  color: rgba(211, 184, 255, 0.92);
+  text-shadow:
+    0 0 18px rgba(255, 255, 255, 0.95),
+    0 0 48px rgba(144, 94, 255, 0.9);
+  animation: ultimateImpactSpin 0.65s ease-out both;
+}
+
+.ultimate-target-impact strong,
+.ultimate-target-impact small,
+.ultimate-target-impact em {
+  position: relative;
+  z-index: 2;
+  text-shadow: 0 3px 12px rgba(0,0,0,.8);
+}
+
+.ultimate-target-impact strong {
+  margin-top: 8px;
+  font-size: clamp(22px, 2.6vw, 42px);
+  color: #fff;
+}
+
+.ultimate-target-impact small {
+  margin-top: 2px;
+  font-size: clamp(7px, 0.7vw, 10px);
+  font-weight: 900;
+}
+
+.ultimate-target-impact em {
+  margin-top: 4px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(220, 51, 87, 0.82);
+  font-size: clamp(7px, 0.65vw, 9px);
+  font-style: normal;
+  font-weight: 950;
+}
+
+.ultimate-target-impact.destroyed strong {
+  color: #ff9eb2;
+}
+
+.ultimate-aoe-summary {
+  position: absolute;
+  left: 50%;
+  bottom: 7vh;
+  z-index: 8;
+  transform: translateX(-50%) translateY(14px);
+  min-width: min(620px, 82vw);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 18px;
+  border: 1px solid rgba(219, 202, 255, 0.32);
+  border-radius: 16px;
+  background: rgba(25, 17, 48, 0.82);
+  box-shadow: 0 16px 48px rgba(0,0,0,.32);
+  opacity: 0;
+}
+
+.phase-result .ultimate-aoe-summary,
+.phase-exit .ultimate-aoe-summary {
+  animation: ultimateSummaryIn 0.42s ease forwards;
+}
+
+.ultimate-aoe-summary span,
+.ultimate-aoe-summary b {
+  color: #d3c7f2;
+  font-size: clamp(8px, 0.75vw, 11px);
+  font-weight: 900;
+}
+
+.ultimate-aoe-summary strong {
+  color: #fff;
+  font-size: clamp(11px, 1vw, 16px);
+}
+
+.ultimate-aoe-summary b {
+  color: #ff91ac;
+}
+
+.phase-exit.ultimate-aoe-overlay {
+  animation: ultimateOverlayExit 0.55s ease forwards;
+}
+
+.ultimate-aoe-enter-active,
+.ultimate-aoe-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.ultimate-aoe-enter-from,
+.ultimate-aoe-leave-to {
+  opacity: 0;
+}
+
+@keyframes ultimateBackdropIn {
+  to { opacity: 1; }
+}
+
+@keyframes ultimateSourceCharge {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.65) rotate(-5deg); }
+  58% { opacity: 1; transform: translate(-50%, -50%) scale(1.08) rotate(2deg); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(0deg); }
+}
+
+@keyframes ultimateCoreBurst {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.15); }
+  35% { opacity: 1; transform: translate(-50%, -50%) scale(1.14); }
+  100% { opacity: 0.88; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes ultimateTargetHit {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.25); }
+  38% { opacity: 1; transform: translate(-50%, -50%) scale(1.18); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes ultimateImpactSpin {
+  0% { transform: scale(0.15) rotate(0deg); opacity: 0; }
+  45% { transform: scale(1.1) rotate(85deg); opacity: 1; }
+  100% { transform: scale(0.88) rotate(145deg); opacity: 0.55; }
+}
+
+@keyframes ultimateSummaryIn {
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes ultimateOverlayExit {
+  to { opacity: 0; transform: scale(1.02); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ultimate-source-card,
+  .ultimate-energy-core,
+  .ultimate-target-impact,
+  .ultimate-target-impact > span,
+  .ultimate-aoe-summary,
+  .ultimate-aoe-overlay {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+
+/* PHASE 3D.20: Spectator-first stage. Every piece fits inside the TV viewport. */
+:global(body.public-tv-mode),
+:global(body.public-tv-mode #app) {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden !important;
+  overscroll-behavior: none;
+}
+.public-battle-page {
+  width: 100%;
+  height: 100dvh;
+  height: 100vh; /* fallback */
+  height: 100dvh;
+  overscroll-behavior: none;
+}
+.public-arena-shell {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: clamp(5px, .6vh, 12px);
+  gap: clamp(5px, .6vw, 12px);
+  grid-template-columns:
+    clamp(90px, 8.3vw, 146px)
+    minmax(0, 1fr)
+    clamp(90px, 8.3vw, 146px);
+}
+.public-zone-rail {
+  min-height: 0;
+  min-width: 0;
+  grid-template-rows: minmax(0, 1fr) 28px minmax(0, 1fr);
+  gap: clamp(4px, .55vh, 9px);
+  overflow: hidden;
+}
+/* Player names and HP are already prominent in the main scoreboard. */
+.zone-player-label { display: none; }
+.public-arena-center { overflow: hidden; min-width: 0; min-height: 0; }
+.public-zone-rail :deep(.battle-zone-stack) { min-height: 0; min-width: 0; overflow: hidden; }
+.deck-counter { min-height: 0; }
+.public-fullscreen-control {
+  position: fixed;
+  right: clamp(9px, 1.25vw, 20px);
+  bottom: clamp(9px, 1.1vh, 17px);
+  z-index: 9500;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  color: #17485f;
+  background: rgba(255,255,255,.93);
+  border: 1px solid rgba(29,140,190,.30);
+  border-radius: 999px;
+  box-shadow: 0 8px 30px rgba(24,61,81,.14);
+  cursor: pointer;
+}
+.public-fullscreen-control span { font-size: 19px; line-height: 1; }
+.public-fullscreen-control strong { font-size: 10px; font-weight: 900; letter-spacing: .04em; }
+@media (max-width: 900px) {
+  .public-arena-shell {
+    grid-template-columns: clamp(57px, 7vw, 84px) minmax(0,1fr) clamp(57px, 7vw, 84px);
+    gap: 4px; padding: 4px;
+  }
+  .public-fullscreen-control strong { display: none; }
+  .public-fullscreen-control { padding: 6px 9px; }
+}
+@media (max-height: 630px) {
+  .public-zone-rail { grid-template-rows:minmax(0,1fr) 22px minmax(0,1fr); gap:3px; }
+  .public-fullscreen-control { bottom: 4px; padding:5px 8px; }
+  .public-sound-control { bottom: 4px; min-height:27px; }
+}
+
 </style>

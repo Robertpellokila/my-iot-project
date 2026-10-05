@@ -69,6 +69,8 @@ export const useBattleSession =
     let channel =
       null;
 
+    let requireActiveBattle = false;
+
 
     let questionChannel =
       null;
@@ -383,12 +385,53 @@ export const useBattleSession =
             row.title ??
             "",
 
+          image_url:
+            row.image_url ??
+            null,
+
 
           code:
             row.code ??
             row.code_snippet ??
             row.snippet ??
             "",
+
+          question_type:
+            row.question_type ??
+            "choice",
+
+          blocks:
+            Array.isArray(row.blocks) ? row.blocks : [],
+
+          code_snippet:
+            row.code_snippet ??
+            row.code ??
+            "",
+
+          hint_1:
+            row.hint_1 ??
+            null,
+
+          hint_2:
+            row.hint_2 ??
+            null,
+
+          explanation:
+            row.explanation ??
+            null,
+
+          category:
+            row.category ??
+            "general",
+
+          learning_topic:
+            row.learning_topic ??
+            row.category ??
+            "coding dasar",
+
+          learning_url:
+            row.learning_url ??
+            null,
 
 
           options:
@@ -879,14 +922,6 @@ export const useBattleSession =
 
         try {
 
-          /*
-           * Kita select * karena schema question project-mu
-           * sebelumnya sudah memiliki beberapa variasi field.
-           *
-           * normalizeQuestion() hanya mengekspos field
-           * yang dibutuhkan public UI.
-           */
-
           const {
             data,
             error:
@@ -896,7 +931,7 @@ export const useBattleSession =
               .from(
                 "coding_questions"
               )
-              .select("*")
+              .select("id,question,image_url,option_a,option_b,option_c,option_d,explanation,category,difficulty,level,is_active,question_type,blocks,code_snippet,hint_1,hint_2,learning_topic,learning_url")
               .eq(
                 "id",
                 questionId
@@ -1323,6 +1358,21 @@ export const useBattleSession =
 
         }
 
+        if (
+          requireActiveBattle &&
+          newBattle.is_active === false &&
+          !newBattle.winner &&
+          String(newBattle.status ?? "").toLowerCase() !== "finished"
+        ) {
+          battle.value = null;
+          cards.value = [];
+          currentQuestion.value = null;
+          currentQuestionRound.value = null;
+          error.value = "Battle ini sudah tidak aktif. Minta admin mengaktifkannya kembali untuk melanjutkan.";
+          await stopRealtime();
+          return;
+        }
+
 
         const previousQuestionActive =
           questionActive.value;
@@ -1514,7 +1564,11 @@ export const useBattleSession =
     // =======================================================
 
     const loadBattle =
-      async code => {
+      async (code, options = {}) => {
+
+        if (typeof options.requireActive === "boolean") {
+          requireActiveBattle = options.requireActive;
+        }
 
         const battleCodeValue =
           String(
@@ -1597,6 +1651,17 @@ export const useBattleSession =
               "Battle tidak ditemukan."
             );
 
+          }
+
+          if (
+            requireActiveBattle &&
+            result.is_active === false &&
+            !result.winner &&
+            String(result.status ?? "").toLowerCase() !== "finished"
+          ) {
+            throw new Error(
+              "Battle ini sudah tidak aktif. Minta admin mengaktifkannya kembali untuk bergabung.",
+            );
           }
 
 
@@ -1701,6 +1766,21 @@ export const useBattleSession =
             await getBattleByCode(
               battle.value.code
             );
+
+          if (
+            requireActiveBattle &&
+            result?.is_active === false &&
+            !result.winner &&
+            String(result.status ?? "").toLowerCase() !== "finished"
+          ) {
+            battle.value = null;
+            cards.value = [];
+            currentQuestion.value = null;
+            currentQuestionRound.value = null;
+            error.value = "Battle ini sudah tidak aktif. Minta admin mengaktifkannya kembali untuk melanjutkan.";
+            await stopRealtime();
+            return null;
+          }
 
 
           if (

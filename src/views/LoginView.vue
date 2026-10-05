@@ -69,16 +69,16 @@ const handleLogin = async () => {
       <div class="login-brand">
 
         <div class="login-brand-icon">
-          R
+          t
         </div>
 
         <div>
           <strong>
-            RFID System
+            Timedoor
           </strong>
 
           <span>
-            Registration Platform
+            Battle Card · Admin
           </span>
         </div>
 
@@ -96,8 +96,8 @@ const handleLogin = async () => {
         </h1>
 
         <p>
-          Sign in to manage your RFID
-          registration system.
+          Sign in to manage your Timedoor
+          Battle Card platform.
         </p>
 
       </div>

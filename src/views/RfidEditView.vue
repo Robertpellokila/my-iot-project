@@ -1,4 +1,5 @@
 <script setup>
+import SearchableSelect from "../components/SearchableSelect.vue";
 import {
   onMounted,
   ref,
@@ -246,7 +247,7 @@ onMounted(loadData);
               Owner
             </label>
 
-            <select
+            <SearchableSelect
               v-model="ownerId"
               class="form-input"
             >
@@ -263,7 +264,7 @@ onMounted(loadData);
                 {{ profile.full_name }}
               </option>
 
-            </select>
+            </SearchableSelect>
 
           </div>
 
@@ -274,7 +275,7 @@ onMounted(loadData);
               RFID Type
             </label>
 
-            <select
+            <SearchableSelect
               v-model="cardType"
               class="form-input"
             >
@@ -295,7 +296,7 @@ onMounted(loadData);
                 Other
               </option>
 
-            </select>
+            </SearchableSelect>
 
           </div>
 
@@ -338,7 +339,7 @@ onMounted(loadData);
               Status
             </label>
 
-            <select
+            <SearchableSelect
               v-model="isActive"
               class="form-input"
             >
@@ -351,7 +352,7 @@ onMounted(loadData);
                 Inactive
               </option>
 
-            </select>
+            </SearchableSelect>
 
           </div>
 

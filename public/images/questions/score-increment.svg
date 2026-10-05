@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 360" role="img" aria-labelledby="title desc">
+  <title id="title">Blok skor bertambah saat menerima koin</title>
+  <desc id="desc">Ilustrasi koin Scratch dan blok kode untuk menambah skor.</desc>
+  <defs>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#f4fbf3"/>
+      <stop offset="1" stop-color="#e2f4e2"/>
+    </linearGradient>
+    <linearGradient id="coin" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#ffe77a"/>
+      <stop offset="1" stop-color="#f4aa22"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="744" height="344" rx="30" fill="url(#panel)" stroke="#cde9d0" stroke-width="4"/>
+  <circle cx="128" cy="153" r="67" fill="url(#coin)" stroke="#d99112" stroke-width="8"/>
+  <circle cx="128" cy="153" r="51" fill="none" stroke="#fff2b4" stroke-width="5"/>
+  <path d="M128 116v74m-22-53c4-17 41-17 44 0 4 18-43 14-44 34-1 18 39 22 47 3" fill="none" stroke="#9b6412" stroke-linecap="round" stroke-width="9"/>
+  <path d="M220 153h64m-20-20 20 20-20 20" fill="none" stroke="#22a447" stroke-linecap="round" stroke-linejoin="round" stroke-width="10"/>
+  <g font-family="Arial, sans-serif" font-weight="700">
+    <rect x="318" y="63" width="376" height="76" rx="18" fill="#f2a43a"/>
+    <circle cx="346" cy="101" r="9" fill="#fff4d9"/>
+    <text x="370" y="109" fill="#fff" font-size="25">when I receive coin</text>
+    <rect x="318" y="153" width="376" height="76" rx="18" fill="#36a968"/>
+    <circle cx="346" cy="191" r="9" fill="#e5fff0"/>
+    <text x="370" y="199" fill="#fff" font-size="25">change score by 1</text>
+    <rect x="318" y="243" width="376" height="76" rx="18" fill="#2d9b56" stroke="#11763a" stroke-width="5"/>
+    <circle cx="346" cy="281" r="9" fill="#e5fff0"/>
+    <text x="370" y="289" fill="#fff" font-size="25">change score by 2</text>
+  </g>
+  <path d="M284 281h25" stroke="#11763a" stroke-linecap="round" stroke-width="8"/>
+</svg>

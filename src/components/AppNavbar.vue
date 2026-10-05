@@ -61,17 +61,17 @@ onMounted(loadProfile);
     <div class="navbar-left">
 
       <div class="brand-mark">
-        R
+        t
       </div>
 
       <div class="brand-content">
 
         <h1>
-          RFID System
+          Timedoor
         </h1>
 
         <p>
-          Registration Platform
+          Battle Card · Admin
         </p>
 
       </div>

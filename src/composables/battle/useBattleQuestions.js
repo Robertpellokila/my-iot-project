@@ -285,6 +285,8 @@ export const useBattleQuestions = ({
 
           "Coding Question",
 
+        image_url: row.image_url ?? null,
+
 
         options,
 

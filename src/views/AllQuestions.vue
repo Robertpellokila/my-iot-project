@@ -1,9 +1,12 @@
 <script setup>
+import SearchableSelect from "../components/SearchableSelect.vue";
+import AdminTable from "../components/AdminTable.vue";
 import { ref, computed, onMounted, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { supabase } from '../lib/supabase';
 
 const router = useRouter();
+const route = useRoute();
 const questions = ref([]);
 const loading = ref(false);
 const deletingId = ref(null);
@@ -12,7 +15,7 @@ const successMessage = ref('');
 const search = ref('');
 const category = ref('');
 const difficulty = ref('');
-const status = ref('');
+const status = ref('active');
 const page = ref(1);
 const perPage = ref(10);
 const totalItems = ref(0);
@@ -37,8 +40,10 @@ async function fetchQuestions() {
     if (keyword) query = query.or(`question.ilike.%${keyword}%,category.ilike.%${keyword}%,difficulty.ilike.%${keyword}%`);
     if (category.value) query = query.eq('category', category.value);
     if (difficulty.value) query = query.eq('difficulty', difficulty.value);
-    if (status.value === 'active') query = query.eq('is_active', true);
-    if (status.value === 'inactive') query = query.eq('is_active', false);
+    if (status.value === 'active') query = query.is('deleted_at', null).eq('is_active', true);
+    if (status.value === 'inactive') query = query.is('deleted_at', null).eq('is_active', false);
+    if (status.value === 'archived') query = query.not('deleted_at', 'is', null);
+    if (status.value === 'all') query = query.is('deleted_at', null);
 
     const from = (page.value - 1) * perPage.value;
     const to = from + perPage.value - 1;
@@ -60,6 +65,7 @@ function editQuestion(id) {
 }
 
 async function toggleActive(question) {
+  if (question.deleted_at) return;
   const previous = question.is_active;
   question.is_active = !previous;
   try {
@@ -72,17 +78,46 @@ async function toggleActive(question) {
 }
 
 async function deleteQuestion(question) {
-  if (!window.confirm(`Hapus question ini?\n\n${question.question}`)) return;
+  if (!window.confirm(`Hapus question ini? Jika sudah dipakai di riwayat battle, question akan diarsipkan agar data battle lama tetap utuh.\n\n${question.question}`)) return;
   deletingId.value = question.id;
   errorMessage.value = '';
   try {
     const { error } = await supabase.from('coding_questions').delete().eq('id', question.id);
-    if (error) throw error;
-    successMessage.value = 'Question berhasil dihapus.';
+    if (error?.code === '23503') {
+      const { error: archiveError } = await supabase
+        .from('coding_questions')
+        .update({ is_active: false, deleted_at: new Date().toISOString() })
+        .eq('id', question.id);
+      if (archiveError) throw archiveError;
+      successMessage.value = 'Question diarsipkan karena sudah dipakai di battle. Riwayat battle tetap tersimpan.';
+    } else if (error) {
+      throw error;
+    } else {
+      successMessage.value = 'Question berhasil dihapus permanen.';
+    }
     if (questions.value.length === 1 && page.value > 1) page.value--;
     await fetchQuestions();
   } catch (error) {
     errorMessage.value = error.message || 'Gagal menghapus question.';
+  } finally {
+    deletingId.value = null;
+  }
+}
+
+async function restoreQuestion(question) {
+  deletingId.value = question.id;
+  errorMessage.value = '';
+  successMessage.value = '';
+  try {
+    const { error } = await supabase
+      .from('coding_questions')
+      .update({ deleted_at: null, is_active: true })
+      .eq('id', question.id);
+    if (error) throw error;
+    successMessage.value = 'Question dipulihkan dan diaktifkan kembali.';
+    await fetchQuestions();
+  } catch (error) {
+    errorMessage.value = error.message || 'Gagal memulihkan question.';
   } finally {
     deletingId.value = null;
   }
@@ -96,7 +131,12 @@ watch(search, () => {
   searchTimer = setTimeout(() => { page.value = 1; fetchQuestions(); }, 350);
 });
 
-onMounted(fetchQuestions);
+onMounted(() => {
+  if (route.query.notice === 'archived') successMessage.value = 'Question diarsipkan karena sudah dipakai di battle. Riwayat battle tetap tersimpan.';
+  if (route.query.notice === 'deleted') successMessage.value = 'Question berhasil dihapus permanen.';
+  if (route.query.notice) router.replace({ name: 'questions' });
+  fetchQuestions();
+});
 </script>
 
 <template>
@@ -106,7 +146,7 @@ onMounted(fetchQuestions);
         <div>
           <span class="eyebrow">BATTLE ARENA ADMIN</span>
           <h1>All Coding Questions</h1>
-          <p>Search, filter, edit, activate/deactivate, dan delete question.</p>
+          <p>Kelola soal aktif, nonaktif, dan arsip tanpa menghapus riwayat battle.</p>
         </div>
         <button class="primary" @click="router.push({ name: 'question-add' })">+ ADD QUESTION</button>
       </header>
@@ -116,25 +156,27 @@ onMounted(fetchQuestions);
 
       <section class="filters">
         <input v-model="search" type="search" placeholder="Search question..." />
-        <select v-model="category">
+        <SearchableSelect v-model="category">
           <option value="">All Categories</option>
           <option v-for="item in categories" :key="item" :value="item">{{ item }}</option>
-        </select>
-        <select v-model="difficulty">
+        </SearchableSelect>
+        <SearchableSelect v-model="difficulty">
           <option value="">All Difficulties</option>
           <option v-for="item in difficulties" :key="item" :value="item">{{ item }}</option>
-        </select>
-        <select v-model="status">
-          <option value="">All Status</option>
+        </SearchableSelect>
+        <SearchableSelect v-model="status">
+          <option value="all">All non-archived</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
-        </select>
+          <option value="archived">Archived</option>
+        </SearchableSelect>
       </section>
 
       <section class="table-card">
         <div v-if="loading" class="state">Loading questions...</div>
         <div v-else-if="questions.length === 0" class="state">Tidak ada question ditemukan.</div>
         <div v-else class="table-wrap">
+          <AdminTable>
           <table>
             <thead>
               <tr>
@@ -147,17 +189,18 @@ onMounted(fetchQuestions);
                 <td><span class="pill">{{ q.category }}</span></td>
                 <td><span class="pill" :class="q.difficulty">{{ q.difficulty }}</span></td>
                 <td><span class="answer">{{ q.correct_answer }}</span></td>
-                <td><button class="status-btn" :class="{ active: q.is_active }" @click="toggleActive(q)">{{ q.is_active ? 'ACTIVE' : 'INACTIVE' }}</button></td>
-                <td><div class="actions"><button class="edit" @click="editQuestion(q.id)">EDIT</button><button class="delete" :disabled="deletingId === q.id" @click="deleteQuestion(q)">{{ deletingId === q.id ? 'DELETING...' : 'DELETE' }}</button></div></td>
+                <td><button class="status-btn" :class="{ active: q.is_active && !q.deleted_at, archived: q.deleted_at }" :disabled="Boolean(q.deleted_at)" @click="toggleActive(q)">{{ q.deleted_at ? 'ARCHIVED' : q.is_active ? 'ACTIVE' : 'INACTIVE' }}</button></td>
+                <td><div class="actions"><button class="edit" @click="editQuestion(q.id)">EDIT</button><button v-if="q.deleted_at" class="restore" :disabled="deletingId === q.id" @click="restoreQuestion(q)">{{ deletingId === q.id ? 'RESTORING...' : 'RESTORE' }}</button><button v-else class="delete" :disabled="deletingId === q.id" @click="deleteQuestion(q)">{{ deletingId === q.id ? 'DELETING...' : 'DELETE' }}</button></div></td>
               </tr>
             </tbody>
           </table>
+          </AdminTable>
         </div>
 
         <footer class="pagination">
           <span>Showing {{ startItem }}-{{ endItem }} of {{ totalItems }}</span>
           <div>
-            <select v-model.number="perPage"><option :value="10">10 / page</option><option :value="20">20 / page</option><option :value="50">50 / page</option></select>
+            <SearchableSelect v-model.number="perPage"><option :value="10">10 / page</option><option :value="20">20 / page</option><option :value="50">50 / page</option></SearchableSelect>
             <button :disabled="page <= 1" @click="page--">PREV</button>
             <strong>{{ page }} / {{ totalPages }}</strong>
             <button :disabled="page >= totalPages" @click="page++">NEXT</button>
@@ -169,5 +212,47 @@ onMounted(fetchQuestions);
 </template>
 
 <style scoped>
-*{box-sizing:border-box}.questions-page{min-height:100vh;padding:40px 24px;background:#030816;color:#fff;font-family:Inter,system-ui,sans-serif}.shell{max-width:1280px;margin:auto}.header-card,.filters,.table-card{border:1px solid rgba(255,255,255,.08);background:#071126;border-radius:16px}.header-card{display:flex;justify-content:space-between;align-items:center;padding:26px;margin-bottom:18px}.eyebrow{font-size:10px;color:#5edcff;font-weight:900;letter-spacing:.16em}.header-card h1{margin:7px 0 5px}.header-card p{margin:0;color:#8295af;font-size:13px}.primary{border:0;border-radius:10px;padding:14px 18px;background:linear-gradient(90deg,#4fd8ff,#65efc8);font-weight:900;cursor:pointer}.alert{padding:13px 15px;border-radius:10px;margin-bottom:14px;font-size:12px}.success{color:#6df0a9;background:rgba(39,165,94,.12);border:1px solid rgba(80,230,145,.25)}.error{color:#ff8da5;background:rgba(174,38,68,.12);border:1px solid rgba(255,90,120,.25)}.filters{display:grid;grid-template-columns:1fr 180px 180px 160px;gap:10px;padding:14px;margin-bottom:16px}.filters input,.filters select,.pagination select{height:42px;border:1px solid rgba(255,255,255,.1);border-radius:9px;background:#050d1e;color:#fff;padding:0 12px}.table-card{overflow:hidden}.table-wrap{overflow:auto}table{width:100%;min-width:950px;border-collapse:collapse}th,td{text-align:left;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.06)}th{font-size:9px;color:#7890ad;text-transform:uppercase}.question-cell{max-width:430px}.question-cell strong{display:block;font-size:12px;line-height:1.45}.question-cell small{display:block;margin-top:5px;color:#6f829c}.pill,.answer{display:inline-block;padding:6px 9px;border-radius:999px;background:rgba(77,191,241,.1);font-size:8px;text-transform:uppercase}.pill.easy{color:#65eba7}.pill.medium{color:#ffd36b}.pill.hard{color:#ff829a}.answer{color:#061a13;background:#58e9a4;font-weight:900}.status-btn,.edit,.delete,.pagination button{border-radius:8px;padding:8px 10px;font-size:8px;font-weight:900;cursor:pointer}.status-btn{border:1px solid rgba(255,255,255,.08);background:transparent;color:#8da0b9}.status-btn.active{color:#66eda9;border-color:rgba(70,220,145,.25)}.actions{display:flex;gap:7px}.edit{color:#6edcff;background:rgba(65,180,220,.08);border:1px solid rgba(80,200,245,.25)}.delete{color:#ff8299;background:rgba(190,40,70,.08);border:1px solid rgba(255,90,120,.25)}.state{padding:55px;text-align:center;color:#7c90aa}.pagination{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;color:#7f92ab;font-size:10px}.pagination>div{display:flex;gap:8px;align-items:center}.pagination select{width:auto;height:34px}.pagination button{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);color:#adc0d6}.pagination button:disabled{opacity:.3;cursor:not-allowed}@media(max-width:900px){.filters{grid-template-columns:1fr 1fr}}@media(max-width:650px){.questions-page{padding:20px 12px}.header-card{align-items:flex-start;flex-direction:column;gap:16px}.primary{width:100%}.filters{grid-template-columns:1fr}.pagination{align-items:flex-start;flex-direction:column;gap:10px}}
+* { box-sizing: border-box; }
+.questions-page { min-height: 100vh; padding: 40px 24px; background: #f2f8f1; color: #173623; font-family: Inter, system-ui, sans-serif; }
+.shell { max-width: 1280px; margin: auto; }
+.header-card, .filters, .table-card { border: 1px solid #dce9db; background: #fff; border-radius: 16px; box-shadow: 0 8px 24px #1645230b; }
+.header-card { display: flex; justify-content: space-between; align-items: center; padding: 26px; margin-bottom: 18px; }
+.eyebrow { font-size: 10px; color: #118a2b; font-weight: 900; letter-spacing: .16em; }
+.header-card h1 { margin: 7px 0 5px; color: #173623; }
+.header-card p { margin: 0; color: #718675; font-size: 13px; }
+.primary { border: 0; border-radius: 10px; padding: 14px 18px; background: #0caf25; color: #fff; font-weight: 900; cursor: pointer; }
+.alert { padding: 13px 15px; border-radius: 10px; margin-bottom: 14px; font-size: 12px; }
+.success { color: #176d2e; background: #e8f6e8; border: 1px solid #c6e5c8; }
+.error { color: #9e263a; background: #fff0f1; border: 1px solid #f0c7cc; }
+.filters { display: grid; grid-template-columns: 1fr 180px 180px 180px; gap: 10px; padding: 14px; margin-bottom: 16px; }
+.filters input, .filters select, .pagination select { height: 42px; border: 1px solid #cfe4cf; border-radius: 9px; background: #fff; color: #21472b; padding: 0 12px; }
+.filters input::placeholder { color: #879a89; }
+.table-card { overflow: hidden; }
+.table-wrap { overflow: auto; }
+.table-wrap :deep(table) { width: 100%; min-width: 950px; border-collapse: collapse; color: #29432f; }
+.table-wrap :deep(th), .table-wrap :deep(td) { text-align: left; padding: 14px 16px; border-bottom: 1px solid #e6eee5; }
+.table-wrap :deep(th) { background: #f4faf3; color: #607763; font-size: 9px; text-transform: uppercase; }
+.question-cell { max-width: 430px; }
+.question-cell strong { display: block; color: #23452b; font-size: 12px; line-height: 1.45; }
+.question-cell small { display: block; margin-top: 5px; color: #718675; }
+.pill, .answer { display: inline-block; padding: 6px 9px; border-radius: 999px; background: #edf6ed; color: #406647; font-size: 8px; text-transform: uppercase; }
+.pill.easy { color: #16783a; }.pill.medium { color: #89600a; }.pill.hard { color: #a3293e; }
+.answer { color: #176d2e; background: #e1f4e4; font-weight: 900; }
+.status-btn, .edit, .delete, .restore, .pagination button { border-radius: 8px; padding: 8px 10px; font-size: 8px; font-weight: 900; cursor: pointer; }
+.status-btn { border: 1px solid #d8e5d7; background: #f6faf5; color: #718675; }
+.status-btn.active { color: #16783a; border-color: #bfe0c2; background: #ebf7e9; }
+.status-btn.archived { color: #80621b; border-color: #eadcae; background: #fff9e8; }
+.actions { display: flex; gap: 7px; }
+.edit { color: #18782d; background: #eef8ed; border: 1px solid #cfe4cf; }
+.delete { color: #9e263a; background: #fff1f1; border: 1px solid #efc9cf; }
+.restore { color: #176d2e; background: #e8f6e8; border: 1px solid #c3e2c5; }
+.state { padding: 55px; text-align: center; color: #718675; }
+.pagination { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; color: #607763; font-size: 10px; }
+.pagination > div { display: flex; gap: 8px; align-items: center; }
+.pagination select { width: auto; height: 34px; }
+.pagination button { border: 1px solid #cfe4cf; background: #f6faf5; color: #386541; }
+.pagination button:disabled { opacity: .4; cursor: not-allowed; }
+.actions button:disabled { opacity: .55; cursor: wait; }
+@media (max-width: 900px) { .filters { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 650px) { .questions-page { padding: 20px 12px; }.header-card { align-items: flex-start; flex-direction: column; gap: 16px; }.primary { width: 100%; }.filters { grid-template-columns: 1fr; }.pagination { align-items: flex-start; flex-direction: column; gap: 10px; } }
 </style>

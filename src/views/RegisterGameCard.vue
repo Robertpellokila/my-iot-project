@@ -1,20 +1,26 @@
 <script setup>
+import SearchableSelect from "../components/SearchableSelect.vue";
 
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 
 import { useRouter } from "vue-router";
 
 import { supabase } from "../lib/supabase"; // Sesuaikan path Supabase kamu
-
-
+import { compressImageFile, IMAGE_UPLOAD_LIMITS } from "../lib/compressImage";
 
 const router = useRouter();
-
-
 
 // State Form Pendaftaran/Edit Kartu Game
 
 const cardName = ref("");
+
+const cardLevel = ref(1);
+
+const cardRarity = ref("common");
+
+const cardLore = ref("");
+
+const cardMetadata = ref({});
 
 const element = ref("Fire");
 
@@ -25,6 +31,23 @@ const attack = ref(45);
 const defense = ref(30);
 
 const imageUrl = ref("🔥");
+const compressedCardImage = ref(null);
+const compressedImagePreview = ref("");
+const compressingImage = ref(false);
+const cardImageInput = ref(null);
+const cardImagePreviewUrl = computed(() => compressedImagePreview.value || imageUrl.value);
+const physicalCardImageUrl = ref("");
+const compressedPhysicalCardImage = ref(null);
+const physicalCardImagePreview = ref("");
+const physicalCardImageInput = ref(null);
+const avatarImageFile = ref(null);
+const avatarImagePreview = ref("");
+const avatarImageInput = ref(null);
+const physicalCardPreviewUrl = computed(() => physicalCardImagePreview.value || physicalCardImageUrl.value);
+const avatarPreviewUrl = computed(() => avatarImagePreview.value || avatarUrl.value);
+const compressedSizeLabel = computed(() => compressedCardImage.value
+  ? `${(compressedCardImage.value.size / 1024).toFixed(0)} KB WebP setelah kompres`
+  : "JPG/PNG/WebP · maks. 10 MB · hasil WebP maks. 1 MB");
 
 const uid = ref("");
 
@@ -227,8 +250,12 @@ const fusionRequirements = ref([createFusionRequirement()]);
 // Database tetap mendukung banyak skill per card.
 const specialSkillMode = ref("none"); // none | existing | new | edit
 const specialSkills = ref([]);
+const catalogSkills = ref([]);
+const allSkillDefinitions = ref([]);
 const selectedSpecialSkillId = ref("");
 const existingRelationId = ref(null);
+const existingCardSkillRelations = ref([]);
+const builtinSkillSelections = ref({});
 
 // Form pembuatan Special Skill baru
 const skillName = ref("");
@@ -285,7 +312,7 @@ const successMessage = ref("");
 
 const isImageUrl = (str) =>
 
-  str && (str.startsWith("http") || str.startsWith("/"));
+  str && (str.startsWith("http") || str.startsWith("/") || str.startsWith("blob:"));
 
 
 
@@ -319,8 +346,11 @@ const formatTagsInput = (tags) =>
 
 const physicalCopySources = computed(() => {
   const byCode = new Map();
+  const preferredSources = [...gameCardCatalog.value].sort((a, b) =>
+    Number(Boolean(a?.uid)) - Number(Boolean(b?.uid)),
+  );
 
-  for (const card of gameCardCatalog.value) {
+  for (const card of preferredSources) {
     if (card?.fusion_only) continue;
 
     const code = String(card?.card_code ?? "").trim();
@@ -377,11 +407,17 @@ const loadGameCardCatalog = async () => {
 
 
 const clearCardFields = ({ keepUid = false } = {}) => {
+  clearCardImage();
+  clearAdditionalCardImages();
   if (!keepUid) {
     uid.value = "";
   }
 
   cardName.value = "";
+  cardLevel.value = 1;
+  cardRarity.value = "common";
+  cardLore.value = "";
+  cardMetadata.value = {};
   cardCodeAuto.value = true;
   cardCode.value = "";
   tagsInput.value = "";
@@ -391,6 +427,7 @@ const clearCardFields = ({ keepUid = false } = {}) => {
   defense.value = 30;
   imageUrl.value = "🔥";
   avatarUrl.value = "";
+  physicalCardImageUrl.value = "";
 
   isExistingCard.value = false;
   recordId.value = null;
@@ -400,12 +437,18 @@ const clearCardFields = ({ keepUid = false } = {}) => {
 
 const applyCardDataToForm = async (card, { keepUid = false } = {}) => {
   if (!card) return;
+  clearCardImage();
+  clearAdditionalCardImages();
 
   if (!keepUid) {
     uid.value = card.uid ?? "";
   }
 
   cardName.value = card.name ?? "";
+  cardLevel.value = Number(card.level ?? 1);
+  cardRarity.value = card.rarity ?? "common";
+  cardLore.value = card.lore ?? "";
+  cardMetadata.value = card.metadata ?? {};
   cardCode.value = card.card_code ?? slugifyCardCode(card.name);
   cardCodeAuto.value = false;
   tagsInput.value = formatTagsInput(card.tags);
@@ -415,6 +458,9 @@ const applyCardDataToForm = async (card, { keepUid = false } = {}) => {
   defense.value = Number(card.defense ?? 30);
   imageUrl.value = card.image_url || "🔥";
   avatarUrl.value = card.avatar_url || "";
+  avatarImagePreview.value = "";
+  physicalCardImageUrl.value = card.physical_card_image_url || "";
+  physicalCardImagePreview.value = "";
 
   await loadCardSpecialSkill(card.id);
 };
@@ -870,6 +916,8 @@ const resetSpecialSkillState = () => {
   specialSkillMode.value = "none";
   selectedSpecialSkillId.value = "";
   existingRelationId.value = null;
+  existingCardSkillRelations.value = [];
+  builtinSkillSelections.value = {};
   resetNewSkillForm();
 };
 
@@ -903,10 +951,149 @@ watch(skillName, (value) => {
 
 
 const selectedSpecialSkill = computed(() =>
-  specialSkills.value.find(
+  allSkillDefinitions.value.find(
     (skill) => skill.id === selectedSpecialSkillId.value,
   ) ?? null,
 );
+const selectedSkillIsActiveOption = computed(() =>
+  specialSkills.value.some((skill) => skill.id === selectedSpecialSkillId.value),
+);
+
+const normalizeSkillIdentity = (value) => String(value ?? "")
+  .trim()
+  .toLocaleLowerCase()
+  .replace(/\s+/g, " ");
+
+const builtinCardSkills = computed(() => {
+  const metadataSkills = Array.isArray(cardMetadata.value?.skills)
+    ? cardMetadata.value.skills
+    : [];
+  const seen = new Set();
+
+  return metadataSkills.flatMap((entry, index) => {
+    const name = String(entry?.name ?? "").trim();
+    const identity = normalizeSkillIdentity(entry?.code || name);
+    if (!identity || seen.has(identity)) return [];
+    seen.add(identity);
+
+    const definition = allSkillDefinitions.value.find((skill) => {
+      const codeMatches = entry?.code && normalizeSkillIdentity(skill.code) === normalizeSkillIdentity(entry.code);
+      return codeMatches || normalizeSkillIdentity(skill.name) === normalizeSkillIdentity(name);
+    }) ?? null;
+    const relation = definition
+      ? existingCardSkillRelations.value.find((item) => String(item.special_skill_id) === String(definition.id))
+      : null;
+    const battleReady = Boolean(
+      definition?.is_active
+      && definition?.catalog_status === "active"
+      && String(definition?.metadata?.catalog_only ?? "false").toLowerCase() !== "true",
+    );
+    const hasSelection = definition
+      && Object.prototype.hasOwnProperty.call(builtinSkillSelections.value, definition.id);
+
+    return [{
+      key: `${identity}-${entry?.slot ?? index + 1}`,
+      name: name || definition?.name || "Skill kartu",
+      description: definition?.description ?? entry?.description ?? entry?.effect ?? "",
+      slot: Number(entry?.slot ?? index + 1),
+      definition,
+      relation,
+      battleReady,
+      enabled: battleReady && (hasSelection
+        ? Boolean(builtinSkillSelections.value[definition.id])
+        : Boolean(relation?.enabled)),
+    }];
+  }).sort((a, b) => a.slot - b.slot);
+});
+
+const setBuiltinSkillEnabled = (item, event) => {
+  if (!item?.definition || !item.battleReady) return;
+  const enabled = Boolean(event?.target?.checked);
+  builtinSkillSelections.value = {
+    ...builtinSkillSelections.value,
+    [item.definition.id]: enabled,
+  };
+
+  if (enabled) {
+    specialSkillMode.value = "existing";
+    selectedSpecialSkillId.value = item.definition.id;
+  }
+};
+
+const handleSpecialSkillModeChange = (mode) => {
+  if (mode !== "none") return;
+  selectedSpecialSkillId.value = "";
+  builtinSkillSelections.value = Object.fromEntries(
+    builtinCardSkills.value
+      .filter((item) => item.definition)
+      .map((item) => [item.definition.id, false]),
+  );
+};
+
+const soulRebirthSkill = computed(() =>
+  specialSkills.value.find(
+    (skill) => String(skill?.code ?? "").toLowerCase() === "soul_rebirth",
+  ) ?? null,
+);
+
+
+const STATUS_SKILL_PRESETS = [
+  { code: "scorch_mark", icon: "🔥", label: "BURN", hint: "10 damage • 2 turn • max 3 stack" },
+  { code: "frost_lock", icon: "🧊", label: "FREEZE", hint: "Block Attack + Ultimate • 1 turn" },
+  { code: "toxic_spore", icon: "☠", label: "POISON", hint: "8 damage • 3 turn • max 3 stack" },
+  { code: "thunder_stun", icon: "💫", label: "STUN", hint: "Block card actions • 1 turn" },
+];
+
+const statusSkillPresetCards = computed(() =>
+  STATUS_SKILL_PRESETS.map((preset) => ({
+    ...preset,
+    skill:
+      specialSkills.value.find(
+        (skill) => String(skill?.code ?? "").toLowerCase() === preset.code,
+      ) ?? null,
+  })),
+);
+
+const assignStatusSkillPreset = (preset) => {
+  const skill = preset?.skill;
+
+  if (!skill) {
+    errorMessage.value =
+      `Master skill "${preset?.code ?? "status"}" belum ada. Jalankan SQL Phase 3D.19 terlebih dahulu.`;
+    successMessage.value = "";
+    return;
+  }
+
+  specialSkillMode.value = "existing";
+  selectedSpecialSkillId.value = skill.id;
+  existingRelationId.value = null;
+  errorMessage.value = "";
+  successMessage.value =
+    `${preset.icon} ${skill.name} dipilih. Simpan Card untuk memasang preset status ini.`;
+};
+
+const assignSoulRebirthPreset = () => {
+  const skill = soulRebirthSkill.value;
+
+  if (!skill) {
+    errorMessage.value =
+      'Master skill "soul_rebirth" belum ada. Jalankan SQL Phase 3C.1 Necro Resurrection terlebih dahulu.';
+    successMessage.value = "";
+    return;
+  }
+
+  const currentTags = parseTags(tagsInput.value);
+  if (!currentTags.some((tag) => String(tag).toLowerCase() === "necro")) {
+    tagsInput.value = [...currentTags, "necro"].join(", ");
+  }
+
+  specialSkillMode.value = "existing";
+  selectedSpecialSkillId.value = skill.id;
+  existingRelationId.value = null;
+  errorMessage.value = "";
+  successMessage.value =
+    "☠ Soul Rebirth dipilih. Simpan Card untuk memasang skill Necro Resurrection ini.";
+};
 
 
 const humanTargetLabel = (value) => {
@@ -974,6 +1161,47 @@ const populateSkillForm = (skill) => {
   const effects = Array.isArray(skill.effects) ? skill.effects : [];
   skillEffectsJson.value = JSON.stringify(effects, null, 2);
 
+  if (effects.length === 0) {
+    const description = String(skill.description ?? "");
+    const healAmount = description.match(/\bheal\s*(\d+)\b/i);
+    const describesAllyCard = /\b(rekan|teman|sekutu|ally)\b/i.test(description);
+    const isWorldtreePulse = String(skill.name ?? "").trim().toLowerCase() === "worldtree pulse";
+
+    // Draft skill katalog dapat belum memiliki effects. Biarkan admin memilih
+    // efek sederhana; untuk Worldtree Pulse isi konfigurasi Heal ke kartu ally
+    // dari deskripsi master plan agar dropdown tidak terkunci pada Advanced.
+    skillAdvancedMode.value = false;
+    skillEffectType.value = healAmount && describesAllyCard ? "heal_card" : "";
+    skillEffectAmount.value = healAmount && describesAllyCard
+      ? Number(healAmount[1])
+      : 0;
+
+    if (healAmount && describesAllyCard) {
+      skillTargetType.value = "ally_active";
+    }
+
+    if (/sekali\s*\/\s*battle|once per battle/i.test(description)) {
+      skillOncePerBattle.value = true;
+      skillMaxUses.value = 1;
+    }
+
+    const cooldown = description.match(/\bcd\.?\s*(\d+)\b/i);
+    if (cooldown) {
+      skillCooldownRounds.value = Number(cooldown[1]);
+    }
+
+    if (isWorldtreePulse && healAmount && describesAllyCard) {
+      skillDescription.value =
+        `Sekali per battle, pulihkan ${healAmount[1]} HP pada satu kartu Active milikmu; cooldown ${cooldown?.[1] ?? 3} ronde.`;
+    }
+
+    if (skillEffectType.value) {
+      skillEffectsJson.value = JSON.stringify(buildSimpleEffects(), null, 2);
+    }
+
+    return;
+  }
+
   const firstEffect = effects[0];
   const simpleTypes = [
     "damage_card",
@@ -1036,9 +1264,10 @@ const loadSpecialSkills = async () => {
       effects,
       consumes_turn,
       priority,
-      is_active
+      is_active,
+      catalog_status,
+      metadata
     `)
-    .eq("is_active", true)
     .order("name");
 
   if (error) {
@@ -1046,7 +1275,9 @@ const loadSpecialSkills = async () => {
     return;
   }
 
-  specialSkills.value = data ?? [];
+  allSkillDefinitions.value = data ?? [];
+  specialSkills.value = allSkillDefinitions.value.filter((skill) => skill.is_active && !skill.metadata?.catalog_only);
+  catalogSkills.value = allSkillDefinitions.value.filter((skill) => skill.metadata?.catalog_only);
 };
 
 
@@ -1068,23 +1299,26 @@ const loadCardSpecialSkill = async (gameCardId) => {
       overrides
     `)
     .eq("game_card_id", gameCardId)
-    .eq("enabled", true)
-    .order("sort_order", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .order("sort_order", { ascending: true });
 
   if (error) {
     console.error("Load Card Special Skill:", error);
     throw error;
   }
 
-  if (!data) {
-    return;
-  }
+  existingCardSkillRelations.value = data ?? [];
+  const activeRelation = existingCardSkillRelations.value.find((relation) => {
+    const skill = allSkillDefinitions.value.find(
+      (item) => String(item.id) === String(relation.special_skill_id),
+    );
+    return relation.enabled && skill?.is_active && !skill?.metadata?.catalog_only;
+  });
 
-  existingRelationId.value = data.id;
-  selectedSpecialSkillId.value = data.special_skill_id;
-  specialSkillMode.value = "existing";
+  if (activeRelation) {
+    existingRelationId.value = activeRelation.id;
+    selectedSpecialSkillId.value = activeRelation.special_skill_id;
+    specialSkillMode.value = "existing";
+  }
 };
 
 
@@ -1136,6 +1370,10 @@ const buildLimits = () => {
 
 
 const buildSimpleEffects = () => {
+  if (!skillEffectType.value) {
+    throw new Error("Pilih Jenis Efek sebelum menyimpan Special Skill.");
+  }
+
   const amount = {
     mode: "fixed",
     value: Math.max(0, Number(skillEffectAmount.value) || 0),
@@ -1254,6 +1492,10 @@ const buildSkillPayload = () => {
     category: "special",
     skill_type: skillType.value,
     activation_timing: activationTiming.value,
+    trigger_spec: {
+      type: activationTiming.value,
+      label: activationTiming.value === "main_phase" ? "Aktif manual pada main phase" : "Pemicu event katalog",
+    },
     source_zones: ["active"],
     target_spec: buildTargetSpec(),
     cost_spec: buildCostSpec(),
@@ -1261,7 +1503,9 @@ const buildSkillPayload = () => {
     effects: getEffectsForSave(),
     consumes_turn: Boolean(skillConsumesTurn.value),
     priority: 100,
+    catalog_status: "active",
     is_active: true,
+    change_note: "Disimpan dari Register Card",
     metadata: {},
   };
 };
@@ -1299,7 +1543,30 @@ const syncCardSpecialSkill = async (gameCardId) => {
       throw new Error("Pilih Special Skill terlebih dahulu.");
     }
 
-    // Phase 3C pertama memakai satu skill aktif per card.
+    const preserveCardSkills = Boolean(
+      existingCardSkillRelations.value.length > 1 &&
+      existingCardSkillRelations.value.some(
+        (relation) => String(relation.special_skill_id) === String(selectedSpecialSkillId.value),
+      ),
+    );
+    const relationsToSave = preserveCardSkills
+      ? existingCardSkillRelations.value.map((relation) => ({
+          game_card_id: gameCardId,
+          special_skill_id: relation.special_skill_id,
+          sort_order: relation.sort_order,
+          enabled: relation.enabled,
+          overrides: relation.overrides ?? {},
+        }))
+      : [{
+          game_card_id: gameCardId,
+          special_skill_id: selectedSpecialSkillId.value,
+          sort_order: 0,
+          enabled: true,
+          overrides: {},
+        }];
+
+    // A seeded template can carry two catalog abilities. Preserve both when
+    // its skill is copied to a freshly scanned physical card.
     const { error: deleteError } = await supabase
       .from("game_card_special_skills")
       .delete()
@@ -1309,23 +1576,16 @@ const syncCardSpecialSkill = async (gameCardId) => {
       throw deleteError;
     }
 
-    const { data: relation, error: insertError } = await supabase
+    const { data: relations, error: insertError } = await supabase
       .from("game_card_special_skills")
-      .insert({
-        game_card_id: gameCardId,
-        special_skill_id: selectedSpecialSkillId.value,
-        sort_order: 0,
-        enabled: true,
-        overrides: {},
-      })
-      .select("id")
-      .single();
+      .insert(relationsToSave)
+      .select("id");
 
     if (insertError) {
       throw insertError;
     }
 
-    existingRelationId.value = relation.id;
+    existingRelationId.value = relations?.[0]?.id ?? null;
     return;
   }
 
@@ -1447,6 +1707,46 @@ const syncCardSpecialSkill = async (gameCardId) => {
   }
 
   throw new Error("Mode Special Skill tidak dikenali.");
+};
+
+const syncBuiltinCardSkillToggles = async (gameCardId) => {
+  const toggleableSkills = builtinCardSkills.value.filter((item) => item.definition);
+  if (!gameCardId || !toggleableSkills.length) return;
+
+  const { data: relations, error: loadError } = await supabase
+    .from("game_card_special_skills")
+    .select("id, special_skill_id, enabled")
+    .eq("game_card_id", gameCardId);
+
+  if (loadError) throw loadError;
+
+  for (const item of toggleableSkills) {
+    const relation = (relations ?? []).find(
+      (row) => String(row.special_skill_id) === String(item.definition.id),
+    );
+    const shouldEnable = Boolean(item.battleReady && item.enabled);
+
+    if (relation) {
+      if (Boolean(relation.enabled) !== shouldEnable) {
+        const { error } = await supabase
+          .from("game_card_special_skills")
+          .update({ enabled: shouldEnable })
+          .eq("id", relation.id);
+        if (error) throw error;
+      }
+    } else if (shouldEnable) {
+      const { error } = await supabase
+        .from("game_card_special_skills")
+        .insert({
+          game_card_id: gameCardId,
+          special_skill_id: item.definition.id,
+          sort_order: item.slot,
+          enabled: true,
+          overrides: {},
+        });
+      if (error) throw error;
+    }
+  }
 };
 
 
@@ -1585,6 +1885,11 @@ const handleSubmit = async () => {
   errorMessage.value = "";
   successMessage.value = "";
 
+  if (compressingImage.value) {
+    errorMessage.value = "Tunggu sampai semua gambar selesai dikompres.";
+    return;
+  }
+
   const isFusionCard = cardMode.value === "fusion";
 
   if (!isFusionCard && !uid.value.trim()) {
@@ -1603,9 +1908,9 @@ const handleSubmit = async () => {
     return;
   }
 
-  const finalCardCode = slugifyCardCode(
-    cardCode.value.trim() || cardName.value,
-  );
+    const finalCardCode = slugifyCardCode(
+      cardCode.value.trim() || cardName.value,
+    );
 
   if (!finalCardCode) {
     errorMessage.value = "Card Code tidak valid.";
@@ -1623,21 +1928,52 @@ const handleSubmit = async () => {
   loading.value = true;
 
   try {
+    let savedImageUrl = imageUrl.value.trim();
+    if (compressedCardImage.value) {
+      savedImageUrl = await uploadCompressedCardImage(compressedCardImage.value, "cover");
+    }
+    let savedPhysicalCardImageUrl = physicalCardImageUrl.value.trim();
+    if (compressedPhysicalCardImage.value) {
+      savedPhysicalCardImageUrl = await uploadCompressedCardImage(compressedPhysicalCardImage.value, "physical");
+    }
+    let savedAvatarUrl = avatarUrl.value.trim();
+    if (avatarImageFile.value) {
+      savedAvatarUrl = await uploadCompressedCardImage(avatarImageFile.value, "avatar");
+    }
+
     let savedCardId = null;
     const wasExisting = Boolean(isExistingCard.value && recordId.value);
+    const metadataForSave = {
+      ...(cardMetadata.value && typeof cardMetadata.value === "object" && !Array.isArray(cardMetadata.value)
+        ? cardMetadata.value
+        : {}),
+    };
+
+    // timedoor_seed_key hanya milik satu baris master katalog. Kartu fisik
+    // dengan UID adalah instance terpisah, sehingga key master tidak boleh ikut
+    // terkirim saat insert maupun update. Simpan asalnya sebagai metadata biasa.
+    if (!isFusionCard && metadataForSave.timedoor_seed_key) {
+      metadataForSave.catalog_source_seed_key ??= metadataForSave.timedoor_seed_key;
+      delete metadataForSave.timedoor_seed_key;
+    }
 
     const payload = {
       uid: isFusionCard ? null : uid.value.trim(),
       card_code: finalCardCode,
       tags: parseTags(tagsInput.value),
+      level: Number(cardLevel.value ?? 1),
+      rarity: cardRarity.value || "common",
+      lore: cardLore.value || null,
+      metadata: metadataForSave,
       fusion_only: isFusionCard,
       name: cardName.value.trim(),
       element: element.value,
       hp: parseInt(hp.value),
       attack: parseInt(attack.value),
       defense: parseInt(defense.value),
-      image_url: imageUrl.value.trim(),
-      avatar_url: avatarUrl.value.trim(),
+      image_url: savedImageUrl,
+      physical_card_image_url: savedPhysicalCardImageUrl || null,
+      avatar_url: savedAvatarUrl || null,
     };
 
     if (wasExisting) {
@@ -1666,6 +2002,7 @@ const handleSubmit = async () => {
 
     // Special Skill tetap memakai sistem Phase 3C yang sudah works.
     await syncCardSpecialSkill(savedCardId);
+    await syncBuiltinCardSkillToggles(savedCardId);
 
     cardCode.value = finalCardCode;
 
@@ -1690,8 +2027,24 @@ const handleSubmit = async () => {
     console.error("Save Card:", error);
 
     if (error?.code === "23505") {
-      errorMessage.value =
-        "Data unik bentrok. Untuk Physical Card, pastikan UID RFID belum pernah didaftarkan.";
+      const conflict = [error?.message, error?.details, error?.hint]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      if (conflict.includes("timedoor_seed_key")) {
+        errorMessage.value =
+          "Identitas kartu katalog tidak boleh dipakai ulang. Coba simpan ulang kartu salinan.";
+      } else if (conflict.includes("game_cards_uid_key") || conflict.includes("(uid)")) {
+        errorMessage.value =
+          "UID RFID ini sudah terdaftar. Scan UID lain atau buka kartu yang sudah ada untuk mengeditnya.";
+      } else if (conflict.includes("game_cards_unique_fusion_template_code_idx")) {
+        errorMessage.value =
+          "Card Code Fusion tersebut sudah digunakan. Pilih Card Code lain atau edit kartu Fusion yang ada.";
+      } else {
+        errorMessage.value =
+          "Data kartu bentrok dengan data unik lain. Periksa UID RFID dan Card Code, lalu coba lagi.";
+      }
     } else {
       errorMessage.value =
         error?.message || "Gagal menyimpan data kartu.";
@@ -1701,9 +2054,119 @@ const handleSubmit = async () => {
   }
 };
 
+const handleCardImage = async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  compressingImage.value = true;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const compressed = await compressImageFile(file, {
+      maxSourceBytes: IMAGE_UPLOAD_LIMITS.sourceBytes,
+      maxOutputBytes: IMAGE_UPLOAD_LIMITS.outputBytes,
+      maxDimension: IMAGE_UPLOAD_LIMITS.maxDimension,
+    });
+    if (compressedImagePreview.value.startsWith("blob:")) URL.revokeObjectURL(compressedImagePreview.value);
+    compressedCardImage.value = compressed;
+    compressedImagePreview.value = URL.createObjectURL(compressed);
+    successMessage.value = `Gambar otomatis dikompres menjadi ${Math.ceil(compressed.size / 1024)} KB.`;
+  } catch (error) {
+    errorMessage.value = error?.message ?? "Gagal mengompres gambar.";
+    event.target.value = "";
+  } finally {
+    compressingImage.value = false;
+  }
+};
+
+const clearCardImage = () => {
+  if (compressedImagePreview.value.startsWith("blob:")) URL.revokeObjectURL(compressedImagePreview.value);
+  compressedCardImage.value = null;
+  compressedImagePreview.value = "";
+  if (cardImageInput.value) cardImageInput.value.value = "";
+};
+
+const handleAuxiliaryCardImage = async (event, fileState, previewState, label) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  compressingImage.value = true;
+  errorMessage.value = "";
+  successMessage.value = "";
+  if (previewState.value.startsWith("blob:")) URL.revokeObjectURL(previewState.value);
+  fileState.value = null;
+  previewState.value = "";
+  try {
+    const compressed = await compressImageFile(file, {
+      maxSourceBytes: IMAGE_UPLOAD_LIMITS.sourceBytes,
+      maxOutputBytes: IMAGE_UPLOAD_LIMITS.outputBytes,
+      maxDimension: IMAGE_UPLOAD_LIMITS.maxDimension,
+    });
+    fileState.value = compressed;
+    previewState.value = URL.createObjectURL(compressed);
+    successMessage.value = `${label} dikompres menjadi ${Math.ceil(compressed.size / 1024)} KB WebP.`;
+  } catch (error) {
+    errorMessage.value = error?.message ?? `Gagal mengompres ${label.toLowerCase()}.`;
+    event.target.value = "";
+  } finally {
+    compressingImage.value = false;
+  }
+};
+
+const handlePhysicalCardImage = (event) => handleAuxiliaryCardImage(
+  event,
+  compressedPhysicalCardImage,
+  physicalCardImagePreview,
+  "Gambar kartu fisik",
+);
+
+const handleAvatarImage = (event) => handleAuxiliaryCardImage(
+  event,
+  avatarImageFile,
+  avatarImagePreview,
+  "Avatar",
+);
+
+const clearAuxiliaryCardImage = (fileState, previewState, inputState) => {
+  if (previewState.value.startsWith("blob:")) URL.revokeObjectURL(previewState.value);
+  fileState.value = null;
+  previewState.value = "";
+  if (inputState.value) inputState.value.value = "";
+};
+
+const clearAdditionalCardImages = () => {
+  clearAuxiliaryCardImage(compressedPhysicalCardImage, physicalCardImagePreview, physicalCardImageInput);
+  clearAuxiliaryCardImage(avatarImageFile, avatarImagePreview, avatarImageInput);
+};
+
+const clearPhysicalCardImage = () => clearAuxiliaryCardImage(
+  compressedPhysicalCardImage,
+  physicalCardImagePreview,
+  physicalCardImageInput,
+);
+
+const clearAvatarImage = () => clearAuxiliaryCardImage(
+  avatarImageFile,
+  avatarImagePreview,
+  avatarImageInput,
+);
+
+const uploadCompressedCardImage = async (file, folder) => {
+  const path = `${folder}/${crypto.randomUUID()}.webp`;
+  const { error: uploadError } = await supabase.storage
+    .from("card-images")
+    .upload(path, file, {
+      cacheControl: "31536000",
+      upsert: false,
+      contentType: "image/webp",
+    });
+  if (uploadError) throw uploadError;
+  return supabase.storage.from("card-images").getPublicUrl(path).data.publicUrl;
+};
+
 
 
 const resetForm = () => {
+  clearCardImage();
+  clearAdditionalCardImages();
   cardMode.value = "new";
   copySourceCardId.value = "";
   selectedFusionCardId.value = "";
@@ -1718,6 +2181,7 @@ const resetForm = () => {
   defense.value = 30;
   imageUrl.value = "🔥";
   avatarUrl.value = "";
+  physicalCardImageUrl.value = "";
 
   isExistingCard.value = false;
   recordId.value = null;
@@ -1744,6 +2208,10 @@ onMounted(async () => {
 
 
 onUnmounted(() => {
+
+  if (compressedImagePreview.value.startsWith("blob:")) URL.revokeObjectURL(compressedImagePreview.value);
+  if (physicalCardImagePreview.value.startsWith("blob:")) URL.revokeObjectURL(physicalCardImagePreview.value);
+  if (avatarImagePreview.value.startsWith("blob:")) URL.revokeObjectURL(avatarImagePreview.value);
 
   if (realtimeChannel) {
 
@@ -1910,7 +2378,7 @@ onUnmounted(() => {
 
                 <div v-if="cardMode === 'copy'" class="input-group compact-field">
                   <label for="copySourceCard">Copy dari Card Type</label>
-                  <select
+                  <SearchableSelect
                     id="copySourceCard"
                     v-model="copySourceCardId"
                     @change="loadCopySourceCard"
@@ -1921,9 +2389,9 @@ onUnmounted(() => {
                       :key="card.id"
                       :value="card.id"
                     >
-                      {{ card.name }} — {{ card.card_code }}
+                      {{ card.name }} — {{ card.metadata?.source_card_code || card.card_code }}
                     </option>
-                  </select>
+                  </SearchableSelect>
                   <small class="help-text">
                     Stats, element, media, tags, Card Code, dan Special Skill ikut dicopy.
                     UID tetap memakai RFID baru.
@@ -1942,7 +2410,7 @@ onUnmounted(() => {
 
                 <div class="input-group compact-field">
                   <label for="fusionExistingCard">Edit Existing Fusion Card</label>
-                  <select
+                  <SearchableSelect
                     id="fusionExistingCard"
                     v-model="selectedFusionCardId"
                     @change="loadFusionCardForEdit"
@@ -1955,7 +2423,7 @@ onUnmounted(() => {
                     >
                       {{ card.name }} — {{ card.card_code }}
                     </option>
-                  </select>
+                  </SearchableSelect>
                 </div>
               </template>
             </section>
@@ -2088,7 +2556,7 @@ onUnmounted(() => {
 
               <div class="input-group compact-field">
                 <label for="element">Pilih Element</label>
-                <select id="element" v-model="element">
+                <SearchableSelect id="element" v-model="element">
                   <option
                     v-for="item in elementOptions"
                     :key="item"
@@ -2096,7 +2564,7 @@ onUnmounted(() => {
                   >
                     {{ item }}
                   </option>
-                </select>
+                </SearchableSelect>
               </div>
 
               <div class="inline-element-add">
@@ -2180,14 +2648,44 @@ onUnmounted(() => {
               </div>
 
               <div class="input-group">
-                <label for="image">Asset Gambar / Emoji</label>
+                <label for="image">Emoji fallback atau URL cover kartu</label>
                 <input
                   id="image"
                   v-model="imageUrl"
                   type="text"
-                  placeholder="🔥 atau https://.../image.png"
+                  placeholder="🔥 atau https://.../cover.webp"
                   required
                 />
+              </div>
+
+              <div class="input-group card-image-upload">
+                <label for="card-image-file">Upload cover kartu</label>
+                <input
+                  id="card-image-file"
+                  ref="cardImageInput"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  :disabled="compressingImage || loading"
+                  @change="handleCardImage"
+                />
+                <small>{{ compressingImage ? "Mengompres ke WebP…" : compressedSizeLabel }}</small>
+                <button v-if="compressedCardImage" type="button" class="clear-card-image" @click="clearCardImage">Pakai gambar sebelumnya</button>
+              </div>
+
+              <div class="input-group card-image-upload auxiliary-image-upload">
+                <label for="physical-card-image-file">Upload gambar kartu fisik</label>
+                <input
+                  id="physical-card-image-file"
+                  ref="physicalCardImageInput"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  :disabled="compressingImage || loading"
+                  @change="handlePhysicalCardImage"
+                />
+                <small>{{ compressingImage ? "Mengompres ke WebP…" : compressedPhysicalCardImage ? `${Math.ceil(compressedPhysicalCardImage.size / 1024)} KB WebP setelah kompres` : "Opsional · maks. 10 MB · hasil WebP maks. 1 MB" }}</small>
+                <input v-model="physicalCardImageUrl" type="url" placeholder="URL kartu fisik yang sudah tersimpan (opsional)" aria-label="URL gambar kartu fisik" />
+                <img v-if="isImageUrl(physicalCardPreviewUrl)" class="media-image-preview physical-media-preview" :src="physicalCardPreviewUrl" alt="Preview kartu fisik" />
+                <button v-if="compressedPhysicalCardImage" type="button" class="clear-card-image" @click="clearPhysicalCardImage">Gunakan gambar fisik tersimpan</button>
               </div>
 
               <div class="input-group">
@@ -2200,11 +2698,27 @@ onUnmounted(() => {
                 />
               </div>
 
+              <div class="input-group card-image-upload auxiliary-image-upload">
+                <label for="avatar-image-file">Upload avatar</label>
+                <input
+                  id="avatar-image-file"
+                  ref="avatarImageInput"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  :disabled="compressingImage || loading"
+                  @change="handleAvatarImage"
+                />
+                <small>{{ compressingImage ? "Mengompres ke WebP…" : avatarImageFile ? `${Math.ceil(avatarImageFile.size / 1024)} KB WebP setelah kompres` : "Opsional · transparansi PNG/WebP tetap dijaga · hasil maks. 1 MB" }}</small>
+                <img v-if="isImageUrl(avatarPreviewUrl)" class="media-image-preview avatar-media-preview" :src="avatarPreviewUrl" alt="Preview avatar" />
+                <button v-if="avatarImageFile" type="button" class="clear-card-image" @click="clearAvatarImage">Gunakan avatar URL tersimpan</button>
+              </div>
+
               <div class="media-hint">
                 <span>🖼️</span>
                 <p>
-                  Gunakan gambar card untuk display utama dan Avatar transparan
-                  untuk animasi battle.
+                  Sebaiknya unggah ilustrasi cover tanpa teks tetap. Nama, statistik,
+                  badge, dan skill dirender dari data kartu agar selalu sinkron; avatar
+                  transparan dipakai untuk animasi battle.
                 </p>
               </div>
             </section>
@@ -2235,7 +2749,7 @@ onUnmounted(() => {
             <template v-if="fusionRecipeEnabled">
               <div v-if="isExistingCard && fusionRecipes.length" class="input-group">
                 <label for="fusionRecipeSelector">Recipe Existing</label>
-                <select
+                <SearchableSelect
                   id="fusionRecipeSelector"
                   v-model="selectedFusionRecipeId"
                   @change="loadSelectedFusionRecipe"
@@ -2248,7 +2762,7 @@ onUnmounted(() => {
                   >
                     {{ recipe.icon || "🔥" }} {{ recipe.name }} — {{ recipe.code }}
                   </option>
-                </select>
+                </SearchableSelect>
               </div>
 
               <div class="recipe-grid">
@@ -2369,11 +2883,11 @@ onUnmounted(() => {
                   <div class="input-row">
                     <div class="input-group">
                       <label>Requirement Type</label>
-                      <select v-model="req.material_type">
+                      <SearchableSelect v-model="req.material_type">
                         <option value="exact_card">Exact Card</option>
                         <option value="one_of">One Of</option>
                         <option value="tag">Tag</option>
-                      </select>
+                      </SearchableSelect>
                     </div>
 
                     <div class="input-group">
@@ -2392,7 +2906,7 @@ onUnmounted(() => {
 
                   <div v-if="req.material_type === 'exact_card'" class="input-group">
                     <label>Exact Logical Card</label>
-                    <select v-model="req.card_code">
+                    <SearchableSelect v-model="req.card_code">
                       <option value="">-- Pilih Card --</option>
                       <option
                         v-for="card in fusionMaterialCardOptions"
@@ -2401,12 +2915,12 @@ onUnmounted(() => {
                       >
                         {{ card.fusion_only ? "🧬 " : "" }}{{ card.name }} — {{ card.card_code }}
                       </option>
-                    </select>
+                    </SearchableSelect>
                   </div>
 
                   <div v-else-if="req.material_type === 'one_of'" class="input-group">
                     <label>One Of Cards</label>
-                    <select v-model="req.card_codes" multiple class="multi-select">
+                    <SearchableSelect v-model="req.card_codes" multiple class="multi-select">
                       <option
                         v-for="card in fusionMaterialCardOptions"
                         :key="`oneof-${req._key}-${card.card_code}`"
@@ -2414,7 +2928,7 @@ onUnmounted(() => {
                       >
                         {{ card.fusion_only ? "🧬 " : "" }}{{ card.name }} — {{ card.card_code }}
                       </option>
-                    </select>
+                    </SearchableSelect>
                     <small class="help-text">
                       Pilih beberapa alternatif. Contoh: Moltres ATAU Blaziken.
                       Gunakan Ctrl/Cmd untuk memilih lebih dari satu di desktop.
@@ -2481,33 +2995,33 @@ onUnmounted(() => {
                 <div class="fusion-stat-grid">
                   <div class="fusion-stat-card">
                     <strong>HP</strong>
-                    <select v-model="fusionHpMode">
+                    <SearchableSelect v-model="fusionHpMode">
                       <option value="material_sum_percent">Sum × Multiplier</option>
                       <option value="highest_material_percent">Highest × Multiplier</option>
                       <option value="fixed">Fixed</option>
-                    </select>
+                    </SearchableSelect>
                     <input v-model.number="fusionHpValue" type="number" min="0" step="0.05" />
                     <small>{{ fusionHpMode === 'fixed' ? 'Nilai HP tetap.' : '0.8 = 80%.' }}</small>
                   </div>
 
                   <div class="fusion-stat-card">
                     <strong>ATK</strong>
-                    <select v-model="fusionAttackMode">
+                    <SearchableSelect v-model="fusionAttackMode">
                       <option value="material_sum_percent">Sum × Multiplier</option>
                       <option value="highest_material_percent">Highest × Multiplier</option>
                       <option value="fixed">Fixed</option>
-                    </select>
+                    </SearchableSelect>
                     <input v-model.number="fusionAttackValue" type="number" min="0" step="0.05" />
                     <small>{{ fusionAttackMode === 'fixed' ? 'Nilai ATK tetap.' : '0.8 = 80%.' }}</small>
                   </div>
 
                   <div class="fusion-stat-card">
                     <strong>DEF</strong>
-                    <select v-model="fusionDefenseMode">
+                    <SearchableSelect v-model="fusionDefenseMode">
                       <option value="material_sum_percent">Sum × Multiplier</option>
                       <option value="highest_material_percent">Highest × Multiplier</option>
                       <option value="fixed">Fixed</option>
-                    </select>
+                    </SearchableSelect>
                     <input v-model.number="fusionDefenseValue" type="number" min="0" step="0.05" />
                     <small>{{ fusionDefenseMode === 'fixed' ? 'Nilai DEF tetap.' : '0.8 = 80%.' }}</small>
                   </div>
@@ -2564,10 +3078,47 @@ onUnmounted(() => {
               </div>
             </div>
 
+            <section v-if="builtinCardSkills.length" class="builtin-skill-toggle-list" aria-label="Skill bawaan kartu">
+              <header>
+                <div>
+                  <strong>Skill bawaan kartu</strong>
+                  <small>Aktifkan skill yang sudah memiliki aturan battle. Perubahan disimpan bersama kartu.</small>
+                </div>
+                <span>{{ builtinCardSkills.filter((item) => item.enabled).length }} aktif</span>
+              </header>
+
+              <article v-for="item in builtinCardSkills" :key="item.key" class="builtin-skill-toggle-row">
+                <div class="builtin-skill-toggle-copy">
+                  <strong>{{ item.definition?.icon || "✦" }} {{ item.name }}</strong>
+                  <small>{{ item.description || "Belum ada deskripsi skill." }}</small>
+                  <em v-if="!item.battleReady">
+                    {{ item.definition ? "Belum aktif di Skill Catalog; lengkapi efek dan aturan battle terlebih dahulu." : "Skill ini belum terdaftar di Skill Catalog." }}
+                  </em>
+                  <RouterLink v-if="!item.battleReady" class="skill-catalog-link" to="/admin/game/catalog">
+                    Atur aturan skill →
+                  </RouterLink>
+                </div>
+                <label class="skill-toggle" :class="{ disabled: !item.battleReady }">
+                  <input
+                    type="checkbox"
+                    :checked="item.enabled"
+                    :disabled="!item.battleReady"
+                    :aria-label="`${item.enabled ? 'Nonaktifkan' : 'Aktifkan'} skill ${item.name}`"
+                    @change="setBuiltinSkillEnabled(item, $event)"
+                  />
+                  <span aria-hidden="true"></span>
+                </label>
+              </article>
+            </section>
+
             <div class="input-group">
               <label for="specialSkillMode">Special Skill</label>
 
-              <select id="specialSkillMode" v-model="specialSkillMode">
+              <SearchableSelect
+                id="specialSkillMode"
+                v-model="specialSkillMode"
+                @change="handleSpecialSkillModeChange"
+              >
                 <option value="none">
                   Tidak Memiliki Special Skill
                 </option>
@@ -2579,7 +3130,48 @@ onUnmounted(() => {
                 <option value="new">
                   Buat Special Skill Baru
                 </option>
-              </select>
+              </SearchableSelect>
+            </div>
+
+            <div class="necro-skill-preset">
+              <div>
+                <strong>☠ NECRO PRESET • SOUL REBIRTH</strong>
+                <small>Korbankan kartu ini untuk membangkitkan 1 kartu milikmu dari Graveyard ke Active dengan 50% Base HP.</small>
+              </div>
+
+              <button
+                type="button"
+                class="btn-necro-preset"
+                :disabled="!soulRebirthSkill"
+                @click="assignSoulRebirthPreset"
+              >
+                {{ soulRebirthSkill ? "PAKAI SOUL REBIRTH" : "JALANKAN SQL PRESET" }}
+              </button>
+            </div>
+
+            <div class="status-skill-presets">
+              <div class="status-preset-heading">
+                <strong>STATUS EFFECT PRESETS • PHASE 3D.19</strong>
+                <small>Effect tidak otomatis hanya karena element. Pasang preset ini ke Card yang memang memiliki skill tersebut.</small>
+              </div>
+
+              <div class="status-preset-grid">
+                <button
+                  v-for="preset in statusSkillPresetCards"
+                  :key="preset.code"
+                  type="button"
+                  class="status-preset-card"
+                  :disabled="!preset.skill"
+                  @click="assignStatusSkillPreset(preset)"
+                >
+                  <span>{{ preset.icon }}</span>
+                  <div>
+                    <strong>{{ preset.label }}</strong>
+                    <small>{{ preset.hint }}</small>
+                  </div>
+                  <b>{{ preset.skill ? "USE" : "SQL" }}</b>
+                </button>
+              </div>
             </div>
 
             <!-- EXISTING SPECIAL SKILL -->
@@ -2587,12 +3179,19 @@ onUnmounted(() => {
               <div class="input-group">
                 <label for="existingSkill">Pilih Skill</label>
 
-                <select
+                <SearchableSelect
                   id="existingSkill"
                   v-model="selectedSpecialSkillId"
                 >
                   <option value="">
                     -- Pilih Special Skill --
+                  </option>
+
+                  <option
+                    v-if="selectedSpecialSkill?.metadata?.catalog_only && !selectedSkillIsActiveOption"
+                    :value="selectedSpecialSkill.id"
+                  >
+                    {{ selectedSpecialSkill.name }} (Katalog, belum aktif di battle)
                   </option>
 
                   <option
@@ -2604,7 +3203,7 @@ onUnmounted(() => {
                     {{ skill.name }}
                     ({{ skill.code }})
                   </option>
-                </select>
+                </SearchableSelect>
               </div>
 
               <div
@@ -2625,6 +3224,10 @@ onUnmounted(() => {
                 <p>
                   {{ selectedSpecialSkill.description || "Tidak ada deskripsi." }}
                 </p>
+
+                <small v-if="selectedSpecialSkill.metadata?.catalog_only" class="help-text">
+                  Skill ini sudah tertaut ke kartu sebagai data katalog. Efek battle-nya belum diaktifkan karena dokumen sumber menandainya perlu playtest.
+                </small>
 
                 <div class="skill-summary-grid">
                   <span>
@@ -2757,7 +3360,7 @@ onUnmounted(() => {
                 <div class="input-group">
                   <label for="skillTargetType">Target</label>
 
-                  <select
+                  <SearchableSelect
                     id="skillTargetType"
                     v-model="skillTargetType"
                   >
@@ -2788,7 +3391,7 @@ onUnmounted(() => {
                     <option value="enemy_graveyard">
                       Enemy Graveyard
                     </option>
-                  </select>
+                  </SearchableSelect>
                 </div>
               </div>
 
@@ -2796,7 +3399,7 @@ onUnmounted(() => {
                 <div class="input-group">
                   <label for="skillCostType">Cost</label>
 
-                  <select
+                  <SearchableSelect
                     id="skillCostType"
                     v-model="skillCostType"
                   >
@@ -2807,7 +3410,7 @@ onUnmounted(() => {
                     <option value="skill_gauge">
                       Skill Gauge
                     </option>
-                  </select>
+                  </SearchableSelect>
                 </div>
 
                 <div
@@ -2890,17 +3493,22 @@ onUnmounted(() => {
                   <div class="input-group">
                     <label for="skillEffectType">Jenis Efek</label>
 
-                    <select
+                    <SearchableSelect
                       id="skillEffectType"
                       v-model="skillEffectType"
                       :disabled="skillAdvancedMode"
                     >
+                      <option value="" disabled>-- Pilih jenis efek --</option>
                       <option value="damage_card">Damage ke Card</option>
                       <option value="heal_card">Heal Card</option>
                       <option value="damage_player">Damage langsung ke Player</option>
                       <option value="heal_player">Heal Player</option>
                       <option value="add_skill_gauge">Tambah Skill Gauge</option>
-                    </select>
+                    </SearchableSelect>
+
+                    <small v-if="skillAdvancedMode" class="help-text">
+                      Advanced Mode aktif. Matikan centangnya di bawah untuk mengubah satu jenis efek sederhana.
+                    </small>
                   </div>
 
                   <div class="input-group">
@@ -3030,9 +3638,9 @@ onUnmounted(() => {
 
             <img
 
-              v-if="isImageUrl(imageUrl)"
+              v-if="isImageUrl(cardImagePreviewUrl)"
 
-              :src="imageUrl"
+              :src="cardImagePreviewUrl"
 
               class="preview-img-asset"
 
@@ -4686,5 +5294,127 @@ textarea {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+
+
+/* =========================================================
+   PHASE 3C.1 • NECRO RESURRECTION PRESET
+========================================================= */
+.necro-skill-preset {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 14px 0 18px;
+  padding: 14px 16px;
+  border: 1px solid rgba(118, 72, 176, 0.22);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(250, 247, 255, 0.98), rgba(240, 232, 252, 0.88));
+  box-shadow: 0 12px 28px rgba(72, 46, 105, 0.08);
+}
+
+.necro-skill-preset > div {
+  display: grid;
+  gap: 4px;
+}
+
+.necro-skill-preset strong {
+  color: #56347d;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.necro-skill-preset small {
+  max-width: 620px;
+  color: #76668a;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.btn-necro-preset {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 11px;
+  color: #fff;
+  background: linear-gradient(135deg, #5f3b86, #8b4fb4);
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 0 10px 20px rgba(89, 51, 125, 0.18);
+}
+
+.btn-necro-preset:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+@media (max-width: 720px) {
+  .necro-skill-preset {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .btn-necro-preset {
+    width: 100%;
+  }
+}
+
+
+/* =========================================================
+   PHASE 3D.19 • STATUS SKILL PRESETS
+========================================================= */
+.status-skill-presets {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid rgba(88, 116, 146, 0.16);
+  border-radius: 16px;
+  background: rgba(246, 251, 255, 0.76);
+}
+.status-preset-heading { display:flex; flex-direction:column; gap:4px; margin-bottom:10px; }
+.status-preset-heading strong { color:#23425a; font-size:12px; font-weight:950; }
+.status-preset-heading small { color:#6d8395; font-size:10px; line-height:1.45; }
+.status-preset-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.status-preset-card { min-height:62px; display:grid; grid-template-columns:34px minmax(0,1fr) auto; align-items:center; gap:9px; padding:9px 10px; border:1px solid rgba(76,126,160,.18); border-radius:13px; background:#fff; color:#26465f; text-align:left; cursor:pointer; }
+.status-preset-card:hover:not(:disabled) { transform:translateY(-1px); border-color:rgba(46,150,214,.42); box-shadow:0 8px 18px rgba(55,105,140,.10); }
+.status-preset-card > span { font-size:23px; }
+.status-preset-card > div { min-width:0; display:flex; flex-direction:column; gap:3px; }
+.status-preset-card strong { font-size:10px; font-weight:950; }
+.status-preset-card small { color:#718798; font-size:8px; line-height:1.35; }
+.status-preset-card > b { padding:4px 6px; border-radius:999px; background:#edf6fb; color:#2b83b7; font-size:7px; }
+.status-preset-card:disabled { opacity:.45; cursor:not-allowed; }
+@media(max-width:720px){.status-preset-grid{grid-template-columns:1fr}}
+
+.card-image-upload input[type="file"] { width: 100%; padding: 10px; border: 1px dashed #a8d5ad; border-radius: 9px; background: #f5fbf4; color: #48664e; font-size: 10px; }
+.card-image-upload input[type="file"]::file-selector-button { margin-right: 10px; border: 0; border-radius: 7px; padding: 8px 11px; background: #0caf25; color: #fff; font: 800 10px 'DM Sans',sans-serif; cursor: pointer; }
+.card-image-upload input[type="file"]:disabled { opacity: .65; cursor: progress; }
+.card-image-upload small { color: #527359; font-size: 9px; line-height: 1.5; }
+.clear-card-image { align-self: flex-start; border: 1px solid #b9d9ba; border-radius: 7px; padding: 7px 9px; background: #f2faf1; color: #287a35; font-size: 9px; font-weight: 800; cursor: pointer; }
+.clear-card-image:hover { background: #e4f5e4; }
+.auxiliary-image-upload{gap:8px}
+.auxiliary-image-upload>input[type="url"]{width:100%;border:1px solid #d8e8d8;border-radius:8px;padding:9px 10px;background:#fff;color:#284b30;font-size:10px}
+.media-image-preview{display:block;max-width:100%;max-height:190px;object-fit:contain;align-self:flex-start;border:1px solid #d9e9d9;border-radius:9px;background:#f6faf5}
+.physical-media-preview{width:min(170px,100%);aspect-ratio:2/3}
+.avatar-media-preview{width:96px;height:96px;padding:6px}
+
+.builtin-skill-toggle-list{display:grid;gap:9px;margin:12px 0 18px;padding:14px;border:1px solid #d8ead8;border-radius:13px;background:#f7fbf5}
+.builtin-skill-toggle-list>header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:2px}
+.builtin-skill-toggle-list>header>div,.builtin-skill-toggle-copy{display:grid;gap:4px;min-width:0}
+.builtin-skill-toggle-list>header strong{color:#21472a;font-size:12px;font-weight:900}
+.builtin-skill-toggle-list>header small,.builtin-skill-toggle-copy small{color:#718575;font-size:9px;line-height:1.5}
+.builtin-skill-toggle-list>header>span{flex:none;border-radius:999px;padding:5px 8px;background:#e4f4e2;color:#287d36;font-size:8px;font-weight:900}
+.builtin-skill-toggle-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 11px;border:1px solid #deebdd;border-radius:10px;background:#fff}
+.builtin-skill-toggle-copy strong{color:#284b30;font-size:10px;font-weight:900}
+.builtin-skill-toggle-copy em{color:#9a6a1b;font-size:8px;font-style:normal;line-height:1.4}
+.skill-catalog-link{color:#267b34;font-size:8px;font-weight:900;text-decoration:none}
+.skill-catalog-link:hover{text-decoration:underline}
+.skill-toggle{position:relative;display:inline-flex;flex:none;align-items:center;cursor:pointer}
+.skill-toggle input{position:absolute;width:1px;height:1px;opacity:0}
+.skill-toggle>span{position:relative;width:39px;height:22px;border-radius:999px;background:#c8d5c8;transition:background .18s ease,box-shadow .18s ease}
+.skill-toggle>span::after{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:white;box-shadow:0 1px 4px #173b2230;content:"";transition:transform .18s ease}
+.skill-toggle input:checked+span{background:#16a52b}
+.skill-toggle input:checked+span::after{transform:translateX(17px)}
+.skill-toggle input:focus-visible+span{outline:3px solid #a3ddb0;outline-offset:2px}
+.skill-toggle.disabled{cursor:not-allowed;opacity:.55}
+@media(max-width:620px){.builtin-skill-toggle-list{padding:10px}.builtin-skill-toggle-row{align-items:flex-start;padding:9px}.builtin-skill-toggle-list>header{align-items:flex-start}}
 
 </style>

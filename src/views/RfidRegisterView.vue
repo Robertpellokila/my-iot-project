@@ -1,4 +1,5 @@
 <script setup>
+import SearchableSelect from "../components/SearchableSelect.vue";
 import { onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { createRfid, getProfiles } from "../services/rfidService";
@@ -216,7 +217,7 @@ onUnmounted(() => {
               Owner
             </label>
 
-            <select
+            <SearchableSelect
               id="owner"
               v-model="ownerId"
               class="form-input"
@@ -237,7 +238,7 @@ onUnmounted(() => {
                 {{ profile.full_name }}
               </option>
 
-            </select>
+            </SearchableSelect>
 
           </div>
 
@@ -248,7 +249,7 @@ onUnmounted(() => {
               RFID Type
             </label>
 
-            <select
+            <SearchableSelect
               id="cardType"
               v-model="cardType"
               class="form-input"
@@ -270,7 +271,7 @@ onUnmounted(() => {
                 Other
               </option>
 
-            </select>
+            </SearchableSelect>
 
           </div>
 

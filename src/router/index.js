@@ -87,6 +87,8 @@ import PublicBattleArena
 import PlayerBattle
   from "../views/PlayerBattle.vue";
 import CardCollection from "../views/CardCollection.vue";
+import GameLanding from "../views/GameLanding.vue";
+import SkillCatalog from "../views/SkillCatalog.vue";
 
 
 // =========================================================
@@ -100,6 +102,12 @@ const router =
       createWebHistory(),
 
     routes: [
+
+      { path: "/", name: "game-landing", component: GameLanding },
+      { path: "/cards", name: "public-cards", component: GameLanding },
+      { path: "/fusion", name: "public-fusion", component: GameLanding },
+      { path: "/skills", name: "public-skills", component: GameLanding },
+      { path: "/play", name: "public-game-play", component: GameLanding },
 
       // =====================================================
       // PUBLIC BATTLE
@@ -212,7 +220,7 @@ const router =
 
       {
         path:
-          "/",
+          "/admin",
 
         component:
           DashboardLayout,
@@ -233,7 +241,7 @@ const router =
               "",
 
             redirect:
-              "/dashboard",
+              "/admin/dashboard",
           },
 
 
@@ -307,7 +315,7 @@ const router =
               "question",
 
             redirect:
-              "/questions/add",
+              "/admin/questions/add",
           },
 
 
@@ -383,6 +391,16 @@ const router =
             component:
               CardCollection,
           },
+          {
+            path:
+              "game/catalog",
+
+            name:
+              "skill-catalog",
+
+            component:
+              SkillCatalog,
+          },
 
 
           // =================================================
@@ -430,6 +448,17 @@ const router =
         ],
       },
 
+      ...[
+        ["/dashboard", "/admin/dashboard"], ["/questions", "/admin/questions"],
+        ["/questions/add", "/admin/questions/add"], ["/question", "/admin/questions/add"],
+        ["/setup", "/admin/setup"], ["/battle-history", "/admin/battle-history"],
+        ["/arena", "/admin/arena"], ["/game/register", "/admin/game/register"],
+        ["/game/album-card", "/admin/game/album-card"], ["/rfid", "/admin/rfid"],
+        ["/game/catalog", "/admin/game/catalog"],
+        ["/rfid/register", "/admin/rfid/register"],
+      ].map(([path, redirect]) => ({ path, redirect })),
+      { path: "/rfid/:id/edit", redirect: (to) => `/admin/rfid/${to.params.id}/edit` },
+
 
       // =====================================================
       // 404
@@ -440,7 +469,7 @@ const router =
           "/:pathMatch(.*)*",
 
         redirect:
-          "/dashboard",
+          "/admin/dashboard",
       },
 
     ],

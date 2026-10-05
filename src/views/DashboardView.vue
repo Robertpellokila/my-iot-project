@@ -1,4 +1,5 @@
 <script setup>
+import AdminTable from "../components/AdminTable.vue";
 import {
   computed,
   onMounted,
@@ -311,6 +312,7 @@ onMounted(loadDashboard);
 
         <div class="table-wrapper">
 
+          <AdminTable>
           <table class="data-table">
 
             <thead>
@@ -420,6 +422,7 @@ onMounted(loadDashboard);
             </tbody>
 
           </table>
+          </AdminTable>
 
         </div>
 

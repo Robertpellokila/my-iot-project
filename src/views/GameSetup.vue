@@ -1,4 +1,5 @@
 <script setup>
+import SearchableSelect from "../components/SearchableSelect.vue";
 import { ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { supabase } from "../lib/supabase";
@@ -23,6 +24,7 @@ const player2Name = ref("Player 2");
 
 const totalRounds = ref(10);
 const startingPlayer = ref("random");
+const turnDurationSeconds = ref(45);
 
 // =========================================================
 // TCG V1
@@ -76,6 +78,20 @@ const fusionEnabled = ref(true);
 const questionEnabled = ref(true);
 const questionLevel = ref("medium");
 const questionEveryRounds = ref(5);
+const questionTopics = ref([]);
+const questionTimeLimitSeconds = ref(30);
+const questionBonusEnabled = ref(true);
+const questionLearningEnabled = ref(true);
+const questionTopicOptions = [
+  { value: "scratch", label: "Scratch" },
+  { value: "block_coding", label: "Block coding" },
+  { value: "programming_basics", label: "Dasar coding" },
+  { value: "javascript", label: "JavaScript" },
+  { value: "html", label: "HTML" },
+  { value: "algorithm", label: "Algoritma" },
+  { value: "database", label: "Database" },
+  { value: "general", label: "Umum" },
+];
 
 // =========================================================
 // STATE
@@ -92,6 +108,17 @@ const createdBattle = ref(null);
 const player1QrDataUrl = ref("");
 const player2QrDataUrl = ref("");
 const qrError = ref(null);
+const enlargedQr = ref(null);
+
+const enlargePlayerQr = (player) => {
+  const image = player === "p1" ? player1QrDataUrl.value : player2QrDataUrl.value;
+  if (!image) return;
+  enlargedQr.value = {
+    player,
+    name: player === "p1" ? createdBattle.value?.player1_name : createdBattle.value?.player2_name,
+    image,
+  };
+};
 
 // =========================================================
 // CREATED URLS
@@ -230,6 +257,13 @@ const generateBattleCode = () => {
   }
 
   return result;
+};
+
+const generatePlayerAccessCode = () => {
+  const characters = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const random = new Uint8Array(10);
+  crypto.getRandomValues(random);
+  return [...random].map((value) => characters[value % characters.length]).join("");
 };
 
 // =========================================================
@@ -453,6 +487,28 @@ const createBattle = async () => {
     return;
   }
 
+  if (questionEnabled.value) {
+    let questionPool = supabase
+      .from("coding_questions")
+      .select("id", { count: "exact", head: true })
+      .eq("is_active", true);
+    if (questionLevel.value !== "mixed") {
+      questionPool = questionPool.eq("difficulty", questionLevel.value);
+    }
+    if (questionTopics.value.length) {
+      questionPool = questionPool.in("category", questionTopics.value);
+    }
+    const { count, error: questionPoolError } = await questionPool;
+    if (questionPoolError) {
+      error.value = `Bank soal tidak dapat diperiksa: ${questionPoolError.message}`;
+      return;
+    }
+    if (!count) {
+      error.value = "Belum ada soal aktif untuk kombinasi topik dan level ini. Pilih topik lain atau aktifkan level Mixed.";
+      return;
+    }
+  }
+
   loading.value = true;
 
   createdBattle.value = null;
@@ -516,6 +572,8 @@ const createBattle = async () => {
         // =================================================
 
         code,
+        player1_access_code: generatePlayerAccessCode(),
+        player2_access_code: generatePlayerAccessCode(),
 
         // =================================================
         // PLAYER
@@ -545,6 +603,9 @@ const createBattle = async () => {
 
         starting_player:
           resolvedStartingPlayer,
+
+        turn_duration_seconds:
+          Number(turnDurationSeconds.value),
 
         current_turn:
           resolvedStartingPlayer,
@@ -684,6 +745,18 @@ const createBattle = async () => {
           Number(
             questionEveryRounds.value,
           ),
+
+        question_topics:
+          [...questionTopics.value],
+
+        question_time_limit_seconds:
+          Number(questionTimeLimitSeconds.value),
+
+        question_bonus_enabled:
+          Boolean(questionBonusEnabled.value),
+
+        question_learning_enabled:
+          Boolean(questionLearningEnabled.value),
 
         question_active:
           false,
@@ -945,6 +1018,7 @@ const createAnother = () => {
   player1QrDataUrl.value = "";
   player2QrDataUrl.value = "";
   qrError.value = null;
+  enlargedQr.value = null;
 
   error.value = null;
 };
@@ -1092,6 +1166,40 @@ const createAnother = () => {
               />
             </label>
           </div>
+
+          <div class="question-extra-grid" :class="{ disabled: !questionEnabled }">
+            <fieldset class="question-topic-field" :disabled="!questionEnabled">
+              <legend>Topik soal <small>(kosongkan untuk semua topik)</small></legend>
+              <div class="question-topic-options">
+                <label v-for="topic in questionTopicOptions" :key="topic.value" class="question-topic-chip">
+                  <input v-model="questionTopics" type="checkbox" :value="topic.value" />
+                  <span>{{ topic.label }}</span>
+                </label>
+              </div>
+            </fieldset>
+
+            <label class="field">
+              <span>Waktu menjawab</span>
+              <SearchableSelect v-model.number="questionTimeLimitSeconds" :disabled="!questionEnabled">
+                <option :value="0">Tanpa batas waktu</option>
+                <option :value="20">20 detik</option>
+                <option :value="30">30 detik</option>
+                <option :value="45">45 detik</option>
+                <option :value="60">60 detik</option>
+              </SearchableSelect>
+              <small>Timer dihitung sejak soal muncul dan divalidasi oleh server.</small>
+            </label>
+
+            <label class="question-setting-toggle">
+              <input v-model="questionLearningEnabled" type="checkbox" :disabled="!questionEnabled" />
+              <span><strong>Mode belajar</strong><small>Petunjuk bertahap, pembahasan, dan saran materi.</small></span>
+            </label>
+
+            <label class="question-setting-toggle">
+              <input v-model="questionBonusEnabled" type="checkbox" :disabled="!questionEnabled" />
+              <span><strong>Bonus untuk jawaban benar</strong><small>Pemenang kuis memilih satu dari tiga bonus skill.</small></span>
+            </label>
+          </div>
         </section>
 
         <!-- ===============================================
@@ -1179,7 +1287,7 @@ const createAnother = () => {
                 Starting Player
               </span>
 
-              <select
+              <SearchableSelect
                 v-model="
                   startingPlayer
                 "
@@ -1201,7 +1309,7 @@ const createAnother = () => {
                 >
                   Player 2
                 </option>
-              </select>
+              </SearchableSelect>
 
               <small>
                 Jika Random,
@@ -1235,6 +1343,16 @@ const createAnother = () => {
                 Player HP pada
                 TCG V1.
               </small>
+            </label>
+
+            <label class="field">
+              <span>Batas waktu giliran</span>
+              <SearchableSelect v-model.number="turnDurationSeconds">
+                <option :value="30">30 detik</option>
+                <option :value="45">45 detik</option>
+                <option :value="60">60 detik</option>
+              </SearchableSelect>
+              <small>Giliran otomatis berpindah saat waktu habis. Player mendapat satu jeda sambung ulang 10 detik per battle.</small>
             </label>
           </div>
         </section>
@@ -1630,7 +1748,7 @@ const createAnother = () => {
                 Destruction Mode
               </span>
 
-              <select
+              <SearchableSelect
                 v-model="
                   destructionDamageMode
                 "
@@ -1649,7 +1767,7 @@ const createAnother = () => {
                 >
                   Overflow Damage %
                 </option>
-              </select>
+              </SearchableSelect>
 
               <small
                 v-if="
@@ -1974,7 +2092,7 @@ const createAnother = () => {
                 Question Level
               </span>
 
-              <select
+              <SearchableSelect
                 v-model="
                   questionLevel
                 "
@@ -2005,7 +2123,7 @@ const createAnother = () => {
                 >
                   Mixed
                 </option>
-              </select>
+              </SearchableSelect>
 
               <small>
                 Difficulty question
@@ -2475,21 +2593,22 @@ const createAnother = () => {
             >
               {{ player1Url }}
             </div>
+            <div class="player-access-code"><span>KODE PEMAIN</span><code>{{ createdBattle.player1_access_code || createdBattle.player1_token }}</code><button type="button" @click="copyText(createdBattle.player1_access_code || createdBattle.player1_token)">SALIN</button></div>
           </div>
 
           <div
             v-if="player1QrDataUrl"
             class="player-qr-panel blue"
           >
-            <div class="qr-frame">
+            <button type="button" class="qr-frame" aria-label="Perbesar QR Player 1" @click="enlargePlayerQr('p1')">
               <img
                 :src="player1QrDataUrl"
                 :alt="`QR Player 1 - ${createdBattle.player1_name}`"
               />
-            </div>
+            </button>
 
             <span>
-              SCAN TO JOIN
+              KLIK QR UNTUK PERBESAR
             </span>
           </div>
 
@@ -2551,21 +2670,22 @@ const createAnother = () => {
             >
               {{ player2Url }}
             </div>
+            <div class="player-access-code"><span>KODE PEMAIN</span><code>{{ createdBattle.player2_access_code || createdBattle.player2_token }}</code><button type="button" @click="copyText(createdBattle.player2_access_code || createdBattle.player2_token)">SALIN</button></div>
           </div>
 
           <div
             v-if="player2QrDataUrl"
             class="player-qr-panel red"
           >
-            <div class="qr-frame">
+            <button type="button" class="qr-frame" aria-label="Perbesar QR Player 2" @click="enlargePlayerQr('p2')">
               <img
                 :src="player2QrDataUrl"
                 :alt="`QR Player 2 - ${createdBattle.player2_name}`"
               />
-            </div>
+            </button>
 
             <span>
-              SCAN TO JOIN
+              KLIK QR UNTUK PERBESAR
             </span>
           </div>
 
@@ -2612,6 +2732,16 @@ const createAnother = () => {
       >
         + CREATE ANOTHER BATTLE
       </button>
+
+      <div v-if="enlargedQr" class="qr-enlarged-backdrop" @click.self="enlargedQr = null" @keydown.esc="enlargedQr = null">
+        <section class="qr-enlarged-modal" role="dialog" aria-modal="true" :aria-label="`QR ${enlargedQr.player}`">
+          <button type="button" class="qr-enlarged-close" aria-label="Tutup QR" @click="enlargedQr = null">×</button>
+          <span class="qr-enlarged-eyebrow">{{ enlargedQr.player === "p1" ? "PLAYER 1" : "PLAYER 2" }}</span>
+          <h2>{{ enlargedQr.name || "Player" }}</h2>
+          <img :src="enlargedQr.image" :alt="`QR ${enlargedQr.name || enlargedQr.player}`" />
+          <p>Scan QR ini untuk membuka halaman battle player.</p>
+        </section>
+      </div>
     </main>
   </div>
 </template>
@@ -3855,6 +3985,17 @@ select {
   white-space: nowrap;
 }
 
+.player-access-code {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  color: #8fa9bd;
+  font-size: 8px;
+}
+.player-access-code code { color: #d8f2ff; font-size: 10px; font-weight: 900; letter-spacing: .1em; }
+.player-access-code button { border: 1px solid rgba(114, 194, 238, .25); border-radius: 5px; background: rgba(69, 158, 205, .1); color: #8bd3f4; padding: 4px 6px; font-size: 7px; font-weight: 900; cursor: pointer; }
+
 .battle-link-card.with-qr {
   grid-template-columns:
     auto minmax(0, 1fr) 124px auto;
@@ -3895,6 +4036,12 @@ select {
 
   display: grid;
 
+  border: 0;
+
+  cursor: zoom-in;
+
+  appearance: none;
+
   place-items: center;
 
   overflow: hidden;
@@ -3917,6 +4064,80 @@ select {
   object-fit: contain;
 
   image-rendering: pixelated;
+}
+
+.qr-frame:focus-visible {
+  outline: 3px solid #18aa35;
+  outline-offset: 3px;
+}
+
+.qr-enlarged-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(12, 35, 18, .76);
+  backdrop-filter: blur(7px);
+}
+
+.qr-enlarged-modal {
+  width: min(440px, 100%);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 30px 24px 25px;
+  border: 1px solid #dcebd9;
+  border-radius: 20px;
+  color: #21452b;
+  background: #fff;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, .35);
+  text-align: center;
+}
+
+.qr-enlarged-close {
+  width: 38px;
+  height: 38px;
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  border: 1px solid #dce9dc;
+  border-radius: 50%;
+  color: #385d40;
+  background: #f5faf4;
+  cursor: pointer;
+  font-size: 24px;
+}
+
+.qr-enlarged-eyebrow {
+  margin-top: 5px;
+  color: #149b32;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .16em;
+}
+
+.qr-enlarged-modal h2 {
+  margin: 8px 0 18px;
+  color: #183d24;
+  font-size: 22px;
+}
+
+.qr-enlarged-modal img {
+  width: min(100%, 340px);
+  padding: 10px;
+  border: 1px solid #e1ebe0;
+  border-radius: 14px;
+  background: white;
+  image-rendering: pixelated;
+}
+
+.qr-enlarged-modal p {
+  margin: 14px 0 0;
+  color: #758776;
+  font-size: 13px;
 }
 
 .player-qr-panel > span {
@@ -4193,5 +4414,65 @@ select {
 
     min-width: 0;
   }
+}
+
+.question-extra-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 18px;
+}
+.question-extra-grid.disabled { opacity: .55; }
+.question-topic-field {
+  min-width: 0;
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid #dbe9dc;
+  border-radius: 15px;
+  background: #fbfefb;
+}
+.question-topic-field legend {
+  padding: 0 7px;
+  color: #174b2c;
+  font-size: 12px;
+  font-weight: 800;
+}
+.question-topic-field legend small { margin-left: 5px; color: #6b8571; font-weight: 500; }
+.question-topic-options { display: flex; flex-wrap: wrap; gap: 9px; }
+.question-topic-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 7px 11px;
+  border: 1px solid #d6e7d8;
+  border-radius: 999px;
+  color: #305d3d;
+  background: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.question-topic-chip:has(input:checked) { border-color: #179b3c; color: #08742c; background: #e9f8eb; }
+.question-topic-chip input { accent-color: #11a33a; }
+.question-setting-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 13px;
+  border: 1px solid #dbe9dc;
+  border-radius: 14px;
+  color: #18482b;
+  background: #fbfefb;
+  cursor: pointer;
+}
+.question-setting-toggle input { margin-top: 3px; accent-color: #12a33b; }
+.question-setting-toggle span { display: grid; gap: 4px; }
+.question-setting-toggle strong { font-size: 12px; }
+.question-setting-toggle small { color: #698271; font-size: 10px; line-height: 1.45; }
+@media (max-width: 700px) {
+  .question-extra-grid { grid-template-columns: 1fr; }
+  .question-topic-field { grid-column: auto; }
 }
 </style>

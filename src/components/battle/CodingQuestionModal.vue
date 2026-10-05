@@ -96,6 +96,8 @@ const emit = defineEmits([
             {{ question.question }}
           </p>
 
+          <img v-if="question.image_url" class="question-image" :src="question.image_url" alt="Gambar pendukung pertanyaan" />
+
           <div class="question-options">
             <button
               v-for="
@@ -240,6 +242,8 @@ const emit = defineEmits([
   font-weight: 800;
   line-height: 1.45;
 }
+
+.question-image { display:block; max-width:100%; max-height:36vh; margin:0 auto 18px; border-radius:10px; object-fit:contain; }
 
 .question-options {
   display: grid;

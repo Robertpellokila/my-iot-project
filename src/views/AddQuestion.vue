@@ -1,9 +1,19 @@
 <script setup>
+import SearchableSelect from "../components/SearchableSelect.vue";
 import { ref, computed } from 'vue';
 import { supabase } from '../lib/supabase';
+import { compressImageFile, IMAGE_UPLOAD_LIMITS } from '../lib/compressImage';
 
 const form = ref({
   question: '',
+  question_type: 'choice',
+  blocks_text: '',
+  code_snippet: '',
+  bug_line: 0,
+  hint_1: '',
+  hint_2: '',
+  learning_topic: '',
+  learning_url: '',
   option_a: '',
   option_b: '',
   option_c: '',
@@ -18,6 +28,13 @@ const form = ref({
 const isSubmitting = ref(false);
 const successMessage = ref('');
 const errorMessage = ref('');
+const selectedImage = ref(null);
+const imagePreview = ref('');
+const currentImageUrl = ref('');
+const compressingImage = ref(false);
+const questionImageStatus = computed(() => selectedImage.value
+  ? `${Math.ceil(selectedImage.value.size / 1024)} KB WebP setelah kompres`
+  : 'JPG/PNG/WebP · maks. 10 MB · hasil WebP maks. 1 MB');
 
 const categories = [
   'programming',
@@ -26,6 +43,9 @@ const categories = [
   'css',
   'database',
   'algorithm',
+  'scratch',
+  'block_coding',
+  'programming_basics',
   'general',
 ];
 
@@ -55,8 +75,15 @@ const answerOptions = [
 ];
 
 const isFormValid = computed(() => {
+  if (!form.value.question.trim()) return false;
+  if (form.value.question_type === 'block_order') {
+    return form.value.blocks_text.split('\n').map((line) => line.trim()).filter(Boolean).length >= 2;
+  }
+  if (form.value.question_type === 'find_bug') {
+    const lineCount = form.value.code_snippet.split('\n').filter((line) => line.trim()).length;
+    return lineCount >= 2 && lineCount <= 4 && Number(form.value.bug_line) < lineCount;
+  }
   return (
-    form.value.question.trim() &&
     form.value.option_a.trim() &&
     form.value.option_b.trim() &&
     form.value.option_c.trim() &&
@@ -66,8 +93,20 @@ const isFormValid = computed(() => {
 });
 
 const resetForm = () => {
+  if (imagePreview.value.startsWith('blob:')) URL.revokeObjectURL(imagePreview.value);
+  selectedImage.value = null;
+  imagePreview.value = '';
+  currentImageUrl.value = '';
   form.value = {
     question: '',
+    question_type: 'choice',
+    blocks_text: '',
+    code_snippet: '',
+    bug_line: 0,
+    hint_1: '',
+    hint_2: '',
+    learning_topic: '',
+    learning_url: '',
     option_a: '',
     option_b: '',
     option_c: '',
@@ -80,10 +119,35 @@ const resetForm = () => {
   };
 };
 
+const selectQuestionImage = async (event) => {
+  const file = event.target.files?.[0] ?? null;
+  errorMessage.value = '';
+  if (imagePreview.value.startsWith('blob:')) URL.revokeObjectURL(imagePreview.value);
+  selectedImage.value = null;
+  imagePreview.value = currentImageUrl.value;
+  if (!file) return;
+  compressingImage.value = true;
+  try {
+    const compressed = await compressImageFile(file, {
+      maxSourceBytes: IMAGE_UPLOAD_LIMITS.sourceBytes,
+      maxOutputBytes: IMAGE_UPLOAD_LIMITS.outputBytes,
+      maxDimension: IMAGE_UPLOAD_LIMITS.maxDimension,
+    });
+    selectedImage.value = compressed;
+    imagePreview.value = URL.createObjectURL(compressed);
+  } catch (error) {
+    errorMessage.value = error?.message ?? 'Gagal mengompres gambar.';
+    event.target.value = '';
+  } finally {
+    compressingImage.value = false;
+  }
+};
+
 const submitQuestion = async () => {
+  if (compressingImage.value || isSubmitting.value) return;
   if (!isFormValid.value) {
     errorMessage.value =
-      'Question dan semua pilihan jawaban wajib diisi.';
+      'Lengkapi pertanyaan dan bahan interaktif sesuai jenis soal.';
     return;
   }
 
@@ -93,33 +157,81 @@ const submitQuestion = async () => {
   errorMessage.value = '';
 
   try {
+    let imageUrl = currentImageUrl.value || null;
+    if (selectedImage.value) {
+      const file = selectedImage.value;
+      const path = `${crypto.randomUUID()}.webp`;
+      const { error: uploadError } = await supabase.storage
+        .from('quiz-images')
+        .upload(path, file, { cacheControl: '3600', upsert: false, contentType: 'image/webp' });
+      if (uploadError) throw uploadError;
+      imageUrl = supabase.storage.from('quiz-images').getPublicUrl(path).data.publicUrl;
+    }
+    const orderedBlocks = form.value.blocks_text
+      .split('\n').map((line) => line.trim()).filter(Boolean);
+    const codeLines = form.value.code_snippet
+      .split('\n').map((line) => line.trim()).filter(Boolean);
+    const isBlockOrder = form.value.question_type === 'block_order';
+    const isFindBug = form.value.question_type === 'find_bug';
+    const answerLetter = isBlockOrder
+      ? 'A'
+      : isFindBug
+        ? String.fromCharCode(65 + Number(form.value.bug_line))
+        : form.value.correct_answer;
     const payload = {
       question:
         form.value.question.trim(),
 
+      question_type:
+        form.value.question_type,
+
+      blocks:
+        isBlockOrder ? orderedBlocks : [],
+
+      correct_sequence:
+        isBlockOrder ? orderedBlocks.map((_, index) => index) : [],
+
+      code_snippet:
+        isFindBug ? codeLines.join('\n') : null,
+
+      bug_line:
+        isFindBug ? Number(form.value.bug_line) : null,
+
+      image_url: imageUrl,
+
       option_a:
-        form.value.option_a.trim(),
+        isBlockOrder ? 'Urutan sudah benar' : isFindBug ? 'Baris 1' : form.value.option_a.trim(),
 
       option_b:
-        form.value.option_b.trim(),
+        isBlockOrder ? 'Urutan belum benar' : isFindBug ? 'Baris 2' : form.value.option_b.trim(),
 
       option_c:
-        form.value.option_c.trim(),
+        isBlockOrder ? 'Coba lagi' : isFindBug ? 'Baris 3' : form.value.option_c.trim(),
 
       option_d:
-        form.value.option_d.trim(),
+        isBlockOrder ? 'Belum disusun' : isFindBug ? 'Baris 4' : form.value.option_d.trim(),
 
       correct_answer:
-        form.value.correct_answer,
+        answerLetter,
 
       explanation:
         form.value.explanation.trim() ||
         null,
 
+      hint_1: form.value.hint_1.trim() || null,
+      hint_2: form.value.hint_2.trim() || null,
+      learning_topic: form.value.learning_topic.trim() || form.value.category,
+      learning_url: form.value.learning_url.trim() || null,
+
       category:
         form.value.category,
 
       difficulty:
+        form.value.difficulty,
+
+      // Keep both level columns aligned: battle setup and older question
+      // pickers read different columns in existing installations.
+      level:
         form.value.difficulty,
 
       is_active:
@@ -246,6 +358,17 @@ const submitQuestion = async () => {
 
           <div class="field-group">
 
+            <label for="question-type">Question format</label>
+            <SearchableSelect id="question-type" v-model="form.question_type">
+              <option value="choice">Pilihan ganda</option>
+              <option value="block_order">Susun blok Scratch</option>
+              <option value="find_bug">Temukan baris bermasalah</option>
+            </SearchableSelect>
+
+            <small class="field-help">
+              Pilihan ganda tetap tersedia untuk soal biasa. Format interaktif divalidasi di server.
+            </small>
+
             <label for="question">
               Question Text
             </label>
@@ -259,11 +382,34 @@ const submitQuestion = async () => {
 
           </div>
 
+          <div v-if="form.question_type === 'block_order'" class="field-group interactive-authoring">
+            <label for="scratch-blocks">Urutan blok yang benar</label>
+            <textarea id="scratch-blocks" v-model="form.blocks_text" rows="5" placeholder="Ketika bendera hijau diklik&#10;Ulangi 3 kali&#10;Gerak 10 langkah" />
+            <small class="field-help">Tulis satu blok per baris dalam urutan yang benar. Saat bermain, urutannya akan diacak.</small>
+          </div>
+
+          <div v-else-if="form.question_type === 'find_bug'" class="field-group interactive-authoring">
+            <label for="question-code">Potongan blok / kode</label>
+            <textarea id="question-code" v-model="form.code_snippet" rows="5" placeholder="when green flag clicked&#10;repeat 5&#10;move -10 steps&#10;say Done" />
+            <label for="bug-line">Baris yang bermasalah</label>
+            <SearchableSelect id="bug-line" v-model.number="form.bug_line">
+              <option v-for="(line, index) in form.code_snippet.split('\n').filter((item) => item.trim())" :key="index" :value="index">Baris {{ index + 1 }} · {{ line }}</option>
+            </SearchableSelect>
+            <small class="field-help">Maksimal empat baris supaya pemain dapat memilih satu baris secara langsung.</small>
+          </div>
+
+          <div class="field-group image-upload-group">
+            <label for="question-image">Question Image <span class="optional-label">OPSIONAL · WEBP OTOMATIS</span></label>
+            <input id="question-image" type="file" accept="image/png,image/jpeg,image/webp" :disabled="compressingImage || isSubmitting" @change="selectQuestionImage" />
+            <small>{{ compressingImage ? 'Mengompres gambar ke WebP…' : questionImageStatus }}</small>
+            <img v-if="imagePreview" class="question-image-preview" :src="imagePreview" alt="Preview gambar soal" />
+          </div>
+
         </section>
 
         <!-- OPTIONS -->
 
-        <section class="form-section">
+        <section v-if="form.question_type === 'choice'" class="form-section">
 
           <div class="section-heading">
 
@@ -363,7 +509,7 @@ const submitQuestion = async () => {
 
         <!-- CORRECT ANSWER -->
 
-        <section class="form-section">
+        <section v-if="form.question_type === 'choice'" class="form-section">
 
           <div class="section-heading">
 
@@ -465,6 +611,34 @@ const submitQuestion = async () => {
 
         </section>
 
+        <section class="form-section">
+          <div class="section-heading">
+            <span class="step">05</span>
+            <div>
+              <h2>Petunjuk & materi belajar</h2>
+              <p>Petunjuk muncul bertahap. Materi ini direkomendasikan setelah jawaban keliru.</p>
+            </div>
+          </div>
+          <div class="settings-grid">
+            <div class="field-group">
+              <label for="hint-1">Petunjuk pertama</label>
+              <textarea id="hint-1" v-model="form.hint_1" rows="2" placeholder="Arahkan siswa ke konsep yang perlu diperhatikan." />
+            </div>
+            <div class="field-group">
+              <label for="hint-2">Petunjuk kedua</label>
+              <textarea id="hint-2" v-model="form.hint_2" rows="2" placeholder="Berikan petunjuk yang lebih spesifik." />
+            </div>
+            <div class="field-group">
+              <label for="learning-topic">Nama materi</label>
+              <input id="learning-topic" v-model="form.learning_topic" type="text" placeholder="Contoh: Scratch · perulangan" />
+            </div>
+            <div class="field-group">
+              <label for="learning-url">Tautan materi (opsional)</label>
+              <input id="learning-url" v-model="form.learning_url" type="url" placeholder="https://..." />
+            </div>
+          </div>
+        </section>
+
         <!-- SETTINGS -->
 
         <section class="form-section">
@@ -472,7 +646,7 @@ const submitQuestion = async () => {
           <div class="section-heading">
 
             <span class="step">
-              05
+              06
             </span>
 
             <div>
@@ -500,7 +674,7 @@ const submitQuestion = async () => {
                 Category
               </label>
 
-              <select
+              <SearchableSelect
                 v-model="form.category"
               >
                 <option
@@ -510,7 +684,7 @@ const submitQuestion = async () => {
                 >
                   {{ category }}
                 </option>
-              </select>
+              </SearchableSelect>
 
             </div>
 
@@ -522,7 +696,7 @@ const submitQuestion = async () => {
                 Difficulty
               </label>
 
-              <select
+              <SearchableSelect
                 v-model="form.difficulty"
               >
                 <option
@@ -532,7 +706,7 @@ const submitQuestion = async () => {
                 >
                   {{ difficulty }}
                 </option>
-              </select>
+              </SearchableSelect>
 
             </div>
 
@@ -592,6 +766,8 @@ const submitQuestion = async () => {
             }}
 
           </div>
+
+          <img v-if="imagePreview" class="preview-image" :src="imagePreview" alt="Gambar pada preview soal" />
 
           <div class="preview-options">
 
@@ -657,7 +833,7 @@ const submitQuestion = async () => {
           <button
             type="button"
             class="reset-button"
-            :disabled="isSubmitting"
+            :disabled="isSubmitting || compressingImage"
             @click="resetForm"
           >
             RESET
@@ -668,16 +844,16 @@ const submitQuestion = async () => {
             class="submit-button"
             :disabled="
               !isFormValid ||
-              isSubmitting
+              isSubmitting || compressingImage
             "
           >
 
             <template
-              v-if="isSubmitting"
+              v-if="isSubmitting || compressingImage"
             >
               <span class="spinner" />
 
-              SAVING...
+              {{ compressingImage ? 'COMPRESSING IMAGE…' : 'SAVING...' }}
             </template>
 
             <template v-else>
@@ -990,6 +1166,15 @@ const submitQuestion = async () => {
 
   font-weight: 800;
 }
+.optional-label { margin-left: 8px; color: #7187a2; font-size: 8px; letter-spacing: .1em; }
+.image-upload-group input[type="file"] { width: 100%; padding: 10px; border: 1px dashed #a8d5ad; border-radius: 10px; background: #f5fbf4; color: #48664e; letter-spacing: 0; font-size: 10px; }
+.image-upload-group>label { color: #24472c; }
+.image-upload-group .optional-label { color: #4c9254; }
+.image-upload-group input[type="file"]::file-selector-button { margin-right: 10px; border: 0; border-radius: 7px; padding: 8px 11px; background: #0caf25; color: #fff; font: 800 10px 'DM Sans',sans-serif; cursor: pointer; }
+.image-upload-group input[type="file"]:disabled { opacity: .65; cursor: progress; }
+.image-upload-group small { color: #5f7963; font-size: 10px; }
+.question-image-preview,.preview-image { display: block; max-width: min(100%, 440px); max-height: 260px; object-fit: contain; border: 1px solid #d4e8d4; border-radius: 10px; background: #f1f8ef; }
+.preview-image { margin: 0 0 16px; }
 
 input,
 textarea,

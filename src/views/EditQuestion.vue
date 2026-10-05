@@ -1,4 +1,5 @@
 <script setup>
+import SearchableSelect from "../components/SearchableSelect.vue";
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { supabase } from '../lib/supabase';
@@ -38,12 +39,19 @@ async function updateQuestion(){
 }
 
 async function deleteQuestion(){
-  if(!window.confirm('Yakin ingin menghapus question ini?')) return;
+  if(!window.confirm('Hapus question ini? Jika sudah dipakai di riwayat battle, question akan diarsipkan agar data battle lama tetap utuh.')) return;
   deleting.value=true; errorMessage.value='';
   try{
     const {error}=await supabase.from('coding_questions').delete().eq('id',route.params.id);
-    if(error) throw error;
-    await router.replace({name:'questions'});
+    if(error?.code === '23503'){
+      const {error:archiveError}=await supabase.from('coding_questions').update({is_active:false,deleted_at:new Date().toISOString()}).eq('id',route.params.id);
+      if(archiveError) throw archiveError;
+      await router.replace({name:'questions',query:{notice:'archived'}});
+    }else if(error){
+      throw error;
+    }else{
+      await router.replace({name:'questions',query:{notice:'deleted'}});
+    }
   }catch(error){errorMessage.value=error.message||'Gagal menghapus question.';}finally{deleting.value=false;}
 }
 
@@ -63,7 +71,7 @@ onMounted(loadQuestion);
           <section class="card"><h2>Answer Options</h2><div class="grid"><label>A<input v-model="form.option_a" type="text"></label><label>B<input v-model="form.option_b" type="text"></label><label>C<input v-model="form.option_c" type="text"></label><label>D<input v-model="form.option_d" type="text"></label></div></section>
           <section class="card"><h2>Correct Answer</h2><div class="answers"><label v-for="a in answers" :key="a" :class="{selected:form.correct_answer===a}"><input v-model="form.correct_answer" type="radio" :value="a"><strong>{{a}}</strong> Option {{a}}</label></div></section>
           <section class="card"><h2>Explanation</h2><textarea v-model="form.explanation" rows="4" placeholder="Explanation..."></textarea></section>
-          <section class="card"><h2>Settings</h2><div class="grid"><label>Category<select v-model="form.category"><option v-for="item in categories" :key="item" :value="item">{{item}}</option></select></label><label>Difficulty<select v-model="form.difficulty"><option v-for="item in difficulties" :key="item" :value="item">{{item}}</option></select></label></div><label class="active"><input v-model="form.is_active" type="checkbox"> Active Question</label></section>
+          <section class="card"><h2>Settings</h2><div class="grid"><label>Category<SearchableSelect v-model="form.category"><option v-for="item in categories" :key="item" :value="item">{{item}}</option></SearchableSelect></label><label>Difficulty<SearchableSelect v-model="form.difficulty"><option v-for="item in difficulties" :key="item" :value="item">{{item}}</option></SearchableSelect></label></div><label class="active"><input v-model="form.is_active" type="checkbox"> Active Question</label></section>
           <section class="preview"><span>LIVE PREVIEW</span><h3>{{form.question||'Question...'}}</h3><div class="preview-grid"><div v-for="a in answers" :key="a" :class="{correct:form.correct_answer===a}"><b>{{a}}</b><p>{{form[`option_${a.toLowerCase()}`]||`Option ${a}`}}</p></div></div></section>
           <footer class="actions"><button type="button" class="delete" :disabled="deleting||saving" @click="deleteQuestion">{{deleting?'DELETING...':'DELETE QUESTION'}}</button><div><button type="button" class="cancel" @click="router.push({name:'questions'})">CANCEL</button><button type="submit" class="save" :disabled="!isFormValid||saving||deleting">{{saving?'SAVING...':'SAVE CHANGES'}}</button></div></footer>
         </form>
@@ -74,4 +82,26 @@ onMounted(loadQuestion);
 
 <style scoped>
 *{box-sizing:border-box}.edit-page{min-height:100vh;padding:40px 24px;background:#030816;color:#fff;font-family:Inter,system-ui,sans-serif}.shell{max-width:1050px;margin:auto}.header-card,.card,.preview{border:1px solid rgba(255,255,255,.08);background:#071126;border-radius:16px}.header-card{display:flex;justify-content:space-between;align-items:center;padding:26px;margin-bottom:16px}.eyebrow{font-size:10px;color:#5edcff;font-weight:900;letter-spacing:.16em}.header-card h1{margin:7px 0 5px}.header-card p{margin:0;color:#8295af;font-size:13px}.back{border:1px solid rgba(90,205,255,.22);border-radius:9px;padding:12px 14px;background:rgba(70,180,225,.06);color:#70dfff;font-weight:900;cursor:pointer}.form{display:flex;flex-direction:column;gap:15px}.card,.preview{padding:23px}.card h2{margin:0 0 16px;font-size:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.grid label{display:flex;flex-direction:column;gap:7px;font-size:10px;color:#9db0c7}.card input,.card textarea,.card select{width:100%;border:1px solid rgba(255,255,255,.1);border-radius:9px;background:#050d1e;color:#fff;padding:12px}.answers{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.answers label{display:flex;align-items:center;justify-content:center;gap:7px;min-height:68px;border:1px solid rgba(255,255,255,.08);border-radius:10px;color:#8da0b9;cursor:pointer}.answers input{display:none}.answers label.selected{border-color:#58d9ff;background:rgba(60,180,225,.08);color:#fff}.answers strong{display:grid;place-items:center;width:28px;height:28px;border-radius:7px;background:#13243b}.answers label.selected strong{background:#5bdcff;color:#06131d}.active{display:flex!important;flex-direction:row!important;align-items:center;gap:8px!important;margin-top:16px}.active input{width:auto}.preview{border-color:rgba(235,205,65,.18);background:linear-gradient(145deg,rgba(35,31,12,.8),rgba(7,15,34,.95))}.preview>span{font-size:9px;color:#e5c84e;font-weight:900}.preview h3{margin:12px 0 15px}.preview-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.preview-grid>div{display:flex;align-items:center;gap:8px;padding:10px;border:1px solid rgba(255,255,255,.07);border-radius:9px}.preview-grid b{display:grid;place-items:center;width:27px;height:27px;border-radius:7px;background:#9eafc6;color:#07121e}.preview-grid p{margin:0;color:#acb9ca;font-size:10px}.preview-grid>div.correct{border-color:rgba(80,230,145,.25)}.preview-grid>div.correct b{background:#5beaa4}.actions{display:flex;justify-content:space-between;gap:10px}.actions>div{display:flex;gap:10px}.actions button{min-width:135px;height:44px;border-radius:9px;font-weight:900;font-size:9px;cursor:pointer}.delete{color:#ff8299;border:1px solid rgba(255,90,120,.25);background:rgba(190,40,70,.08)}.cancel{color:#9eb0c6;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03)}.save{border:0;background:linear-gradient(90deg,#4fd8ff,#65efc8)}.alert,.state{padding:13px 15px;border-radius:10px;margin-bottom:14px;font-size:12px}.success{color:#6df0a9;background:rgba(39,165,94,.12);border:1px solid rgba(80,230,145,.25)}.error{color:#ff8da5;background:rgba(174,38,68,.12);border:1px solid rgba(255,90,120,.25)}.state{text-align:center;color:#8497b0;background:#071126}.actions button:disabled{opacity:.4;cursor:not-allowed}@media(max-width:700px){.edit-page{padding:20px 12px}.header-card{align-items:flex-start;flex-direction:column;gap:15px}.grid,.preview-grid{grid-template-columns:1fr}.answers{grid-template-columns:1fr 1fr}.actions,.actions>div{flex-direction:column}.actions button{width:100%}}
+.edit-page { background: #f2f8f1 !important; color: #173623 !important; }
+.header-card, .card { border-color: #dce9db !important; background: #fff !important; box-shadow: 0 8px 24px #1645230b; }
+.header-card h1, .card h2, .preview h3 { color: #173623 !important; }
+.header-card p, .grid label { color: #718675 !important; }
+.eyebrow { color: #118a2b !important; }
+.back { border-color: #cfe4cf !important; background: #eef8ed !important; color: #18782d !important; }
+.card input, .card textarea, .card select { border-color: #cfe4cf !important; background: #fff !important; color: #21472b !important; }
+.answers label { border-color: #dce9db !important; background: #f8fbf7; color: #607763 !important; }
+.answers label.selected { border-color: #89ca90 !important; background: #edf8eb !important; color: #21472b !important; }
+.answers strong { background: #e3f2e1 !important; color: #176d2e !important; }
+.preview { border-color: #dce9db !important; background: linear-gradient(145deg,#fff,#f4faf3) !important; }
+.preview > span { color: #118a2b !important; }
+.preview-grid > div { border-color: #e1ece0 !important; background: #fff; }
+.preview-grid p { color: #536f58 !important; }
+.preview-grid b { background: #e3f2e1 !important; color: #176d2e !important; }
+.preview-grid > div.correct { border-color: #a9d9ad !important; background: #f1f9ef; }
+.delete { color: #9e263a !important; border-color: #efc9cf !important; background: #fff1f1 !important; }
+.cancel { color: #46634b !important; border-color: #cfe4cf !important; background: #f6faf5 !important; }
+.save { border: 0 !important; background: #0caf25 !important; color: #fff !important; }
+.success { color: #176d2e !important; background: #e8f6e8 !important; border-color: #c6e5c8 !important; }
+.error { color: #9e263a !important; background: #fff0f1 !important; border-color: #f0c7cc !important; }
+.state { color: #607763 !important; background: #fff !important; }
 </style>

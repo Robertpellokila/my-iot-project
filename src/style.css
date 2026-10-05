@@ -63,9 +63,22 @@ button:disabled {
   opacity: 0.5;
 }
 
+/* SearchableSelect renders its popup under body so clipped form panels cannot
+   hide it. Keep that overlay above sticky admin actions and modal content. */
+body > .searchable-select__menu {
+  position: fixed !important;
+  z-index: 2147483647 !important;
+}
+
 a {
   color: inherit;
   text-decoration: none;
+}
+
+
+
+@media (max-width: 900px) {
+  .admin-theme .app-sidebar { background: #087f1d !important; }
 }
 
 /* App shell */
@@ -1208,3 +1221,435 @@ a {
   border-color: rgba(255, 111, 145, 0.4);
   background: rgba(255, 111, 145, 0.06);
 }
+
+/* Timedoor Academy palette, limited to authenticated admin pages. */
+.admin-theme {
+  --bg: #f5faf4;
+  --surface: #ffffff;
+  --surface-soft: #edf6eb;
+  --border: #dce9dc;
+  --text: #173623;
+  --text-muted: #6e826f;
+  --primary: #0caf25;
+  --primary-hover: #087f1d;
+  --success: #0caf25;
+  --warning: #d9a900;
+  --danger: #c84d4d;
+  min-height: 100vh;
+  color: var(--text);
+  background: #f5faf4 !important;
+}
+
+.admin-theme .app-navbar {
+  border-bottom: 0 !important;
+  background: #0caf25 !important;
+  color: #fff !important;
+}
+.admin-theme .brand-mark {
+  border-color: #ffffffaa !important;
+  border-radius: 4px 14px 4px 14px !important;
+  background: transparent !important;
+  color: #fff !important;
+}
+.admin-theme .brand-content h1,
+.admin-theme .profile-button,
+.admin-theme .profile-info strong { color: #fff !important; }
+.admin-theme .brand-content p,
+.admin-theme .connection-status { color: #dcf5df !important; }
+.admin-theme .app-sidebar {
+  border-right: 0 !important;
+  background: #087f1d !important;
+}
+.admin-theme .sidebar-section-title,
+.admin-theme .sidebar-section-toggle,
+.admin-theme .section-arrow { color: #bde9c2 !important; }
+.admin-theme .sidebar-section-toggle:hover,
+.admin-theme .sidebar-link:hover { color: #fff !important; background: #ffffff18 !important; }
+.admin-theme .sidebar-link { color: #e0f4e1 !important; }
+.admin-theme .sidebar-link-active {
+  border-color: #ffffff55 !important;
+  background: #ffffff24 !important;
+  color: #fff !important;
+}
+.admin-theme .sidebar-link-active .sidebar-icon,
+.admin-theme .sidebar-icon { color: #ffdf4e !important; }
+.admin-theme .sidebar-footer { border-color: #ffffff38 !important; background: #ffffff12 !important; }
+.admin-theme .sidebar-footer strong,
+.admin-theme .sidebar-footer p { color: #e5f5e5 !important; }
+.admin-theme .sidebar-footer-icon { background: #ffffff20 !important; color: #ffdf4e !important; }
+.admin-theme .main-content { background: #f5faf4 !important; color: #173623 !important; }
+.admin-theme .mobile-menu-button { border-color: #087f1d !important; background: #0caf25 !important; color: #fff !important; }
+
+.admin-theme .questions-page,
+.admin-theme .question-page,
+.admin-theme .edit-page,
+.admin-theme .history-page,
+.admin-theme .collection-page,
+.admin-theme .setup-page,
+.admin-theme .register-container {
+  color: #173623 !important;
+  background: #f5faf4 !important;
+}
+.admin-theme .page-background,
+.admin-theme .setup-background,
+.admin-theme .background-glow,
+.admin-theme .album-background { opacity: .14 !important; }
+.admin-theme .questions-page .header-card,
+.admin-theme .questions-page .filters,
+.admin-theme .questions-page .table-card,
+.admin-theme .question-page .form-section,
+.admin-theme .question-page .preview-section,
+.admin-theme .edit-page .header-card,
+.admin-theme .edit-page .card,
+.admin-theme .edit-page .preview,
+.admin-theme .setup-page .setup-card,
+.admin-theme .setup-page .battle-link-card,
+.admin-theme .history-page .history-container,
+.admin-theme .register-container .card-mode-panel,
+.admin-theme .register-container .panel-card,
+.admin-theme .register-container .form-panel,
+.admin-theme .register-container .bento-card,
+.admin-theme .register-container .fusion-recipe-section,
+.admin-theme .register-container .special-skill-section,
+.admin-theme .register-container .card-mode-option,
+.admin-theme .register-container .stat-input-card,
+.admin-theme .register-container .skill-summary-card,
+.admin-theme .register-container .fusion-material-card,
+.admin-theme .register-container .fusion-stat-card,
+.admin-theme .register-container .preview-card-box,
+.admin-theme .register-container .preview-panel,
+.admin-theme .register-container .recipe-subsection,
+.admin-theme .register-container .status-skill-presets,
+.admin-theme .collection-page .album-book,
+.admin-theme .collection-page .album-slot.collected {
+  border-color: #dce9dc !important;
+  background: #fff !important;
+  color: #173623 !important;
+  box-shadow: 0 8px 24px #1645230b !important;
+}
+.admin-theme .questions-page h1,
+.admin-theme .questions-page h2,
+.admin-theme .question-page h1,
+.admin-theme .question-page h2,
+.admin-theme .edit-page h1,
+.admin-theme .edit-page h2,
+.admin-theme .history-page h1,
+.admin-theme .setup-page h1,
+.admin-theme .setup-page h2,
+.admin-theme .register-container h2,
+.admin-theme .register-container h3,
+.admin-theme .collection-page h1,
+.admin-theme .collection-page h2 { color: #173b22 !important; }
+.admin-theme .questions-page p,
+.admin-theme .question-page p,
+.admin-theme .edit-page p,
+.admin-theme .history-page p,
+.admin-theme .setup-page p,
+.admin-theme .register-container p { color: #6e826f !important; }
+.admin-theme :is(.questions-page,.question-page,.edit-page,.history-page,.setup-page,.register-container) input:not([type="checkbox"]):not([type="radio"]),
+.admin-theme :is(.questions-page,.question-page,.edit-page,.history-page,.setup-page,.register-container) textarea,
+.admin-theme :is(.questions-page,.question-page,.edit-page,.history-page,.setup-page,.register-container) select {
+  border-color: #d4e2d3 !important;
+  background: #fbfefb !important;
+  color: #173623 !important;
+}
+.admin-theme :is(.questions-page,.question-page,.edit-page,.setup-page,.register-container) button.primary,
+.admin-theme .register-container .btn-primary,
+.admin-theme .setup-page .btn-primary,
+.admin-theme .page-container .primary-button,
+.admin-theme .page-container .secondary-button {
+  border-color: #0caf25 !important;
+  background: #0caf25 !important;
+  color: #fff !important;
+}
+.admin-theme .questions-page .eyebrow,
+.admin-theme .question-page .eyebrow,
+.admin-theme .edit-page .eyebrow,
+.admin-theme .setup-page .eyebrow,
+.admin-theme .register-container .section-eyebrow { color: #16852a !important; }
+.admin-theme .collection-page .album-book-header,
+.admin-theme .collection-page .album-card,
+.admin-theme .collection-page .card-detail-modal { color: #173623 !important; }
+.admin-theme .collection-page .album-slots { background: transparent !important; }
+.admin-theme .register-container .card-image-upload input[type="file"] { border-color: #bfdbbf !important; background: #f4faf3 !important; color: #4d694f !important; }
+.admin-theme .register-container .card-mode-option.active { border-color: #42ad50 !important; background: #edf8ec !important; box-shadow: inset 0 0 0 1px #42ad5040 !important; }
+.admin-theme .register-container .code-preview,
+.admin-theme .register-container .identity-note,
+.admin-theme .register-container .bento-card-head h3,
+.admin-theme .register-container .card-mode-heading h3 { color: #173b22 !important; }
+.admin-theme .question-page .save,
+.admin-theme .edit-page .save,
+.admin-theme .questions-page .primary,
+.admin-theme .register-container .btn-primary,
+.admin-theme .setup-page .create-button { border-color: #0caf25 !important; background: #0caf25 !important; color: #fff !important; }
+
+.login-page {
+  color: #173623;
+  background: radial-gradient(circle at 72% 22%, #dff3dd, transparent 27rem), #f5faf4;
+}
+.login-background {
+  background: radial-gradient(circle at 16% 85%, #0caf2518, transparent 24rem);
+}
+.login-card {
+  border-color: #dce9dc;
+  background: #ffffffed;
+  box-shadow: 0 24px 70px #144d2014;
+}
+.login-brand-icon {
+  border-color: #0caf25;
+  border-radius: 4px 14px 4px 14px;
+  color: #fff;
+  background: #0caf25;
+}
+.login-brand strong,.login-heading h1 { color: #173b22; }
+.login-brand span,.login-heading p,.login-footer { color: #6e826f; }
+.login-heading .eyebrow { color: #16852a; }
+.login-form .form-input {
+  border-color: #d4e2d3;
+  background: #fbfefb;
+  color: #173623;
+}
+.login-button { border: 0; background: #0caf25; color: #fff; }
+.login-button:hover { background: #087f1d; }
+
+/* Admin pages share the same light Timedoor surface and action colors. */
+.admin-theme :is(.history-page,.questions-page,.question-page,.edit-page,.setup-page,.register-container,.collection-page) {
+  color: #173623 !important;
+}
+.admin-theme .history-page :is(.table-wrapper,.table-card,table) {
+  border-color: #dce9dc !important;
+  background: #fff !important;
+  color: #29432f !important;
+  box-shadow: 0 8px 24px #1645230b !important;
+}
+.admin-theme .history-page th {
+  border-color: #e7eee5 !important;
+  background: #f4faf3 !important;
+  color: #607763 !important;
+}
+.admin-theme .history-page td {
+  border-color: #e9f0e8 !important;
+  color: #405845 !important;
+}
+.admin-theme .history-page tbody tr:hover { background: #f5faf4 !important; }
+.admin-theme .history-page :is(.eyebrow,.code-button,.player.blue,.player.red) { color: #16852a !important; }
+.admin-theme .history-page .status-badge { color: #16852a !important; background: #e9f7e9 !important; }
+.admin-theme .history-page :is(.new-battle-button,.refresh-button) {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid #0caf25 !important;
+  border-radius: 9px;
+  background: #0caf25 !important;
+  color: #fff !important;
+  font-weight: 750;
+}
+.admin-theme .history-page .action {
+  border-color: #c3dfc4 !important;
+  background: #f3faf2 !important;
+  color: #16852a !important;
+}
+.admin-theme .setup-page :is(.created-container,.battle-code-card,.player-access-code,.battle-link-card,.qr-card) {
+  border-color: #dce9dc !important;
+  background: #fff !important;
+  color: #173623 !important;
+}
+.admin-theme .setup-page .player-access-code code { color: #16852a !important; }
+.admin-theme .history-page :is(.filters input,.filters select) {
+  border-color: #d4e2d3 !important;
+  background: #fff !important;
+  color: #173623 !important;
+}
+.admin-theme :is(.questions-page,.question-page,.edit-page,.setup-page,.register-container,.collection-page) :is(button,.button,.btn,.action-button) {
+  border-color: #0caf25;
+}
+.admin-theme :is(.questions-page,.question-page,.edit-page,.setup-page,.register-container,.collection-page) :is(button.primary,button.primary-button,.primary,.primary-button,.btn-primary,.create-button,.save,.submit-button) {
+  border-color: #0caf25 !important;
+  background: #0caf25 !important;
+  color: #fff !important;
+}
+.admin-theme :is(.questions-page,.question-page,.edit-page,.setup-page,.register-container,.collection-page) :is(button:not(.primary):not(.primary-button):not(.btn-primary):not(.create-button):not(.save),.secondary-button,.btn-secondary) {
+  border-color: #b8d9bb !important;
+  background: #f4faf3 !important;
+  color: #187d2a !important;
+}
+.admin-theme :is(.questions-page,.question-page,.edit-page,.setup-page,.register-container,.collection-page) button:disabled { opacity: .58; cursor: not-allowed; }
+.admin-theme .register-container .card-image-upload {
+  border: 1.5px dashed #8fc995 !important;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #f7fcf6, #edf8ec) !important;
+  padding: 16px;
+}
+.admin-theme .register-container .card-image-upload input[type="file"] {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #d5e8d3 !important;
+  border-radius: 10px;
+  background: #fff !important;
+}
+.admin-theme .main-content .page-container { color: #173623 !important; }
+.admin-theme .main-content .page-container :is(h1,h2,h3,h4) { color: #173b22 !important; }
+.admin-theme .main-content .page-container :is(p,.text-muted,.stat-label,.subtitle) { color: #6e826f !important; }
+.admin-theme .main-content .page-container :is(.stat-card,.device-status-card,.table-section,.table-card,.filter-card,.form-card) {
+  border-color: #dce9dc !important;
+  background: #fff !important;
+  color: #29432f !important;
+  box-shadow: 0 8px 24px #1645230b !important;
+}
+.admin-theme .main-content .page-container :is(.data-table,.table-wrapper) { background: #fff !important; }
+.admin-theme .main-content .page-container .data-table th { border-color: #e7eee5 !important; background: #f4faf3 !important; color: #607763 !important; }
+.admin-theme .main-content .page-container .data-table td { border-color: #e9f0e8 !important; color: #405845 !important; }
+.admin-theme .main-content .page-container .data-table tbody tr:hover td { background: #f5faf4 !important; }
+.admin-theme .main-content .page-container :is(input:not([type="checkbox"]):not([type="radio"]),select,textarea) {
+  border-color: #d4e2d3 !important;
+  background: #fff !important;
+  color: #173623 !important;
+}
+.admin-theme .main-content .page-container .uid-code { border-color: #cce3cc !important; background: #f3faf2 !important; color: #16852a !important; }
+.admin-theme .main-content .page-container :is(.primary-button,.secondary-button) { border-color: #0caf25 !important; background: #0caf25 !important; color: #fff !important; }
+.admin-theme .main-content .page-container :is(.secondary-button,.secondary-button:hover) { background: #f4faf3 !important; color: #187d2a !important; }
+
+/* High specificity is intentional: several older admin forms still declare
+   their old navy palette inside scoped component styles. */
+body .admin-theme .main-content :is(.questions-page,.question-page,.edit-page,.history-page,.setup-page,.page-container,.register-container,.collection-page) {
+  background: #f5faf4 !important;
+  color: #173623 !important;
+}
+body .admin-theme .main-content :is(.questions-page,.question-page,.edit-page,.history-page,.setup-page,.page-container,.register-container,.collection-page) :is(.header-card,.filters,.table-card,.card,.preview,.form-section,.preview-section,.setup-card,.setup-container,.created-container,.battle-code-card,.battle-link-card,.player-access-code,.panel,.stat-card,.device-status-card,.table-wrapper,.form-panel,.panel-card,.bento-card,.album-book,.detail-card-modal) {
+  border-color: #dce9dc !important;
+  background: #fff !important;
+  color: #29432f !important;
+  box-shadow: 0 8px 24px #1645230b !important;
+}
+body .admin-theme .main-content :is(.questions-page,.question-page,.edit-page,.history-page,.setup-page,.page-container,.register-container,.collection-page) :is(h1,h2,h3,h4,strong,label) { color: #173b22; }
+body .admin-theme .main-content :is(.questions-page,.question-page,.edit-page,.history-page,.setup-page,.page-container,.register-container,.collection-page) :is(p,small,.muted,.state,.eyebrow,.text-muted) { color: #6e826f; }
+body .admin-theme .main-content :is(.questions-page,.question-page,.edit-page,.history-page,.setup-page,.page-container,.register-container,.collection-page) :is(input:not([type="checkbox"]):not([type="radio"]),textarea,select) {
+  border-color: #d4e2d3 !important;
+  background: #fff !important;
+  color: #173623 !important;
+}
+body .admin-theme .main-content :is(.questions-page,.question-page,.edit-page,.history-page,.setup-page,.page-container,.register-container,.collection-page) button {
+  min-height: 34px;
+  border: 1px solid #0caf25 !important;
+  border-radius: 8px;
+  background: #0caf25 !important;
+  color: #fff !important;
+}
+body .admin-theme .main-content .admin-table {
+  border-color: #dce9dc !important;
+  background: #fff !important;
+}
+body .admin-theme .main-content .admin-table :is(table,thead,tbody,tr) { background: #fff !important; color: #29432f !important; }
+body .admin-theme .main-content .admin-table table { width: 100% !important; border-collapse: collapse !important; }
+body .admin-theme .main-content .admin-table th { padding: 13px 15px !important; border-color: #e3eee2 !important; background: #f4faf3 !important; color: #607763 !important; }
+body .admin-theme .main-content .admin-table td { padding: 14px 15px !important; border-color: #e9f0e8 !important; color: #405845 !important; }
+body .admin-theme .main-content .admin-table tbody tr:hover td { background: #f7fbf6 !important; }
+body .admin-theme .main-content .status-btn:not(.active),
+body .admin-theme .main-content .actions .delete,
+body .admin-theme .main-content button.delete { background: #f4faf3 !important; color: #187d2a !important; }
+
+/* Element status accents used by both the player and public battle displays. */
+.fx-freeze-layer { background: linear-gradient(135deg,#d8f6ff35,transparent 42%,#7ccfff2b); box-shadow: inset 0 0 24px #91dfff45; }
+.fx-stun-layer { background: repeating-linear-gradient(120deg,transparent 0 24px,#ffe56c27 25px 27px,transparent 28px 54px); animation: timedoor-stun 700ms steps(2,end) infinite; }
+.fx-poison-layer { background: radial-gradient(ellipse at 20% 90%,#6fc9632b,transparent 42%),radial-gradient(ellipse at 85% 12%,#a85cc429,transparent 38%); }
+.fx-curse-layer { background: radial-gradient(ellipse at 50% 110%,#55237c64,transparent 62%),linear-gradient(145deg,#21152a22,transparent 55%); box-shadow: inset 0 0 22px #692f8a33; animation: timedoor-curse 2.6s ease-in-out infinite alternate; }
+.card-status-badge.curse,.public-card-status-chip.curse,.battle-status-chip.curse { --status-bg: #6a3c801c; --status-border: #80509b66; --status-text: #804a99; }
+@keyframes timedoor-stun { 0%,100% { opacity:.24 } 50% { opacity:.75 } }
+@keyframes timedoor-curse { from { opacity:.42 } to { opacity:.82 } }
+@media (prefers-reduced-motion: reduce) { .fx-stun-layer,.fx-curse-layer { animation:none !important; } }
+
+/* Remaining album toolbar surfaces were still using locally scoped navy CSS. */
+body .admin-theme .main-content .collection-page .collection-header {
+  border: 1px solid #dce9dc !important;
+  background: #fff !important;
+  color: #173623 !important;
+}
+body .admin-theme .main-content .collection-page .collection-counter {
+  border-color: #cfe5cf !important;
+  background: #f4faf3 !important;
+}
+body .admin-theme .main-content .collection-page .collection-counter :is(span,small) { color: #607763 !important; }
+body .admin-theme .main-content .collection-page .collection-counter strong { color: #16852a !important; }
+body .admin-theme .main-content :is(.search-box,.search-wrapper,.filter-bar,.filters) {
+  border-color: #d4e2d3 !important;
+  background: #fff !important;
+  color: #187d2a !important;
+}
+body .admin-theme .main-content :is(.search-box,.search-wrapper,.filter-bar,.filters) :is(input,select) {
+  border-color: #d4e2d3 !important;
+  background: #fff !important;
+  color: #173623 !important;
+}
+body .admin-theme .main-content :is(.search-box,.search-wrapper) :is(input,select)::placeholder { color: #829482 !important; }
+body .admin-theme .main-content .collection-page .collection-header :is(h1,p,.eyebrow) { color: #173b22 !important; }
+
+/* Timedoor battle palette: pale green arena surfaces and two readable green
+   player accents. Card art and elemental combat colors stay intact. */
+body .player-battle-ui,
+body .public-battle-page {
+  --timedoor-green: #0caf25;
+  --timedoor-green-dark: #087f1d;
+  --timedoor-green-soft: #eaf7e9;
+  color: #173623 !important;
+  background: linear-gradient(180deg,#f7fcf6 0%,#edf8ec 58%,#e3f2e1 100%) !important;
+}
+body .player-battle-ui { --player-accent: #0caf25 !important; --player-accent-soft: #56c963 !important; }
+body .player-battle-ui.p2 { --player-accent: #087f1d !important; --player-accent-soft: #53a95d !important; }
+body .player-battle-ui .arena-background {
+  background: radial-gradient(circle at 50% 45%,#fff 0%,#ffffff80 18%,transparent 42%),linear-gradient(180deg,#eff9ed 0%,#f7fcf6 28%,#e7f5e5 68%,#d9eed7 100%) !important;
+}
+body .player-battle-ui .top-hud,
+body .player-battle-ui .cyber-panel,
+body .player-battle-ui .notification-panel,
+body .player-battle-ui .skill-info-panel {
+  border-color: #d5e8d3 !important;
+  background-color: #ffffffed !important;
+  color: #173623 !important;
+  box-shadow: 0 14px 36px #174a200e !important;
+}
+body .player-battle-ui .battle-sound-toggle,
+body .player-battle-ui :is(.modal-primary,.special-use-button,.fusion-use-button) {
+  border-color: #0caf25 !important;
+  background: #0caf25 !important;
+  color: #fff !important;
+}
+body .player-battle-ui .bonus-button.ready {
+  border-color: #b8dcbc !important;
+  background: linear-gradient(145deg,#fff 0%,#f1f9ef 100%) !important;
+  color: #173623 !important;
+  box-shadow: 0 8px 20px #174a200e !important;
+}
+body .player-battle-ui .bonus-button.ready :is(strong,small,.bonus-description) {
+  color: #174726 !important;
+}
+body .player-battle-ui .bonus-button.ready small {
+  color: #12812b !important;
+}
+body .player-battle-ui .bonus-button.ready .bonus-item-icon {
+  background: #e4f4e3 !important;
+  color: #147d2b !important;
+}
+body .player-battle-ui .bonus-button.ready:hover {
+  border-color: #0caf25 !important;
+  box-shadow: 0 12px 24px #0caf2520 !important;
+}
+body .public-battle-page {
+  background: linear-gradient(180deg,#f4fbf2,#e8f5e5 55%,#dff0dd) !important;
+}
+body .public-battle-page .public-sound-control {
+  border-color: #b9dcb9 !important;
+  background: #ffffffed !important;
+  color: #187d2a !important;
+}
+body .public-battle-page .zone-player-label,
+body .public-battle-page .deck-counter,
+body .public-battle-page .public-active-field .player-hud {
+  border-color: #d6e8d4 !important;
+  background-color: #ffffffed !important;
+  color: #29432f !important;
+}
+body .public-battle-page :is(.zone-player-label.blue,.deck-counter.blue,.public-active-field .player-hud.p1) { --player-accent: #0caf25; border-color: #9dd5a2 !important; }
+body .public-battle-page :is(.zone-player-label.red,.deck-counter.red,.public-active-field .player-hud.p2) { --player-accent: #087f1d; border-color: #b4d9b6 !important; }
+body .public-battle-page :is(.deck-counter.blue strong,.zone-player-label.blue span,.public-active-field .player-hud.p1 .hud-label) { color: #0a9820 !important; }
+body .public-battle-page :is(.deck-counter.red strong,.zone-player-label.red span,.public-active-field .player-hud.p2 .hud-label) { color: #087f1d !important; }
+body .public-battle-page .public-active-field :is(.blue-half,.red-half) { background: #0caf25 !important; opacity: .08; }
+body .public-battle-page .public-active-field .red-half { background: #087f1d !important; }

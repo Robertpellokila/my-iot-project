@@ -23,7 +23,7 @@ const toggleSection = (section) => {
 </script>
 
 <template>
-  <div class="app-shell">
+  <div class="app-shell admin-theme">
     <!-- NAVBAR -->
     <AppNavbar />
 
@@ -56,7 +56,7 @@ const toggleSection = (section) => {
 
         <nav class="sidebar-navigation">
           <RouterLink
-            to="/dashboard"
+            to="/admin/dashboard"
             class="sidebar-link"
             active-class="sidebar-link-active"
             @click="closeSidebar"
@@ -90,7 +90,7 @@ const toggleSection = (section) => {
         <Transition name="section-collapse">
           <nav v-show="sections.rfid" class="sidebar-navigation">
             <RouterLink
-              to="/rfid"
+              to="/admin/rfid"
               class="sidebar-link"
               active-class="sidebar-link-active"
               @click="closeSidebar"
@@ -101,7 +101,7 @@ const toggleSection = (section) => {
             </RouterLink>
 
             <RouterLink
-              to="/rfid/register"
+              to="/admin/rfid/register"
               class="sidebar-link"
               active-class="sidebar-link-active"
               @click="closeSidebar"
@@ -136,7 +136,7 @@ const toggleSection = (section) => {
         <Transition name="section-collapse">
           <nav v-show="sections.questions" class="sidebar-navigation">
             <RouterLink
-              to="/questions"
+              to="/admin/questions"
               class="sidebar-link"
               active-class="sidebar-link-active"
               @click="closeSidebar"
@@ -147,7 +147,7 @@ const toggleSection = (section) => {
             </RouterLink>
 
             <RouterLink
-              to="/questions/add"
+              to="/admin/questions/add"
               class="sidebar-link"
               active-class="sidebar-link-active"
               @click="closeSidebar"
@@ -190,7 +190,7 @@ const toggleSection = (section) => {
       ================================================ -->
 
             <RouterLink
-              to="/setup"
+              to="/admin/setup"
               class="sidebar-link"
               active-class="sidebar-link-active"
               @click="closeSidebar"
@@ -205,7 +205,7 @@ const toggleSection = (section) => {
       ================================================ -->
 
             <RouterLink
-              to="/battle-history"
+              to="/admin/battle-history"
               class="sidebar-link"
               active-class="sidebar-link-active"
               @click="closeSidebar"
@@ -220,7 +220,7 @@ const toggleSection = (section) => {
       ================================================ -->
 
             <RouterLink
-              to="/arena"
+              to="/admin/arena"
               class="sidebar-link"
               active-class="sidebar-link-active"
               @click="closeSidebar"
@@ -235,7 +235,7 @@ const toggleSection = (section) => {
       ================================================ -->
 
             <RouterLink
-              to="/game/register"
+              to="/admin/game/register"
               class="sidebar-link"
               active-class="sidebar-link-active"
               @click="closeSidebar"
@@ -245,7 +245,7 @@ const toggleSection = (section) => {
               <span> Register Card </span>
             </RouterLink>
             <RouterLink
-              to="/game/album-card"
+              to="/admin/game/album-card"
               class="sidebar-link"
               active-class="sidebar-link-active"
               @click="closeSidebar"
@@ -253,6 +253,16 @@ const toggleSection = (section) => {
               <span class="sidebar-icon"> 📕 </span>
 
               <span> Album Card </span>
+            </RouterLink>
+            <RouterLink
+              to="/admin/game/catalog"
+              class="sidebar-link"
+              active-class="sidebar-link-active"
+              @click="closeSidebar"
+            >
+              <span class="sidebar-icon"> ✦ </span>
+
+              <span> Skill & Catalog </span>
             </RouterLink>
           </nav>
         </Transition>
