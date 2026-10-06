@@ -15,6 +15,14 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  maxActive: {
+    type: Number,
+    default: 4,
+  },
+  maxBench: {
+    type: Number,
+    default: 4,
+  },
   selectedCard: {
     type: Object,
     default: null,
@@ -65,6 +73,13 @@ const emit = defineEmits([
 
 const isP1 = computed(() =>
   props.player === "p1"
+);
+
+const activeSlotCount = computed(() =>
+  Math.max(1, Number(props.maxActive) || 1),
+);
+const benchSlotCount = computed(() =>
+  Math.max(0, Number(props.maxBench) || 0),
 );
 
 const normalizeElement = element =>
@@ -173,7 +188,7 @@ const canReturn = card => {
 
         <div class="pokemon-row">
           <div
-            v-for="slot in 4"
+            v-for="slot in activeSlotCount"
             :key="`${player}-active-${slot}`"
             class="pokemon-slot"
             :class="
@@ -383,7 +398,7 @@ const canReturn = card => {
 
         <div class="bench-row">
           <div
-            v-for="slot in 4"
+            v-for="slot in benchSlotCount"
             :key="`${player}-bench-${slot}`"
             class="bench-slot"
             :class="
@@ -495,7 +510,7 @@ const canReturn = card => {
                   >
                     {{
                       activeCards.length <
-                      4
+                      activeSlotCount
                         ? "↥ RETURN"
                         : "⇄ SWAP"
                     }}

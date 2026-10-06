@@ -28,7 +28,7 @@ const blankDraft = () => ({
   name: "", code: "", description: "", icon: "✦", catalog_status: "draft",
   skill_type: "active", trigger_type: "main_phase", activation_timing: "main_phase",
   target_type: "enemy_active", target_required: true,
-  cost_type: "none", cost_value: 0, cooldown_rounds: 0, max_uses: 0,
+  cost_type: "none", cost_value: 0, action_points: 1, cooldown_rounds: 0, max_uses: 0,
   once_per_battle: false, consumes_turn: true,
   effect_type: "damage_card", effect_amount: 30, effect_status: "burn", effect_duration: 1,
   change_note: "",
@@ -51,6 +51,7 @@ const ruleIssues = (skill, { fromDraft = false } = {}) => {
   const row = fromDraft ? draft.value : skill;
   const target = fromDraft ? { type: row.target_type } : row.target_spec ?? {};
   const cost = fromDraft ? { type: row.cost_type } : row.cost_spec ?? {};
+  const limits = fromDraft ? { action_points: row.action_points } : row.limits ?? {};
   let trigger = fromDraft ? row.trigger_type : row.trigger_spec?.type;
   if (!trigger) trigger = row.activation_timing;
   let effects = [];
@@ -67,6 +68,7 @@ const ruleIssues = (skill, { fromDraft = false } = {}) => {
   else if (trigger !== "main_phase") issues.push("Pemicu otomatis belum didukung saat battle; gunakan Main phase untuk aktivasi.");
   if (!String(target.type ?? target.target ?? target.mode ?? "").trim()) issues.push("Target skill belum ditentukan.");
   if (!String(cost.type ?? "").trim()) issues.push("Biaya skill belum ditentukan.");
+  if (![1, 2].includes(Number(limits.action_points ?? 1))) issues.push("Biaya poin giliran harus 1 atau 2.");
   if (!Array.isArray(effects) || !effects.length || effects.some((effect) => !String(effect?.type ?? "").trim())) {
     issues.push("Tambahkan minimal satu efek dengan jenis yang valid.");
   }
@@ -185,6 +187,7 @@ const syncDraftFromSkill = (skill) => {
     target_required: target.required ?? true,
     cost_type: cost.type ?? "none",
     cost_value: Number(cost.value ?? cost.amount ?? 0),
+    action_points: Number(limits.action_points ?? 1),
     cooldown_rounds: Number(limits.cooldown_rounds ?? limits.cooldown ?? 0),
     max_uses: Number(limits.max_uses ?? 0),
     once_per_battle: Boolean(limits.once_per_battle),
@@ -257,6 +260,7 @@ const saveSkill = async () => {
     target_spec: { type: draft.value.target_type, required: Boolean(draft.value.target_required) },
     cost_spec: { type: draft.value.cost_type, value: draft.value.cost_type === "none" ? 0 : Math.max(0, Number(draft.value.cost_value) || 0) },
     limits: {
+      action_points: Math.max(1, Math.min(2, Number(draft.value.action_points) || 1)),
       cooldown_rounds: Math.max(0, Number(draft.value.cooldown_rounds) || 0),
       once_per_battle: Boolean(draft.value.once_per_battle),
       max_uses: draft.value.once_per_battle ? 1 : Math.max(0, Number(draft.value.max_uses) || 0),
@@ -410,6 +414,7 @@ onMounted(loadCatalog);
             <label>Target<SearchableSelect v-model="draft.target_type"><option value="enemy_active">Kartu lawan aktif</option><option value="enemy_active_or_bench">Kartu lawan aktif / bench</option><option value="ally_active">Kartu teman aktif</option><option value="self_card">Kartu ini</option><option value="self_player">Pemain sendiri</option><option value="enemy_player">Pemain lawan</option><option value="ally_graveyard">Kartu sendiri di graveyard</option></SearchableSelect></label>
             <label>Biaya<SearchableSelect v-model="draft.cost_type"><option value="none">Gratis</option><option value="skill_gauge">Skill gauge</option></SearchableSelect></label>
             <label v-if="draft.cost_type !== 'none'">Nilai biaya<input v-model.number="draft.cost_value" type="number" min="0"></label>
+            <label>Poin Giliran<input v-model.number="draft.action_points" type="number" min="1" max="2"><small>Aktivasi skill memakai 1 atau 2 poin giliran.</small></label>
             <label>Cooldown (turn)<input v-model.number="draft.cooldown_rounds" type="number" min="0"><small>Isi 0 jika tidak ada cooldown.</small></label>
             <label>Batas penggunaan<input v-model.number="draft.max_uses" type="number" min="0"><small>Isi 0 jika tidak terbatas.</small></label>
           </div>

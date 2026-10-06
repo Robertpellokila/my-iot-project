@@ -70,6 +70,25 @@ const destructionDamagePercent = ref(30);
 const specialCardSkillsEnabled = ref(true);
 const comboEnabled = ref(true);
 const fusionEnabled = ref(true);
+const tripleComboEnabled = ref(false);
+const genericComboEnabled = ref(false);
+const formationEnabled = ref(false);
+const statusEffectsEnabled = ref(true);
+const actionPointsPerTurn = ref(3);
+const maxAttacksPerCard = ref(1);
+const actionCosts = ref({
+  attack: 1,
+  summon: 1,
+  switch: 1,
+  special_skill: 1,
+  combo_attack: 2,
+  triple_combo: 3,
+  fusion: 2,
+  ultimate_combo: 3,
+  ultimate: 2,
+  heal: 1,
+  synergy: 1,
+});
 
 // =========================================================
 // QUESTION
@@ -353,12 +372,12 @@ const validateForm = () => {
     return "Initial Cards minimal 1.";
   }
 
-  if (Number(maxActive.value) < 1) {
-    return "Max Active minimal 1.";
+  if (Number(maxActive.value) < 1 || Number(maxActive.value) > Number(deckSize.value)) {
+    return "Jumlah Active harus antara 1 dan ukuran physical deck.";
   }
 
-  if (Number(maxBench.value) < 0) {
-    return "Max Bench tidak valid.";
+  if (Number(maxBench.value) < 0 || Number(maxBench.value) > Number(deckSize.value)) {
+    return "Jumlah Bench harus antara 0 dan ukuran physical deck.";
   }
 
   if (
@@ -401,6 +420,20 @@ const validateForm = () => {
       "Max Active + Max Bench " +
       "tidak boleh melebihi Deck Size."
     );
+  }
+
+  if (!Number.isInteger(Number(actionPointsPerTurn.value)) || Number(actionPointsPerTurn.value) < 1 || Number(actionPointsPerTurn.value) > 10) {
+    return "Poin Giliran per giliran harus antara 1 dan 10.";
+  }
+
+  if (!Number.isInteger(Number(maxAttacksPerCard.value)) || Number(maxAttacksPerCard.value) < 1 || Number(maxAttacksPerCard.value) > 5) {
+    return "Kesempatan serang per kartu harus antara 1 dan 5.";
+  }
+
+  for (const [action, cost] of Object.entries(actionCosts.value)) {
+    if (!Number.isInteger(Number(cost)) || Number(cost) < 0 || Number(cost) > Number(actionPointsPerTurn.value)) {
+      return `Biaya poin giliran untuk ${action} harus antara 0 dan jumlah poin per giliran.`;
+    }
   }
 
   // =======================================================
@@ -592,6 +625,16 @@ const createBattle = async () => {
         ruleset:
           ruleset.value,
 
+        action_points_enabled: true,
+        action_points_per_turn: Number(actionPointsPerTurn.value),
+        action_costs: Object.fromEntries(
+          Object.entries(actionCosts.value).map(([key, value]) => [key, Number(value)]),
+        ),
+        max_attacks_per_card: Number(maxAttacksPerCard.value),
+        player1_action_points: resolvedStartingPlayer === "p1" ? Number(actionPointsPerTurn.value) : 0,
+        player2_action_points: resolvedStartingPlayer === "p2" ? Number(actionPointsPerTurn.value) : 0,
+        turn_index: 1,
+
         // =================================================
         // GAME RULES
         // =================================================
@@ -723,6 +766,18 @@ const createBattle = async () => {
           Boolean(
             comboEnabled.value,
           ),
+
+        triple_combo_enabled:
+          Boolean(tripleComboEnabled.value),
+
+        generic_combo_enabled:
+          Boolean(genericComboEnabled.value),
+
+        formation_enabled:
+          Boolean(formationEnabled.value),
+
+        status_effects_enabled:
+          Boolean(statusEffectsEnabled.value),
 
         fusion_enabled:
           Boolean(
@@ -1025,7 +1080,7 @@ const createAnother = () => {
 </script>
 
 <template>
-  <div class="setup-page">
+  <div class="setup-page ide-setup-workspace">
     <!-- ===================================================
          BACKGROUND
     ==================================================== -->
@@ -1095,6 +1150,7 @@ const createAnother = () => {
            FORM
       ================================================== -->
 
+      <div class="setup-workspace-grid">
       <form
         class="setup-form"
         @submit.prevent="
@@ -1421,7 +1477,7 @@ const createAnother = () => {
               class="field"
             >
               <span>
-                Initial Cards
+                Kartu Awal di Active
               </span>
 
               <input
@@ -1436,9 +1492,7 @@ const createAnother = () => {
               />
 
               <small>
-                Card yang harus
-                discan sebelum
-                battle dimulai.
+                Jumlah kartu awal yang harus di-scan sebelum battle dimulai. Kartu ini masuk ke Active, bukan ke hand digital.
               </small>
             </label>
 
@@ -1463,8 +1517,7 @@ const createAnother = () => {
               />
 
               <small>
-                Maksimal card
-                aktif di arena.
+                Batas kartu yang boleh berada di Active. Kartu hasil scan hanya masuk ke Active.
               </small>
             </label>
 
@@ -1489,9 +1542,7 @@ const createAnother = () => {
               />
 
               <small>
-                Maksimal card
-                yang berada
-                di Bench.
+                Batas kartu yang dapat dipindahkan dari Active ke Bench.
               </small>
             </label>
           </div>
@@ -1510,7 +1561,7 @@ const createAnother = () => {
             </span>
 
             <span>
-              Initial
+              Active Awal
 
               <strong>
                 {{
@@ -1561,6 +1612,11 @@ const createAnother = () => {
             berapa kartu dari jatah
             physical deck yang sudah
             dimainkan.
+          </div>
+
+          <div class="info-note">
+            <strong>GILIRAN TCG</strong>
+            Setiap giliran mendapat {{ actionPointsPerTurn }} poin giliran untuk melakukan aksi. Poin diisi kembali saat giliran pemain dimulai. Kartu dimainkan dari hand fisik dengan scan RFID dan selalu masuk ke Active. Jika Active penuh, pindahkan kartu ke Bench sebelum summon berikutnya. Kartu yang berada di Bench tidak dapat menyerang atau ikut Combo.
           </div>
         </section>
 
@@ -1890,6 +1946,27 @@ const createAnother = () => {
             </div>
           </div>
 
+          <div class="form-grid two tcg-config-fields">
+            <label class="field">
+              <span>Poin per Giliran</span>
+              <input v-model.number="actionPointsPerTurn" type="number" min="1" max="10" />
+              <small>Poin yang tersedia saat giliran pemain dimulai.</small>
+            </label>
+            <label class="field">
+              <span>Serangan per Active Card</span>
+              <input v-model.number="maxAttacksPerCard" type="number" min="1" max="5" />
+              <small>Jumlah kesempatan menyerang tiap kartu selama satu giliran.</small>
+            </label>
+          </div>
+
+          <div class="form-grid three tcg-config-fields">
+            <label class="field" v-for="(cost, action) in actionCosts" :key="action">
+              <span>Biaya poin · {{ action.replaceAll('_', ' ') }}</span>
+              <input v-model.number="actionCosts[action]" type="number" min="0" :max="actionPointsPerTurn" />
+              <small>Atur 0 untuk aksi gratis.</small>
+            </label>
+          </div>
+
           <div
             class="combat-rule-list"
           >
@@ -2007,19 +2084,29 @@ const createAnother = () => {
             </label>
           </div>
 
+          <div class="combat-rule-list secondary-rule-list">
+            <label class="rule-option">
+              <div><strong>⚡ Status Effects</strong><small>Mengaktifkan Burn, Freeze, Stun, Poison, Shield, dan efek status lain.</small></div>
+              <span class="toggle"><input v-model="statusEffectsEnabled" type="checkbox" /><span class="toggle-track"><span class="toggle-dot" /></span></span>
+            </label>
+            <label class="rule-option">
+              <div><strong>🔺 Triple Combo</strong><small>Mengizinkan tiga kartu Active jika ada aturan kombinasi khusus dan poin giliran cukup.</small></div>
+              <span class="toggle"><input v-model="tripleComboEnabled" type="checkbox" :disabled="!comboEnabled" /><span class="toggle-track"><span class="toggle-dot" /></span></span>
+            </label>
+            <label class="rule-option">
+              <div><strong>✨ Generic Combo</strong><small>Mengizinkan Combined Strike saat tidak ada synergy tipe khusus.</small></div>
+              <span class="toggle"><input v-model="genericComboEnabled" type="checkbox" :disabled="!comboEnabled" /><span class="toggle-track"><span class="toggle-dot" /></span></span>
+            </label>
+            <label class="rule-option">
+              <div><strong>🛡 Formation</strong><small>Menyiapkan bonus susunan Active; default nonaktif hingga formasi didaftarkan.</small></div>
+              <span class="toggle"><input v-model="formationEnabled" type="checkbox" /><span class="toggle-track"><span class="toggle-dot" /></span></span>
+            </label>
+          </div>
+
           <div
             class="future-note"
           >
-            <span>
-              PLANNED
-            </span>
-
-            Special Skill,
-            Combination, dan Fusion
-            sudah disimpan dalam
-            battle rules. Engine-nya
-            akan kita aktifkan pada
-            fase berikutnya.
+            Aturan ini disimpan pada battle session dan diperiksa oleh server. Combo menggunakan kartu Active saja; tipe lama Electric, Grass, dan Wind tetap dikenali oleh resolver tipe.
           </div>
         </section>
 
@@ -2048,10 +2135,7 @@ const createAnother = () => {
                 </h2>
 
                 <p>
-                  Player tercepat
-                  yang menjawab benar
-                  mendapatkan random
-                  bonus skill.
+                  Pemain yang menjawab benar lebih dulu mendapat tiga pilihan skill.
                 </p>
               </div>
             </div>
@@ -2214,6 +2298,72 @@ const createAnother = () => {
           </button>
         </div>
       </form>
+
+      <aside class="setup-live-panel" aria-label="Ringkasan konfigurasi battle">
+        <div class="setup-live-panel-head">
+          <span class="setup-live-kicker">BATTLE PREVIEW</span>
+          <span class="setup-live-indicator"><i></i> LIVE CONFIG</span>
+        </div>
+
+        <h2>{{ player1Name || "Player 1" }} <span>vs</span> {{ player2Name || "Player 2" }}</h2>
+        <p class="setup-live-intro">Ringkasan ini mengikuti pilihan setup yang sedang kamu ubah.</p>
+
+        <div class="setup-preview-arena">
+          <div class="setup-preview-player blue">
+            <span>P1</span>
+            <strong>{{ player1Name || "Player 1" }}</strong>
+            <small>{{ playerStartingHp }} HP</small>
+          </div>
+          <div class="setup-preview-vs">VS</div>
+          <div class="setup-preview-player red">
+            <span>P2</span>
+            <strong>{{ player2Name || "Player 2" }}</strong>
+            <small>{{ playerStartingHp }} HP</small>
+          </div>
+        </div>
+
+        <section class="setup-preview-block">
+          <div class="setup-preview-block-title"><strong>Physical deck</strong><span>{{ deckSize }} kartu / pemain</span></div>
+          <div class="setup-deck-meter" aria-hidden="true"><i :style="{ width: `${Math.min(100, Math.max(0, Number(deckSize) * 5))}%` }"></i></div>
+          <div class="setup-preview-stats">
+            <div><small>Kartu awal discan</small><strong>{{ initialCardsRequired }}</strong></div>
+            <div><small>Sisa deck</small><strong>{{ deckAfterInitial }}</strong></div>
+            <div><small>Slot Active</small><strong>{{ maxActive }}</strong></div>
+            <div><small>Slot Bench</small><strong>{{ maxBench }}</strong></div>
+          </div>
+          <p class="setup-preview-note">Deck fisik tetap dicatat sesuai jumlah ini. Pengelolaan kartu di tangan dilakukan langsung di meja permainan.</p>
+        </section>
+
+        <section class="setup-preview-block combat-preview-block">
+          <div class="setup-preview-block-title"><strong>Battle rules</strong><span>{{ totalRounds }} ronde</span></div>
+          <div class="setup-rule-chips">
+            <span>{{ turnDurationSeconds }} dtk / giliran</span>
+            <span>{{ actionPointsPerTurn }} poin / giliran</span>
+            <span>{{ comboEnabled ? "Combo aktif" : "Combo nonaktif" }}</span>
+            <span>{{ fusionEnabled ? "Fusion aktif" : "Fusion nonaktif" }}</span>
+          </div>
+        </section>
+
+        <section class="setup-preview-block question-preview-block">
+          <div class="setup-preview-block-title"><strong>Quiz challenge</strong><span>{{ questionEnabled ? "AKTIF" : "NONAKTIF" }}</span></div>
+          <template v-if="questionEnabled">
+            <div class="setup-question-summary">
+              <b>{{ questionLevel === "mixed" ? "Campuran" : questionLevel }}</b>
+              <span>setiap {{ questionEveryRounds }} ronde</span>
+            </div>
+            <small class="setup-topic-summary">
+              {{ questionTopics.length ? questionTopics.map((topic) => questionTopicOptions.find((item) => item.value === topic)?.label || topic).join(" · ") : "Semua topik" }}
+            </small>
+          </template>
+          <p v-else class="setup-preview-note">Battle berjalan tanpa ronde quiz.</p>
+        </section>
+
+        <div class="setup-preview-footer">
+          <span>Starting player</span>
+          <strong>{{ startingPlayer === "random" ? "Dipilih acak" : startingPlayer === "p1" ? player1Name : player2Name }}</strong>
+        </div>
+      </aside>
+      </div>
     </main>
 
     <!-- ===================================================
@@ -3483,13 +3633,25 @@ select {
 ========================================================= */
 
 .toggle {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  vertical-align: middle;
   cursor: pointer;
 }
 
 .toggle input {
   position: absolute;
-
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
   opacity: 0;
+  cursor: pointer;
 }
 
 .toggle-track {
@@ -4471,6 +4633,132 @@ select {
 .question-setting-toggle span { display: grid; gap: 4px; }
 .question-setting-toggle strong { font-size: 12px; }
 .question-setting-toggle small { color: #698271; font-size: 10px; line-height: 1.45; }
+
+/* Timedoor battle builder: a focused rule editor with a live session snapshot. */
+.setup-page.ide-setup-workspace {
+  --setup-green:#0ca52c; --setup-green-dark:#087b27; --setup-ink:#173c25; --setup-muted:#708675; --setup-border:#dcebdd;
+  height:calc(100dvh - 76px); min-height:0; display:flex; flex-direction:column;
+  padding:12px 18px 14px; overflow:clip; color:var(--setup-ink);
+  background:#f0f8f0; font-family:Inter,ui-sans-serif,system-ui,sans-serif;
+}
+.ide-setup-workspace .setup-background { display:none; }
+.ide-setup-workspace .setup-container { position:relative; display:flex; flex:1 1 auto; flex-direction:column; width:min(100%,1580px); max-width:none; min-height:0; margin:0 auto; }
+.ide-setup-workspace .setup-header { position:relative; top:auto; z-index:30; display:flex; flex:0 0 auto; align-items:center; justify-content:space-between; gap:20px; margin:0 0 12px; padding:12px 15px; border:1px solid var(--setup-border); border-radius:15px; background:rgba(255,255,255,.97); box-shadow:0 6px 20px rgba(20,70,35,.06); backdrop-filter:blur(12px); }
+.ide-setup-workspace .setup-header-main { align-items:center; gap:12px; }
+.ide-setup-workspace .setup-logo { display:grid; width:40px; height:40px; place-items:center; border:0; border-radius:12px; color:#fff; background:var(--setup-green); box-shadow:none; }
+.ide-setup-workspace .setup-eyebrow { color:#438b4d; }
+.ide-setup-workspace .setup-header h1 { margin:1px 0 2px; color:var(--setup-ink); font-size:20px; letter-spacing:-.03em; }
+.ide-setup-workspace .setup-header p { max-width:580px; margin:0; color:var(--setup-muted); font-size:11px; line-height:1.45; }
+.ide-setup-workspace .history-button { min-height:38px; padding:0 13px; border:1px solid #cce2cd; border-radius:9px; color:#327c3e; background:#f4faf3; font-size:10px; font-weight:900; }
+.ide-setup-workspace .history-button:hover { color:#176d2a; border-color:#9ccc9f; background:#eaf7e9; }
+.ide-setup-workspace .setup-workspace-grid { display:grid; flex:1 1 auto; grid-template-columns:minmax(0,1fr) minmax(300px,370px); align-items:stretch; gap:15px; min-height:0; }
+.ide-setup-workspace .setup-form { min-width:0; min-height:0; height:100%; max-height:none; padding:1px 7px 12px 1px; overflow-y:auto; overscroll-behavior:contain; scrollbar-color:#bed8bf transparent; }
+.ide-setup-workspace .setup-form::-webkit-scrollbar { width:7px; }
+.ide-setup-workspace .setup-form::-webkit-scrollbar-thumb { border-radius:9px; background:#c7dec8; }
+.ide-setup-workspace .setup-card { padding:19px; border:1px solid var(--setup-border); border-radius:15px; background:#fff; box-shadow:0 5px 17px rgba(20,70,35,.035); }
+.ide-setup-workspace .tcg-card { border-color:#d7e8d4; }
+.ide-setup-workspace .section-heading h2 { color:#20462a; font-size:16px; letter-spacing:-.02em; }
+.ide-setup-workspace .section-heading p,.ide-setup-workspace .setup-card p { color:#718675; }
+.ide-setup-workspace .section-icon { border-color:#d9ecd9; color:#318141; background:#f1f9f0; box-shadow:none; }
+.ide-setup-workspace .field > span,.ide-setup-workspace .rule-option strong { color:#31543a; }
+.ide-setup-workspace .field input,.ide-setup-workspace .field select,.ide-setup-workspace .setup-card input:not([type="checkbox"]):not([type="radio"]),.ide-setup-workspace .setup-card select,.ide-setup-workspace .setup-card textarea { border:1px solid #d6e7d6; border-radius:8px; color:#23492c; background:#fbfdfb; box-shadow:none; }
+.ide-setup-workspace .field input:focus,.ide-setup-workspace .field select:focus,.ide-setup-workspace .setup-card input:focus,.ide-setup-workspace .setup-card select:focus,.ide-setup-workspace .setup-card textarea:focus { border-color:#56b665; outline:3px solid rgba(29,161,53,.12); }
+.ide-setup-workspace .field input:disabled,.ide-setup-workspace .field select:disabled { color:#8a9b8c; background:#f3f7f2; }
+.ide-setup-workspace .field small,.ide-setup-workspace .rule-option small { color:#748a77; }
+.ide-setup-workspace .rule-option { border-color:#e2ede1; background:#fbfdfb; }
+.ide-setup-workspace .rule-option:hover { border-color:#bfddc1; background:#f5fbf4; }
+.ide-setup-workspace .toggle-track { background:#d8e5d8; }
+.ide-setup-workspace .toggle input:checked + .toggle-track { background:var(--setup-green); }
+.ide-setup-workspace .input-suffix { border-color:#d6e7d6; background:#fbfdfb; }
+.ide-setup-workspace .input-suffix input { background:transparent; }
+.ide-setup-workspace .input-suffix > span { color:#738875; }
+.ide-setup-workspace .deck-summary span { border-color:#dcebdd; color:#607a64; background:#f6faf5; }
+.ide-setup-workspace .deck-summary strong { color:#244a2d; }
+.ide-setup-workspace .info-note,.ide-setup-workspace .future-note { border-color:#dcebdd; color:#607a64; background:#f5faf4; }
+.ide-setup-workspace .info-note strong,.ide-setup-workspace .future-note span { color:#348246; }
+.ide-setup-workspace .ruleset-banner { border-color:#efe1bb; background:linear-gradient(135deg,#fff9e9,#fff); }
+.ide-setup-workspace .ruleset-banner span { color:#8c8063; }
+.ide-setup-workspace .ruleset-banner strong { color:#80611c; }
+.ide-setup-workspace .ruleset-banner small { color:#7c806f; }
+.ide-setup-workspace .combat-preview,.ide-setup-workspace .future-note { border-color:#dcebdd; color:#607a64; background:#f5faf4; }
+.ide-setup-workspace .combat-preview > span { color:#b04c5d; }
+.ide-setup-workspace .combat-preview strong { color:#31543a; }
+.ide-setup-workspace .combat-preview p { color:#718675; }
+.ide-setup-workspace .create-button { min-height:46px; border:0; border-radius:10px; color:#fff; background:var(--setup-green); box-shadow:0 8px 18px rgba(12,165,44,.16); }
+.ide-setup-workspace .create-button:hover:not(:disabled) { background:var(--setup-green-dark); }
+.ide-setup-workspace .create-button:disabled { color:#f4fff4; background:#88c994; }
+.ide-setup-workspace .error-box { border-color:#f0bdb8; color:#973e35; background:#fff2f0; }
+.ide-setup-workspace .question-setting-toggle { border-color:#dbe9dc; color:#31543a; background:#fbfdfb; }
+.ide-setup-workspace .question-setting-toggle small { color:#748a77; }
+.ide-setup-workspace .setup-live-panel { position:relative; top:auto; display:grid; align-content:start; gap:14px; min-height:0; height:100%; max-height:none; padding:19px; overflow-y:auto; border:1px solid var(--setup-border); border-radius:16px; background:#fff; box-shadow:0 12px 32px rgba(20,70,35,.065); scrollbar-color:#bed8bf transparent; }
+.ide-setup-workspace .setup-live-panel-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.ide-setup-workspace .setup-live-kicker { color:#438b4d; font-size:9px; font-weight:950; letter-spacing:.15em; }
+.ide-setup-workspace .setup-live-indicator { display:inline-flex; align-items:center; gap:6px; color:#648069; font-size:8px; font-weight:900; letter-spacing:.07em; }
+.ide-setup-workspace .setup-live-indicator i { width:7px; height:7px; border-radius:50%; background:#22a83b; box-shadow:0 0 0 4px #e8f7e8; }
+.ide-setup-workspace .setup-live-panel > h2 { margin:0; color:#21472b; font-size:21px; line-height:1.22; letter-spacing:-.04em; overflow-wrap:anywhere; }
+.ide-setup-workspace .setup-live-panel > h2 span { color:#8ba28d; font-size:12px; }
+.ide-setup-workspace .setup-live-intro { margin:-9px 0 0; color:#758a78; font-size:10px; line-height:1.5; }
+.ide-setup-workspace .setup-preview-arena { display:grid; grid-template-columns:minmax(0,1fr) 26px minmax(0,1fr); align-items:center; gap:5px; padding:12px; border:1px solid #e1ede0; border-radius:13px; background:#f8fcf7; }
+.ide-setup-workspace .setup-preview-player { display:grid; gap:5px; min-width:0; padding:10px; border:1px solid #dbeadd; border-radius:10px; background:#fff; }
+.ide-setup-workspace .setup-preview-player > span { color:#3d8d4b; font-size:8px; font-weight:950; letter-spacing:.08em; }
+.ide-setup-workspace .setup-preview-player strong { overflow:hidden; color:#274a2f; font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
+.ide-setup-workspace .setup-preview-player small { color:#728574; font-size:9px; font-weight:800; }
+.ide-setup-workspace .setup-preview-player.red > span { color:#bb5670; }
+.ide-setup-workspace .setup-preview-vs { color:#9aab9a; font-size:8px; font-weight:950; text-align:center; }
+.ide-setup-workspace .setup-preview-block { display:grid; gap:10px; padding:13px; border:1px solid #e1ede0; border-radius:12px; background:#fff; }
+.ide-setup-workspace .setup-preview-block-title { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.ide-setup-workspace .setup-preview-block-title strong { color:#31543a; font-size:11px; }
+.ide-setup-workspace .setup-preview-block-title > span { color:#398649; font-size:9px; font-weight:900; text-align:right; }
+.ide-setup-workspace .setup-deck-meter { height:6px; overflow:hidden; border-radius:999px; background:#e9f0e8; }
+.ide-setup-workspace .setup-deck-meter i { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#21b743,#73d085); transition:width .2s ease; }
+.ide-setup-workspace .setup-preview-stats { display:grid; grid-template-columns:1fr 1fr; gap:9px; }
+.ide-setup-workspace .setup-preview-stats > div { display:grid; gap:3px; padding:8px; border-radius:9px; background:#f5faf4; }
+.ide-setup-workspace .setup-preview-stats small { color:#7b8d7d; font-size:8px; }
+.ide-setup-workspace .setup-preview-stats strong { color:#244a2d; font-size:16px; }
+.ide-setup-workspace .setup-preview-note { margin:0; color:#718675; font-size:9px; line-height:1.5; }
+.ide-setup-workspace .setup-rule-chips { display:flex; flex-wrap:wrap; gap:6px; }
+.ide-setup-workspace .setup-rule-chips span { padding:6px 8px; border:1px solid #d9ead8; border-radius:999px; color:#4f7255; background:#f4faf3; font-size:8px; font-weight:850; }
+.ide-setup-workspace .setup-question-summary { display:flex; align-items:center; justify-content:space-between; gap:10px; color:#31543a; font-size:10px; }
+.ide-setup-workspace .setup-question-summary b { text-transform:capitalize; }
+.ide-setup-workspace .setup-question-summary span,.ide-setup-workspace .setup-topic-summary { color:#728574; font-size:9px; }
+.ide-setup-workspace .setup-topic-summary { line-height:1.5; }
+.ide-setup-workspace .setup-preview-footer { display:flex; justify-content:space-between; gap:10px; padding-top:9px; border-top:1px solid #e6efe5; color:#758a78; font-size:9px; }
+.ide-setup-workspace .setup-preview-footer strong { color:#31543a; text-align:right; }
+/* The created-battle confirmation uses the same light Timedoor surface. */
+.ide-setup-workspace > .created-container { width:min(100%,1180px); max-width:none; max-height:100%; margin:auto; padding:24px; overflow-y:auto; border:1px solid var(--setup-border); border-radius:18px; background:#fff; box-shadow:0 12px 34px rgba(20,70,35,.06); }
+.ide-setup-workspace .success-icon { border-color:#bce3c0; color:#168534; background:#eff9ef; box-shadow:none; }
+.ide-setup-workspace .created-label { color:#438b4d; }
+.ide-setup-workspace .created-container h1 { color:#173c25; }
+.ide-setup-workspace .created-description { color:#708675; }
+.ide-setup-workspace .battle-code-card { border-color:#cfe5d0; background:linear-gradient(135deg,#f5fbf4,#eaf6e9); }
+.ide-setup-workspace .battle-code-card > span { color:#718675; }
+.ide-setup-workspace .battle-code-card > strong { color:#148333; }
+.ide-setup-workspace .battle-code-card button { border-color:#cce5cd; color:#28773a; background:#fff; }
+.ide-setup-workspace .battle-info > div,.ide-setup-workspace .created-rule-summary > div { border-color:#e0ece0; background:#f8fbf7; }
+.ide-setup-workspace .battle-info span,.ide-setup-workspace .created-rule-summary span { color:#758a78; }
+.ide-setup-workspace .battle-info strong,.ide-setup-workspace .created-rule-summary strong { color:#294d31; }
+.ide-setup-workspace .open-public-button { border:0; color:#fff; background:var(--setup-green); }
+.ide-setup-workspace .history-secondary-button,.ide-setup-workspace .another-button { border:1px solid #d5e6d5; color:#3f6847; background:#f7fbf6; }
+.ide-setup-workspace .battle-link-card { border-color:#dcebdd; background:#fbfdfb; }
+.ide-setup-workspace .battle-link-card.blue { border-color:#cfe2ed; }
+.ide-setup-workspace .battle-link-card.red { border-color:#eed5dc; }
+.ide-setup-workspace .link-icon { background:#f0f7ef; }
+.ide-setup-workspace .link-label { color:#718675; }
+.ide-setup-workspace .link-content strong { color:#294d31; }
+.ide-setup-workspace .link-url { color:#718675; }
+.ide-setup-workspace .player-access-code { color:#718675; }
+.ide-setup-workspace .player-access-code code { color:#31543a; }
+.ide-setup-workspace .player-access-code button,.ide-setup-workspace .link-actions button { border-color:#d6e7d6; color:#416b49; background:#fff; }
+.ide-setup-workspace .link-actions button.primary { border-color:#0ca52c; color:#fff; background:#0ca52c; }
+.ide-setup-workspace .link-actions button.primary.red { border-color:#ca4960; color:#fff; background:#ca4960; }
+.ide-setup-workspace .player-qr-panel { border-color:#dcebdd; background:#f7fbf6; }
+.ide-setup-workspace .player-qr-panel.red { border-color:#eed5dc; }
+.ide-setup-workspace .player-qr-panel > span { color:#438b4d; }
+.ide-setup-workspace .player-qr-panel.red > span { color:#a65166; }
+.ide-setup-workspace .qr-error-box { border-color:#f0bdb8; color:#973e35; background:#fff2f0; }
+@media (max-width:1080px) { .ide-setup-workspace .setup-workspace-grid { grid-template-columns:minmax(0,1fr) 300px; } .ide-setup-workspace .setup-live-panel { padding:14px; } }
+@media (max-width:820px) { .setup-page.ide-setup-workspace { height:auto; min-height:calc(100dvh - 76px); padding:12px; overflow:visible; } .ide-setup-workspace .setup-container { flex:none; } .ide-setup-workspace .setup-header { position:relative; align-items:flex-start; padding:12px; } .ide-setup-workspace .setup-header p { display:none; } .ide-setup-workspace .setup-workspace-grid { flex:none; grid-template-columns:1fr; } .ide-setup-workspace .setup-form { height:auto; max-height:none; padding:0 0 10px; overflow:visible; } .ide-setup-workspace .setup-live-panel { position:relative; top:auto; order:-1; height:auto; max-height:none; } }
+@media (max-width:520px) { .ide-setup-workspace .setup-header { flex-direction:column; gap:10px; } .ide-setup-workspace .history-button { width:100%; } .ide-setup-workspace .setup-header h1 { font-size:18px; } .ide-setup-workspace .setup-card { padding:15px; } }
 @media (max-width: 700px) {
   .question-extra-grid { grid-template-columns: 1fr; }
   .question-topic-field { grid-column: auto; }

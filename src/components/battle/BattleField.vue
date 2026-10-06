@@ -48,6 +48,16 @@ const props =
         () => [],
     },
 
+    maxActive: {
+      type: Number,
+      default: 4,
+    },
+
+    maxBench: {
+      type: Number,
+      default: 4,
+    },
+
     selectedCard: {
       type:
         Object,
@@ -1256,6 +1266,10 @@ onUnmounted(
         player1Bench
       "
 
+      :max-active="maxActive"
+
+      :max-bench="maxBench"
+
       :selected-card="
         selectedCard
       "
@@ -1336,6 +1350,10 @@ onUnmounted(
       :bench-cards="
         player2Bench
       "
+
+      :max-active="maxActive"
+
+      :max-bench="maxBench"
 
       :selected-card="
         selectedCard

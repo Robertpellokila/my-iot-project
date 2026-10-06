@@ -68,11 +68,12 @@ const skillCodeAuto = ref(true);
 // Element is stored as text in game_cards, so the UI can safely discover
 // existing values and add new ones without a schema migration.
 const DEFAULT_ELEMENTS = [
+  "Knight",
   "Fire",
   "Water",
-  "Grass",
-  "Electric",
-  "Ice",
+  "Forest",
+  "Thunder",
+  "Light",
   "Dark",
 ];
 
@@ -104,16 +105,33 @@ const elementOptions = computed(() => {
 });
 
 const synergySupportedElements = new Set([
+  "knight",
   "fire",
   "water",
-  "grass",
-  "electric",
-  "ice",
+  "forest",
+  "thunder",
+  "light",
   "dark",
 ]);
 
+const canonicalElement = (value) => {
+  const aliases = {
+    electric: "thunder",
+    lightning: "thunder",
+    wind: "thunder",
+    ice: "water",
+    grass: "forest",
+    nature: "forest",
+    holy: "light",
+    warrior: "knight",
+    shadow: "dark",
+  };
+  const key = String(value ?? "").trim().toLowerCase();
+  return aliases[key] ?? key;
+};
+
 const elementSupportsSynergy = computed(() =>
-  synergySupportedElements.has(String(element.value ?? "").trim().toLowerCase()),
+  synergySupportedElements.has(canonicalElement(element.value)),
 );
 
 const persistCustomElements = () => {
@@ -2227,112 +2245,58 @@ onUnmounted(() => {
 
 <template>
 
-  <div class="register-container">
+  <div class="register-container ide-builder-page">
 
-    <div class="header-section">
-
-      <span class="eyebrow">TCG SYSTEM</span>
-
-      <h2>
-        {{
-          isExistingCard
-            ? cardMode === "fusion"
-              ? "Edit Fusion Card"
-              : "Edit Physical Card"
-            : cardMode === "copy"
-              ? "Copy Existing Card"
-              : cardMode === "fusion"
-                ? "Register Fusion Card"
-                : "Register Physical Card Baru"
-        }}
-      </h2>
-
-      <p>
-        Physical Card memakai UID RFID unik. Copy Existing Card membuat copy
-        fisik baru dengan <b>card_code yang sama</b>. Fusion Card bersifat
-        virtual dan tidak membutuhkan RFID.
-      </p>
-
-    </div>
-
-
-
-    <!-- Pesan Error / Sukses -->
-
-    <div v-if="errorMessage" class="alert error">{{ errorMessage }}</div>
-
-    <div v-if="successMessage" class="alert success">{{ successMessage }}</div>
-
-    <!-- =====================================================
-         CARD MODE
-    ====================================================== -->
-    <section class="card-mode-panel">
-      <div class="card-mode-heading">
-        <div>
-          <span class="section-eyebrow">PHASE 3D</span>
-          <h3>Card Mode</h3>
+    <header class="ide-toolbar">
+      <div class="toolbar-left">
+        <span class="brand-mark toolbar-logo" aria-hidden="true">t</span>
+        <div class="toolbar-heading">
+          <span class="toolbar-kicker">TIMEDOOR · CARD STUDIO</span>
+          <h1 class="toolbar-title">
+            {{ isExistingCard ? "Edit Card" : "Register Card" }}
+          </h1>
+          <span class="toolbar-subtitle">
+            {{ uid ? `RFID ${uid}` : cardMode === "fusion" ? "Virtual fusion card" : "Menunggu kartu RFID" }}
+          </span>
         </div>
-
-        <span class="identity-note">
-          UID = fisik • Card Code = jenis kartu
-        </span>
       </div>
 
-      <div class="card-mode-grid">
-        <label
-          class="card-mode-option"
-          :class="{ active: cardMode === 'new' }"
-        >
-          <input
-            v-model="cardMode"
-            type="radio"
-            value="new"
-            @change="handleCardModeChange"
-          />
-          <span class="mode-icon">📡</span>
-          <strong>New Physical Card</strong>
-          <small>RFID baru atau edit Physical Card melalui scan.</small>
-        </label>
-
-        <label
-          class="card-mode-option"
-          :class="{ active: cardMode === 'copy' }"
-        >
-          <input
-            v-model="cardMode"
-            type="radio"
-            value="copy"
-            @change="handleCardModeChange"
-          />
-          <span class="mode-icon">📑</span>
-          <strong>Copy Existing Card</strong>
-          <small>UID berbeda, tetapi Card Code / stats / skill sama.</small>
-        </label>
-
-        <label
-          class="card-mode-option fusion"
-          :class="{ active: cardMode === 'fusion' }"
-        >
-          <input
-            v-model="cardMode"
-            type="radio"
-            value="fusion"
-            @change="handleCardModeChange"
-          />
-          <span class="mode-icon">🧬</span>
-          <strong>Fusion Card</strong>
-          <small>Virtual card hasil Fusion. Tidak mempunyai RFID.</small>
-        </label>
+      <div class="toolbar-center" role="radiogroup" aria-label="Mode kartu">
+        <div class="ide-segmented-control">
+          <label :class="{ active: cardMode === 'new' }">
+            <input v-model="cardMode" type="radio" value="new" @change="handleCardModeChange" />
+            Fisik
+          </label>
+          <label :class="{ active: cardMode === 'copy' }">
+            <input v-model="cardMode" type="radio" value="copy" @change="handleCardModeChange" />
+            Salin kartu
+          </label>
+          <label :class="{ active: cardMode === 'fusion', fusion: cardMode === 'fusion' }">
+            <input v-model="cardMode" type="radio" value="fusion" @change="handleCardModeChange" />
+            Fusion
+          </label>
+        </div>
       </div>
-    </section>
 
-    <div class="form-grid-layout">
+      <div class="toolbar-right">
+        <button type="button" class="ide-btn outline" @click="resetForm">Reset</button>
+        <button type="submit" form="register-game-card-form" class="ide-btn primary" :disabled="loading || compressingImage">
+          <span v-if="loading || compressingImage" class="ide-spinner" aria-hidden="true"></span>
+          {{ loading ? "Menyimpan…" : compressingImage ? "Mengompres gambar…" : isExistingCard ? "Simpan perubahan" : "Simpan kartu" }}
+        </button>
+      </div>
+    </header>
+
+    <div v-if="errorMessage" class="alert error" role="alert">{{ errorMessage }}</div>
+    <div v-if="successMessage" class="alert success" role="status">{{ successMessage }}</div>
+
+    <div class="form-grid-layout ide-main-grid">
 
       <!-- FORM INPUT -->
 
       <div class="panel-card">
 
-        <form class="bento-form" @submit.prevent="handleSubmit">
+        <form id="register-game-card-form" class="bento-form" @submit.prevent="handleSubmit">
 
           <!-- =====================================================
                QUICK BENTO: SOURCE / IDENTITY / STATS / MEDIA
@@ -2539,13 +2503,14 @@ onUnmounted(() => {
                 <span class="element-symbol">
                   {{
                     {
+                      knight: "🛡️",
                       fire: "🔥",
                       water: "💧",
-                      grass: "🌿",
-                      electric: "⚡",
-                      ice: "❄️",
+                      forest: "🌿",
+                      thunder: "⚡",
+                      light: "✨",
                       dark: "🌑",
-                    }[String(element || "").toLowerCase()] || "✦"
+                    }[canonicalElement(element)] || "✦"
                   }}
                 </span>
                 <div>
@@ -2725,6 +2690,7 @@ onUnmounted(() => {
 
           </div>
 
+          <div class="ide-advanced-column">
           <!-- =====================================================
                FUSION RECIPE - PHASE 3D.6
           ====================================================== -->
@@ -3565,37 +3531,6 @@ onUnmounted(() => {
             </template>
           </div>
 
-
-          <div class="button-actions">
-
-            <button type="button" class="btn-secondary" @click="resetForm">
-
-              Reset
-
-            </button>
-
-            <button type="submit" class="btn-primary" :disabled="loading">
-
-              {{
-
-                loading
-
-                  ? "Menyimpan..."
-
-                  : isExistingCard
-                    ? cardMode === "fusion"
-                      ? "Perbarui Fusion Card"
-                      : "Perbarui Physical Card"
-                    : cardMode === "copy"
-                      ? "Simpan Copy Card"
-                      : cardMode === "fusion"
-                        ? "Simpan Fusion Card"
-                        : "Simpan Physical Card"
-
-              }}
-
-            </button>
-
           </div>
 
         </form>
@@ -4033,6 +3968,21 @@ textarea:focus {
 
   background: linear-gradient(135deg, #60a5fa, #1e3a8a);
 
+}
+
+.preview-card-box.forest {
+  background: linear-gradient(135deg, #4ade80, #14532d);
+}
+.preview-card-box.thunder {
+  color: #152333;
+  background: linear-gradient(135deg, #fde047, #854d0e);
+}
+.preview-card-box.knight {
+  background: linear-gradient(135deg, #dbe5e9, #526874);
+}
+.preview-card-box.light {
+  color: #493b14;
+  background: linear-gradient(135deg, #fff3b0, #e8bf45);
 }
 
 .preview-card-box.grass {
@@ -5416,5 +5366,274 @@ textarea {
 .skill-toggle input:focus-visible+span{outline:3px solid #a3ddb0;outline-offset:2px}
 .skill-toggle.disabled{cursor:not-allowed;opacity:.55}
 @media(max-width:620px){.builtin-skill-toggle-list{padding:10px}.builtin-skill-toggle-row{align-items:flex-start;padding:9px}.builtin-skill-toggle-list>header{align-items:flex-start}}
+
+/* Timedoor Card Studio: fixed tool rail, editable properties, live card canvas, and advanced rules. */
+.register-container.ide-builder-page {
+  --studio-green: #0ca52c;
+  --studio-green-dark: #087b27;
+  --studio-ink: #173c25;
+  --studio-muted: #718675;
+  --studio-border: #dcebdd;
+  --studio-canvas: #f1f8f1;
+  width: 100%;
+  max-width: none;
+  height: calc(100dvh - 76px);
+  min-height: calc(100dvh - 76px);
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border: 1px solid var(--studio-border);
+  border-radius: 16px;
+  color: var(--studio-ink);
+  background: var(--studio-canvas);
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+.ide-builder-page .ide-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 35;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto minmax(250px, 1fr);
+  align-items: center;
+  gap: 18px;
+  min-height: 76px;
+  flex: 0 0 76px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--studio-border);
+  background: rgba(255,255,255,.97);
+  box-shadow: 0 5px 18px rgba(20,70,35,.06);
+  backdrop-filter: blur(14px);
+}
+.ide-builder-page .toolbar-left { display:flex; align-items:center; gap:11px; min-width:0; }
+.ide-builder-page .toolbar-logo { width:38px; height:38px; flex:0 0 38px; border-radius:4px 14px 4px 14px; border:1px solid #ffffffaa; background:transparent; color:#fff; font-family:"Space Grotesk",sans-serif; font-size:20px; font-weight:700; }
+.ide-builder-page .toolbar-logo.brand-mark { border-color:rgba(12,165,44,.55)!important; color:#0ca52c!important; background:#eff8ef!important; }
+.ide-builder-page .toolbar-heading { display:grid; min-width:0; gap:1px; }
+.ide-builder-page .toolbar-kicker { color:var(--studio-green-dark); font-size:8px; font-weight:950; letter-spacing:.16em; }
+.ide-builder-page .toolbar-title { margin:0; color:var(--studio-ink); font-size:16px; font-weight:900; line-height:1.2; }
+.ide-builder-page .toolbar-subtitle { max-width:230px; overflow:hidden; color:var(--studio-muted); font:10px ui-monospace,SFMono-Regular,Menlo,monospace; text-overflow:ellipsis; white-space:nowrap; }
+.ide-builder-page .toolbar-center { justify-self:center; }
+.ide-builder-page .ide-segmented-control { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:4px; min-width:min(390px,100%); padding:5px; border:1px solid rgba(198,222,198,.8); border-radius:15px; background:rgba(239,248,238,.62); box-shadow:inset 0 1px 2px rgba(37,87,43,.05),0 7px 22px rgba(40,93,45,.08); backdrop-filter:blur(14px); }
+.ide-builder-page .ide-segmented-control label { display:flex; align-items:center; justify-content:center; gap:7px; min-width:0; padding:9px 12px; border:1px solid transparent; border-radius:11px; color:#66806a; font-size:11px; font-weight:800; white-space:nowrap; transition:background .18s ease,border-color .18s ease,box-shadow .18s ease,color .18s ease; }
+.ide-builder-page .ide-segmented-control label.active { border-color:rgba(255,255,255,.82); color:var(--studio-green-dark); background:rgba(255,255,255,.88); box-shadow:0 3px 11px rgba(25,90,39,.12); backdrop-filter:blur(14px); }
+.ide-builder-page .ide-segmented-control label.fusion.active { color:#7044a0; }
+.ide-builder-page .toolbar-right { display:flex; justify-content:flex-end; gap:8px; }
+.ide-builder-page .ide-btn { min-height:38px; border-radius:9px; font-size:11px; }
+.ide-builder-page .ide-btn.primary { background:var(--studio-green); }
+.ide-builder-page .ide-btn.primary:hover:not(:disabled) { background:var(--studio-green-dark); }
+.ide-builder-page .ide-btn.outline { border-color:#d4e5d4; color:#47634b; }
+.ide-builder-page .ide-btn.outline:hover { background:#eff8ef; }
+.ide-spinner { width:13px; height:13px; border:2px solid rgba(255,255,255,.45); border-top-color:#fff; border-radius:50%; animation:studio-spin .7s linear infinite; }
+@keyframes studio-spin { to { transform:rotate(360deg); } }
+.ide-builder-page > .alert { position:relative; z-index:2; margin:10px 14px 0; padding:10px 13px; border-radius:10px; }
+.ide-builder-page > .alert.error { color:#9b2c2c; border-color:#f1baba; background:#fff1f0; }
+.ide-builder-page > .alert.success { color:#247438; border-color:#bde2c3; background:#effaf0; }
+.form-grid-layout.ide-main-grid {
+  display:grid;
+  grid-template-columns:minmax(285px, 330px) minmax(330px, 1fr) minmax(330px, 390px);
+  grid-template-rows:minmax(0,1fr);
+  gap:0;
+  align-items:stretch;
+  flex:1 1 auto;
+  height:auto;
+  min-height:0;
+  max-height:none;
+  margin:0;
+  overflow:hidden;
+  border-radius:0 0 15px 15px;
+}
+.ide-main-grid > .panel-card,
+.ide-main-grid > .panel-card > .bento-form { display:contents; }
+.ide-main-grid .register-bento-grid {
+  grid-column:1;
+  grid-row:1;
+  display:flex;
+  flex-direction:column;
+  gap:0;
+  min-width:0;
+  min-height:0;
+  height:100%;
+  padding:10px;
+  overflow:auto;
+  border-right:1px solid var(--studio-border);
+  background:#fff;
+  overscroll-behavior:contain;
+}
+.ide-main-grid .bento-card {
+  flex:none;
+  width:100%;
+  padding:15px;
+  overflow:visible;
+  border:0;
+  border-bottom:1px solid #e8f0e7;
+  border-radius:0;
+  background:#fff;
+  box-shadow:none;
+}
+.ide-main-grid .bento-card::after { display:none; }
+.ide-main-grid .bento-card-head { margin-bottom:12px; }
+.ide-main-grid .bento-card-head h3 { color:var(--studio-ink); font-size:14px; }
+.ide-main-grid .section-eyebrow { color:#4b9c58; }
+.ide-main-grid .bento-card label { color:#38563d; }
+.ide-main-grid .bento-card input:not([type="checkbox"]):not([type="radio"]),
+.ide-main-grid .bento-card textarea,
+.ide-main-grid .bento-card select,
+.ide-main-grid .inline-element-add input {
+  min-width:0;
+  border:1px solid #d7e7d6;
+  border-radius:8px;
+  background:#fbfdfb;
+  color:#23492c;
+  box-shadow:none;
+}
+.ide-main-grid .input-group,
+.ide-main-grid .code-input-wrap { width:100%; min-width:0; }
+.ide-main-grid .input-group > input:not([type="checkbox"]):not([type="radio"]),
+.ide-main-grid .input-group > select,
+.ide-main-grid .input-group > textarea,
+.ide-main-grid .code-input-wrap > input { display:block; width:100%; max-width:100%; min-width:0; box-sizing:border-box; }
+.ide-main-grid .bento-card input:focus,
+.ide-main-grid .bento-card textarea:focus,
+.ide-main-grid .inline-element-add input:focus { border-color:#55b765; outline:3px solid rgba(29,161,53,.12); }
+.ide-main-grid .rfid-display,
+.ide-main-grid .virtual-source,
+.ide-main-grid .element-hero { border-color:#dcebdd; background:#f5faf4; }
+.ide-main-grid .rfid-display strong,
+.ide-main-grid .element-hero strong { color:#22492c; }
+.ide-main-grid .rfid-display small,
+.ide-main-grid .element-hero small { color:#78907a; }
+.ide-main-grid .auto-code-button,
+.ide-main-grid .auto-code-pill { border-color:#cce5cd; background:#eff9ee; color:#378246; }
+.ide-main-grid .auto-code-pill.locked { border-color:#dce6dc; background:#f4f7f3; color:#728374; }
+.ide-main-grid .code-input-wrap input[readonly] { border-color:#d7e7d6; background:#f5faf4; color:#6c806f; }
+.ide-main-grid .code-preview { color:#628269; }
+.ide-main-grid .code-input-wrap input { padding-right:112px; }
+.ide-main-grid .code-preview { right:10px; max-width:min(98px,34%); font-size:7px; }
+.ide-main-grid .tag-chip { border-color:#cce8ce; background:#f0faf0; color:#398448; }
+.ide-main-grid .stat-input-card { border-color:#e0ebdf; background:#f7fbf6; }
+.ide-main-grid .stat-input-card input { background:transparent; color:#1e492a; }
+.ide-main-grid .stat-input-card small { color:#708774; }
+.ide-main-grid .status-pill { border-color:#dce8db; background:#f3f7f1; color:#718375; }
+.ide-main-grid .status-pill.success { border-color:#bce3c0; background:#eff9ef; color:#368449; }
+.ide-main-grid .status-pill.info,
+.ide-main-grid .status-pill.accent { border-color:#c9e3d0; background:#edf8ef; color:#287c3b; }
+.ide-main-grid .status-pill.warning { border-color:#f0deaf; background:#fff9e9; color:#987326; }
+.ide-main-grid .help-text,
+.ide-main-grid .virtual-source p { color:#758a78; }
+.ide-main-grid .btn-add-element { border-color:#bdddbe; background:#eff8ef; color:#2e7c3b; }
+.ide-main-grid .bento-media-card { display:flex; flex-direction:column; }
+.ide-main-grid .media-hint { border-color:#dcebdd; background:#f6faf5; color:#66806a; }
+.ide-main-grid .media-hint p { color:#718675; }
+.ide-main-grid .ide-advanced-column {
+  grid-column:3;
+  grid-row:1;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  min-width:0;
+  min-height:0;
+  height:100%;
+  padding:12px;
+  overflow:auto;
+  border-left:1px solid var(--studio-border);
+  background:#fbfdfb;
+  overscroll-behavior:contain;
+}
+.ide-main-grid .fusion-recipe-section,
+.ide-main-grid .special-skill-section {
+  flex:none;
+  min-width:0;
+  padding:16px;
+  border:1px solid #dcebdd;
+  border-radius:13px;
+  background:#fff;
+  box-shadow:0 5px 16px rgba(22,76,34,.035);
+}
+.ide-main-grid .fusion-recipe-section h3,
+.ide-main-grid .special-skill-section h3,
+.ide-main-grid .fusion-recipe-section h4,
+.ide-main-grid .special-skill-section h4 { color:#21482b; }
+.ide-main-grid .fusion-recipe-section p,
+.ide-main-grid .special-skill-section p { color:#718675; }
+.ide-main-grid .fusion-material-card,
+.ide-main-grid .fusion-stat-card { border-color:#dcebdd; background:#f7fbf6; }
+.ide-main-grid .fusion-material-title,
+.ide-main-grid .fusion-stat-card strong { color:#274c30; }
+.ide-main-grid .material-remove-btn { border-color:#efcccc; background:#fff5f3; color:#a34c45; }
+.ide-main-grid .zone-option { border-color:#dcebdd; background:#f5faf4; color:#4c6851; }
+.ide-main-grid .zone-option.necro-zone { border-color:#e1d8ef; background:#f7f3fc; color:#725492; }
+.ide-main-grid .fusion-fixed-rules { color:#59745e; }
+.ide-main-grid .necro-skill-preset { align-items:stretch; flex-direction:column; gap:10px; padding:14px; border:1px solid rgba(164,128,199,.34); border-radius:15px; background:rgba(250,247,255,.72); box-shadow:0 8px 20px rgba(72,46,105,.07); backdrop-filter:blur(12px); }
+.ide-main-grid .necro-skill-preset > div { width:100%; }
+.ide-main-grid .necro-skill-preset strong { color:#56347d; line-height:1.35; }
+.ide-main-grid .necro-skill-preset small { max-width:none; color:#76668a; }
+.ide-main-grid .btn-necro-preset { width:100%; align-self:stretch; border:1px solid rgba(87,54,128,.18); border-radius:10px; }
+.ide-main-grid .preview-panel {
+  grid-column:2;
+  grid-row:1;
+  position:relative;
+  top:auto;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  min-width:0;
+  min-height:0;
+  height:100%;
+  padding:26px;
+  overflow:hidden;
+  border:0;
+  border-radius:0;
+  background-color:#f1f8f1;
+  background-image:radial-gradient(#cfe2cf 1px, transparent 1px);
+  background-size:22px 22px;
+  box-shadow:none;
+}
+.ide-main-grid .preview-panel::before { content:"LIVE CARD PREVIEW"; position:absolute; top:17px; left:18px; color:#4b9c58; font-size:9px; font-weight:950; letter-spacing:.16em; }
+.ide-main-grid .preview-panel h3 { position:absolute; top:34px; left:18px; margin:0; color:#1d4729; font-size:16px; text-align:left; }
+.ide-main-grid .preview-desc { position:absolute; top:58px; left:18px; margin:0; color:#758a78; font-size:10px; text-align:left; }
+.ide-main-grid .preview-card-box {
+  width:min(320px, 84%);
+  height:auto;
+  min-height:440px;
+  aspect-ratio: .72;
+  padding:16px;
+  border-radius:19px;
+  box-shadow:0 28px 55px rgba(24,71,35,.18), 0 5px 14px rgba(24,71,35,.1);
+}
+.ide-main-grid .preview-header .p-name { max-width:70%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ide-main-grid .preview-artbox { flex:1; min-height:0; }
+.ide-main-grid .preview-img-asset { width:100%; height:100%; object-fit:cover; }
+.ide-main-grid .preview-identity-tags,
+.ide-main-grid .preview-uid-tag { color:#617864; }
+.ide-main-grid .alert { grid-column:1/-1; }
+
+@media (max-width: 1320px) {
+  .form-grid-layout.ide-main-grid { grid-template-columns:minmax(280px, 330px) minmax(320px,1fr); }
+  .ide-main-grid .ide-advanced-column { grid-column:1/-1; grid-row:2; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); height:auto; max-height:520px; border-top:1px solid var(--studio-border); border-left:0; }
+  .ide-main-grid .preview-panel { grid-column:2; grid-row:1; }
+  .ide-main-grid .register-bento-grid { grid-column:1; grid-row:1; }
+}
+@media (max-width: 820px) {
+  .register-container.ide-builder-page { height:auto; min-height:calc(100dvh - 76px); }
+  .ide-builder-page .ide-toolbar { position:relative; grid-template-columns:1fr; gap:10px; }
+  .ide-builder-page .toolbar-center { justify-self:stretch; overflow-x:auto; }
+  .ide-builder-page .ide-segmented-control { width:max-content; max-width:100%; }
+  .ide-builder-page .toolbar-right { justify-content:stretch; }
+  .ide-builder-page .toolbar-right .ide-btn { flex:1; }
+  .form-grid-layout.ide-main-grid { display:flex; flex-direction:column; height:auto; max-height:none; min-height:0; overflow:visible; }
+  .ide-main-grid > .panel-card,
+  .ide-main-grid > .panel-card > .bento-form { display:contents; }
+  .ide-main-grid .register-bento-grid { order:1; height:auto; max-height:none; overflow:visible; border-right:0; }
+  .ide-main-grid .preview-panel { order:2; min-height:590px; height:auto; }
+  .ide-main-grid .ide-advanced-column { order:3; display:flex; height:auto; max-height:none; overflow:visible; border-top:1px solid var(--studio-border); }
+  .ide-main-grid .preview-card-box { width:min(320px,90%); min-height:430px; }
+  .ide-main-grid .bento-card { padding:14px 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ide-spinner { animation:none; }
+  .ide-builder-page *, .ide-builder-page *::before, .ide-builder-page *::after { scroll-behavior:auto !important; transition-duration:.01ms !important; }
+}
 
 </style>

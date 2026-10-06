@@ -3,6 +3,7 @@ import SearchableSelect from "../components/SearchableSelect.vue";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { supabase } from "../lib/supabase";
+import { normalizeTcgType } from "../utils/tcgTypes";
 
 const route = useRoute();
 const router = useRouter();
@@ -21,6 +22,7 @@ const selectedSkill = ref("All");
 const selectedLearningArc = ref("All");
 const currentPage = ref(1);
 const pageSize = 12;
+const tcgTypeOptions = ["Knight", "Fire", "Water", "Forest", "Thunder", "Light", "Dark"];
 const fusionSearch = ref("");
 const fusionElement = ref("All");
 const fusionRarity = ref("All");
@@ -36,7 +38,7 @@ const joinError = ref("");
 const selectedCard = ref(null);
 const tutorialMediaErrors = ref({});
 const tutorialMedia = [
-  { key: "deck-shuffle", title: "Deck dan pengambilan kartu", file: "deck-shuffle.gif", caption: "Kartu pemain digabung dengan 20 kartu arena, dikocok, lalu diambil 20 kartu teratas.", icon: "🎴" },
+  { key: "deck-shuffle", title: "Deck dan pengambilan kartu", file: "deck-shuffle.gif", caption: "Kartu arena dan kartu bawaan pemain dikocok; jumlah kartu yang diambil mengikuti Game Setup (default 20).", icon: "🎴" },
   { key: "playerbattle", title: "Halaman PlayerBattle", file: "playerbattle-overview.gif", caption: "Kenali giliran, HP, gauge, kartu aktif, bench, graveyard, dan sisa deck.", icon: "🕹️" },
   { key: "summon-attack", title: "Summon dan attack", file: "summon-attack.gif", caption: "Scan kartu saat giliranmu, pilih attacker, lalu tentukan target serangan.", icon: "⚔️" },
   { key: "bench-graveyard", title: "Bench dan graveyard", file: "bench-graveyard.gif", caption: "Pindahkan cadangan dari bench dan pelajari kartu yang masuk graveyard.", icon: "🪦" },
@@ -68,15 +70,7 @@ const normalCards = computed(() => {
   }
   return [...unique.values()];
 });
-const typeFilters = computed(() => {
-  const types = new Map();
-  for (const card of normalCards.value) {
-    const label = String(card.element ?? "Other").trim() || "Other";
-    const key = label.toLocaleLowerCase();
-    if (!types.has(key)) types.set(key, label);
-  }
-  return ["All", ...[...types.values()].sort((a, b) => a.localeCompare(b))];
-});
+const typeFilters = computed(() => ["All", ...tcgTypeOptions]);
 const uniqueCardValues = (readValue, compare = (a, b) => a.localeCompare(b)) => {
   const values = new Map();
   for (const card of normalCards.value) {
@@ -103,7 +97,7 @@ const filteredCards = computed(() => {
   const term = search.value.trim().toLocaleLowerCase();
   return normalCards.value.filter((card) => {
     const cardSkills = skillsForCard(card);
-    return (selectedType.value === "All" || String(card.element ?? "Other").toLowerCase() === selectedType.value.toLowerCase())
+    return (selectedType.value === "All" || normalizeTcgType(card.element) === normalizeTcgType(selectedType.value))
       && (selectedRarity.value === "All" || String(card.rarity ?? "").toLowerCase() === selectedRarity.value.toLowerCase())
       && (selectedSkill.value === "All" || cardSkills.some((skill) => String(skill.name ?? "").toLowerCase() === selectedSkill.value.toLowerCase()))
       && (selectedLearningArc.value === "All" || String(card.metadata?.learning_arc ?? "").toLowerCase() === selectedLearningArc.value.toLowerCase())
@@ -199,7 +193,7 @@ const toggleFusionRecipe = (cardId) => {
   else next.add(key);
   expandedFusionRecipes.value = next;
 };
-const fusionElementFilters = computed(() => ["All", ...[...new Set(fusionEntries.value.map(({ card }) => String(card.element ?? "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))]);
+const fusionElementFilters = computed(() => ["All", ...tcgTypeOptions]);
 const fusionRarityFilters = computed(() => ["All", ...[...new Set(fusionEntries.value.map(({ card }) => String(card.rarity ?? "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))]);
 const filteredFusionEntries = computed(() => {
   const term = fusionSearch.value.trim().toLocaleLowerCase();
@@ -216,7 +210,7 @@ const filteredFusionEntries = computed(() => {
     const availabilityMatch = fusionAvailability.value === "All"
       || (fusionAvailability.value === "active" && entry.recipes.some((recipe) => recipe.is_active))
       || (fusionAvailability.value === "preview" && entry.recipes.every((recipe) => !recipe.is_active));
-    return (fusionElement.value === "All" || String(entry.card.element ?? "").toLowerCase() === fusionElement.value.toLowerCase())
+    return (fusionElement.value === "All" || normalizeTcgType(entry.card.element) === normalizeTcgType(fusionElement.value))
       && (fusionRarity.value === "All" || String(entry.card.rarity ?? "").toLowerCase() === fusionRarity.value.toLowerCase())
       && availabilityMatch
       && (!term || searchText.includes(term));
@@ -237,12 +231,17 @@ const visualToken = (value) => String(value ?? "")
   .replace(/[\u0300-\u036f]/g, "")
   .replace(/[^a-z0-9]+/g, "-")
   .replace(/^-|-$/g, "") || "unknown";
-const elementClass = (element) => `element-${visualToken(element)}`;
+const canonicalElement = (element) => ({
+  electric: "thunder", lightning: "thunder", wind: "thunder",
+  grass: "forest", nature: "forest", ice: "water", holy: "light",
+  warrior: "knight", shadow: "dark",
+}[visualToken(element)] ?? visualToken(element));
+const elementClass = (element) => `element-${canonicalElement(element)}`;
 const rarityClass = (rarity) => `rarity-${visualToken(rarity)}`;
 const elementIcon = (element) => ({
-  fire: "🔥", water: "💧", grass: "🌿", electric: "⚡", ice: "❄️", dark: "🌑",
-  light: "✨", wind: "🌪️", neutral: "◉",
-}[visualToken(element)] ?? "✦");
+  knight: "🛡️", fire: "🔥", water: "💧", forest: "🌿", thunder: "⚡",
+  light: "✨", dark: "🌑", neutral: "◉",
+}[canonicalElement(element)] ?? "✦");
 const rarityIcon = (rarity) => ({
   common: "●", uncommon: "◆", rare: "★", epic: "✦", legendary: "✹", mythic: "◈",
 }[visualToken(rarity)] ?? "◇");
@@ -331,11 +330,11 @@ const joinGame = async () => {
         <div class="guide-section-title"><span class="guide-icon">🎴</span><div><span class="eyebrow">SEBELUM BATTLE</span><h3 id="guide-deck-title">Siapkan kartu dan akses pemain</h3></div></div>
         <div class="guide-flow">
           <article><b>01</b><div><h4>Bawa kartu jika punya</h4><p>Bawa Kartu yang ingin kamu mainkan. Kartu harus yang diberikan oleh timedoor.</p></div></article>
-          <article><b>02</b><div><h4>Susun deck battle</h4><p>Gabungkan 20 kartu arena dengan kartu  yang dibawa pemain (jika ada), kocok seluruhnya, lalu ambil 20 kartu teratas untuk menjadi deck pertandingan.</p></div></article>
+          <article><b>02</b><div><h4>Susun deck battle</h4><p>Gabungkan kartu arena dengan kartu yang dibawa pemain (jika ada), lalu kocok. Ambil jumlah teratas sesuai Battle Deck Size di Game Setup (default 20) untuk menjadi deck pertandingan fisik.</p></div></article>
           <article><b>03</b><div><h4>Masuk ke halamanmu</h4><p>Di Home pilih <b>Masuk battle</b>. Kode pemain dari Game Setup langsung membuka PlayerBattle milikmu; kode battle mengharuskanmu memilih Player 1 atau Player 2 atau sesuai dengan namamu.</p></div></article>
-          <article><b>04</b><div><h4>Scan kartu awal</h4><p>Scan sampai jumlah Initial Cards yang diminta terpenuhi (sesuai default yang ada). Setelah kedua pemain memenuhi jumlah awal, battle dimulai.</p></div></article>
+          <article><b>04</b><div><h4>Scan kartu awal</h4><p>Scan jumlah kartu awal yang ditentukan di Game Setup. Kartu awal hanya mengisi slot Active. Setelah kedua pemain siap, battle dimulai dan jumlah AP per giliran mengikuti konfigurasi.</p></div></article>
         </div>
-        <p class="guide-note"><strong>Status implementasi:</strong> alur gabung, shuffle, lalu ambil 20 kartu teratas adalah proses sebelum battle dimulai.</p>
+        <p class="guide-note"><strong>Aturan persiapan fisik:</strong> gabungkan kartu arena dan kartu bawaan, kocok, lalu gunakan jumlah kartu sesuai Battle Deck Size di Game Setup (default 20). Proses hand dan pengocokan tetap dilakukan di meja, bukan di PlayerBattle.</p>
         <section class="guide-media-panel" aria-labelledby="guide-media-title">
           <div class="guide-media-heading"><div><span class="eyebrow">VIDEO PANDUAN</span><h4 id="guide-media-title">Lihat mekaniknya dalam GIF</h4></div><p>Slot ini siap diisi dengan rekaman singkat dari PlayerBattle.</p></div>
           <div class="guide-media-grid">
@@ -354,28 +353,31 @@ const joinGame = async () => {
       <div class="guide-section-title guide-board-title"><span class="guide-icon">🕹️</span><div><span class="eyebrow">HALAMAN PLAYERBATTLE</span><h3>Kenali arena dan panelnya</h3><p>Setiap pemain bermain dari halaman pribadinya. Public Battle/TV menampilkan jalannya pertandingan untuk ditonton.</p></div></div>
       <div class="guide-board-grid">
         <article class="guide-card"><span class="guide-card-number">01</span><h4>Bar status di bagian atas</h4><p>Lihat HP kamu dan lawan, gauge Ultimate, sisa Physical Deck, ronde, giliran aktif, serta efek status. Tombol aksi hanya dapat dipakai oleh pemain yang sedang mendapat giliran. Tombol Sound mengaktifkan atau mematikan audio battle.</p></article>
-        <article class="guide-card"><span class="guide-card-number">02</span><h4>Active Field</h4><p>Kartu di sini dapat bertarung dan memakai skill. Pilih kartu untuk menjadikannya attacker atau sumber skill. Batas default adalah 4 kartu aktif; Game Setup dapat mengubahnya.</p></article>
-        <article class="guide-card"><span class="guide-card-number">03</span><h4>Bench dan Graveyard</h4><p>Bench berisi kartu cadangan (default maksimal 4); saat giliranmu, pindahkan kartu secara drag jika aksinya legal. Graveyard berisi kartu yang kalah atau dibuang. Skill tertentu dapat menghidupkan kartu dari sana.</p></article>
-        <article class="guide-card"><span class="guide-card-number">04</span><h4>Alur giliran</h4><p>Periksa indikator giliran, pilih kartu Active, lalu lakukan aksi yang tersedia. Setelah aksi diterima, giliran berpindah sesuai aturan battle. Serangan mengurangi HP kartu; kartu dengan HP 0 masuk Graveyard. HP pemain dan HP kartu adalah dua hal yang berbeda.</p></article>
+        <article class="guide-card"><span class="guide-card-number">02</span><h4>Active Field</h4><p>Jumlah slot Active mengikuti Game Setup. Kartu Active dapat menyerang dan menjadi sumber skill maupun Combo. Setiap giliran memberi AP sesuai konfigurasi; jumlah serangan maksimal tiap kartu juga mengikuti Game Setup.</p></article>
+        <article class="guide-card"><span class="guide-card-number">03</span><h4>Bench dan Graveyard</h4><p>Jumlah slot Bench mengikuti Game Setup. Kartu hasil scan selalu masuk Active; jika Active penuh, pindahkan kartu Active ke Bench sebelum scan summon. Kartu Bench tidak menyerang dan tidak ikut Combo. Kartu Bench bisa dikembalikan ke slot Active yang kosong, atau ditukar dengan kartu Active saat semua slot penuh. Graveyard berisi kartu KO.</p></article>
+        <article class="guide-card"><span class="guide-card-number">04</span><h4>Alur giliran</h4><p>Gunakan aksi sampai AP habis atau pilih Akhiri Giliran. Biaya tiap aksi dan timer giliran mengikuti Game Setup. HP kartu yang mencapai 0 masuk Graveyard; HP pemain dan HP kartu adalah dua hal berbeda. Status diproses server pada batas giliran/ronde yang ditentukan.</p></article>
       </div>
 
       <section class="guide-actions-panel" aria-labelledby="guide-actions-title">
         <div class="guide-section-title"><span class="guide-icon">⚔️</span><div><span class="eyebrow">CONTROL CONSOLE</span><h3 id="guide-actions-title">Fungsi setiap tombol aksi</h3><p>Pilih kartu Active lebih dulu jika sebuah aksi memerlukannya. Ikuti status READY/LOCKED dan detail aksi yang tampil. Panel Action Information menjelaskan syarat/efek; Fusion History mencatat hasil fusion yang sudah terjadi.</p></div></div>
         <div class="guide-action-grid">
-          <article><b>📡 SUMMON</b><p>Mulai mode scan, lalu tempelkan RFID ke reader pemainmu. Kartu masuk ke Active jika slot masih tersedia dan jatah deck belum habis.</p></article>
-          <article><b>⚔ ATTACK</b><p>Pilih attacker, tekan Attack, lalu pilih kartu Active lawan sebagai target. Damage dasar kartu dihitung dari ATK dikurangi DEF (minimal 1). Jika lawan tidak punya kartu Active dan Direct Attack diaktifkan, serangan mengenai HP pemain sebesar 50% ATK. Normal Attack memberi +10 Ultimate Gauge ke attacker dan +5 ke pemain yang diserang.</p></article>
-          <article><b>🛡 DEFENSE</b><p>Mengurangi 50% damage dari satu hit berikutnya yang diterima, lalu habis setelah menahan hit itu. Defense juga memberi +5 Ultimate Gauge.</p></article>
-          <article><b>⚡ ULTIMATE</b><p>Terbuka saat gauge mencapai 100% dan ada kartu Active lawan. Menyerang semua kartu Active lawan dengan ATK ×2 per target, mengabaikan DEF kartu, lalu gauge kembali ke 0. Ultimate tidak menyerang HP pemain secara langsung.</p></article>
-          <article><b>✚ HEAL</b><p>Memulihkan 35% HP maksimum pemain. Tersedia sekali per battle saat HP pemain sudah 50% atau kurang.</p></article>
-          <article class="guide-synergy-card"><b>✧ SYNERGY</b><p>Memerlukan minimal 2 kartu Active yang tidak Exhausted dan elemennya sama. Tiap elemen Synergy dapat dipakai sekali per battle; jumlah kartu menentukan kekuatannya.</p><details class="guide-details"><summary>Lihat efek tiap elemen</summary><ul><li><b>Fire:</b> ATK ×1,5 / ×1,8 / ×2,2.</li><li><b>Water:</b> kurangi damage dari hit berikutnya yang diterima sebesar 40% / 60% / 80%.</li><li><b>Grass:</b> pulihkan 30% / 45% / 60% Max HP.</li><li><b>Electric:</b> tambah 40 / 70 / 100 Ultimate Gauge.</li><li><b>Ice:</b> damage serangan lawan berikutnya berkurang 25% / 40% / 60%.</li><li><b>Dark:</b> ATK ×1,4 / ×1,7 / ×2 dan abaikan DEF kartu.</li></ul><small>Urutan nilai: 2 / 3 / 4+ kartu Active dengan elemen sama.</small></details></article>
-          <article><b>✨ SPECIAL</b><p>Skill khusus kartu Active yang dipilih. Modalnya menampilkan target, biaya gauge, cooldown, jumlah penggunaan, dan apakah skill menghabiskan giliran.</p></article>
-          <article><b>🧬 FUSION</b><p>Buka daftar resep yang siap, cek jumlah dan lokasi material, lalu lihat kartu hasil serta tujuan material. Resep memberi tahu apakah fusion memakai giliran. Resep berlabel Preview hanya referensi dan belum bisa dipakai di battle.</p></article>
+          <article><b>📡 SUMMON</b><p>Tekan Summon lalu scan RFID dari kartu fisik yang sedang kamu pegang. Kartu hanya dapat masuk ke slot Active yang kosong. Jika Active penuh, pindahkan satu Active ke Bench dahulu; scan tidak pernah mengirim kartu summon langsung ke Bench. Jumlah kartu dan biaya AP mengikuti Game Setup.</p></article>
+          <article><b>⚔ ATTACK</b><p>Pilih kartu Active, tekan Attack, lalu pilih kartu Active lawan. Damage dasar adalah ATK − DEF, minimal 1. Jika lawan tidak punya Active dan Direct Attack aktif, damage ke HP pemain adalah 50% ATK. Batas serangan tiap kartu per giliran mengikuti Game Setup.</p></article>
+          <article><b>🛡 DEFENSE · PASIF</b><p>Defense bukan tombol aksi pada TCG v1. Stat DEF otomatis mengurangi damage kartu. Shield hanya muncul jika skill kartu memberi efek Shield; baca target dan durasi pada deskripsi skill.</p></article>
+          <article><b>⚡ ULTIMATE</b><p>Biaya AP mengikuti Game Setup. Memerlukan gauge 100% dan kartu Active lawan. Ultimate menyerang semua Active lawan dengan ATK ×2 per target dan mengabaikan DEF kartu. Gauge kembali ke 0; aksi ini tidak menyerang HP pemain secara langsung.</p></article>
+          <article><b>✚ HEAL</b><p>Biaya AP mengikuti Game Setup. Memulihkan 35% HP maksimum pemain, sekali per battle saat HP pemain 50% atau kurang.</p></article>
+          <article class="guide-synergy-card"><b>✧ SYNERGY</b><p>Biaya AP mengikuti Game Setup. Memerlukan kartu Active dan syarat elemen/target yang tampil pada panel aksi. Baca status READY atau LOCKED sebelum memilihnya; synergy memakai aturan skill game yang ada.</p></article>
+          <article class="guide-synergy-card"><b>🌀 COMBO ATTACK</b><p>Pilih 2 kartu Active yang masih dapat menyerang; salah satunya menjadi kartu utama. Jika diaktifkan di Game Setup, pilih 3 Active untuk Triple Combo atau 4 Active untuk Formation. Semua peserta berasal dari Active—kartu Bench tidak dapat membantu. Targetnya kartu Active lawan; kombinasi tipe menentukan efek, dan AP mengikuti jumlah peserta serta konfigurasi.</p><details class="guide-details"><summary>Lihat aturan combo tipe</summary><ul><li><b>Knight + Fire · Blazing Fortress:</b> bonus damage dan Shield.</li><li><b>Knight + Water · Frozen Bastion:</b> tembus sebagian DEF dan Freeze.</li><li><b>Knight + Forest · Living Fortress:</b> heal dan Shield.</li><li><b>Knight + Thunder · Thunder Guard:</b> bonus damage dan Shield.</li><li><b>Knight + Light · Holy Guard:</b> heal dan Shield.</li><li><b>Knight + Dark · Shadow Fortress:</b> tembus DEF dan Curse.</li><li><b>Fire + Water · Steam Burst:</b> bonus damage dan Burn.</li><li><b>Fire + Forest · Wildfire Growth:</b> bonus damage dan Burn.</li><li><b>Fire + Thunder · Overcharge Flame:</b> bonus damage lebih besar dan Burn.</li><li><b>Fire + Light · Solar Flame:</b> bonus damage dan heal.</li><li><b>Dark + Fire · Inferno Curse:</b> bonus damage dan Burn.</li><li><b>Forest + Water · Nature Recovery:</b> heal peserta.</li><li><b>Thunder + Water · Electro Surge:</b> bonus damage dan Stun.</li><li><b>Light + Water · Purifying Tide:</b> heal dan cleanse.</li><li><b>Dark + Water · Abyss Current:</b> bonus damage dan Freeze.</li><li><b>Forest + Thunder · Nature Surge:</b> bonus damage dan Poison.</li><li><b>Forest + Light · Sacred Growth:</b> heal peserta.</li><li><b>Dark + Forest · Corrupted Roots:</b> bonus damage dan Poison.</li><li><b>Light + Thunder · Radiant Speed:</b> bonus damage dan Shield.</li><li><b>Dark + Thunder · Shadow Blitz:</b> bonus damage, tembus DEF, dan Curse.</li><li><b>Dark + Light · Eclipse:</b> bonus damage, tembus DEF, dan Shield.</li><li><b>Dua Knight/Fire/Water/Forest/Thunder/Light/Dark:</b> combo tipe sama masing-masing memiliki aturan sendiri.</li></ul><small>Triple Combo dan Formation hanya tersedia bila diaktifkan dan aturan kombinasinya terdaftar. Efek status berlangsung satu giliran target.</small></details></article>
+          <article><b>✨ SPECIAL</b><p>Skill khusus dari kartu Active yang dipilih. Biaya AP mengikuti Game Setup, kecuali kartu menetapkan override. Panel detail menampilkan target, biaya gauge, cooldown, durasi, batas penggunaan, dan apakah skill memakai giliran.</p></article>
+          <article><b>🧬 FUSION</b><p>Buka resep, periksa jumlah dan lokasi setiap material, lalu konfirmasi. Fusion mengonsumsi material sesuai resep dan membuat kartu hasil. Biaya AP mengikuti Game Setup. Fusion adalah aksi terpisah dari Combo Attack.</p></article>
+          <article><b>↔ PINDAH POSISI</b><p>Seret kartu Active ke Bench untuk mengosongkan slot Active. Kartu Bench dapat kembali ke slot Active yang kosong; jika semua slot penuh, pilih Active yang akan ditukar. Biaya AP dan kapasitas slot mengikuti Game Setup.</p></article>
+          <article><b>⏭ AKHIRI GILIRAN</b><p>Gunakan tombol Akhiri Giliran jika masih ada AP yang ingin disimpan atau kamu selesai menyusun strategi. Sisa AP tidak dibawa ke turn berikutnya. Jika timer habis, giliran berpindah otomatis.</p></article>
         </div>
       </section>
 
       <div class="guide-learning-grid">
         <article class="guide-card guide-feature-card"><span class="guide-card-number">QUIZ</span><h4>Ronde pertanyaan dan belajar</h4><p>Admin mengatur level, topik, interval ronde, batas waktu, dan bonus. Saat quiz muncul, aksi battle dijeda. Jawab pilihan ganda, cari baris kode yang salah, atau susun urutan blok. Gunakan petunjuk bertahap; sesudah menjawab, baca penjelasan, jawaban benar, dan rekomendasi materi jika jawabanmu keliru. Bonus hanya diberikan jika diaktifkan pada setup.</p></article>
-        <article class="guide-card guide-feature-card"><span class="guide-card-number">EFEK</span><h4>Status dan efek satu turn</h4><p>Efek elemental pasif muncul setelah basic attack tertarget berhasil mengenai kartu yang masih bertahan. Fire memberi Burn (−10 HP berkala), Water/Ice memberi Freeze (mengunci Attack dan Ultimate), Electric memberi Stun (mengunci Attack, Defense, Ultimate, Heal, Synergy, dan Special), Grass memberi Poison (−8 HP berkala), dan Dark memberi Curse (−8 HP berkala). Status berakhir setelah satu turn pihak yang terkena. Wind dan Fusion tidak menambahkan status pasif dari basic attack; skill khususnya mengikuti deskripsi kartu.</p></article>
+        <article class="guide-card guide-feature-card"><span class="guide-card-number">EFEK</span><h4>Status dan akhir ronde</h4><p>Efek elemental pasif dipicu basic attack tertarget yang berhasil mengenai kartu yang masih bertahan. Fire memberi Burn, Water/Ice memberi Freeze, Electric memberi Stun, Grass memberi Poison, dan Dark memberi Curse sesuai aturan server. Periksa animasi kartu untuk melihat status aktif. Durasi dihitung server pada batas turn/ronde; skill khusus mengikuti deskripsi kartunya. Wind dan Fusion tidak menambahkan status pasif dari basic attack.</p></article>
         <article class="guide-card guide-feature-card"><span class="guide-card-number">KARTU</span><h4>Baca deskripsi sebelum menyusun strategi</h4><p>Di halaman Kartu, klik kartu untuk membuka detail. Baca elemen, HP/ATK/DEF, lore, misi belajar, dan teks skill—termasuk target, biaya, cooldown, durasi, syarat, serta batas pemakaian. Skill bertanda <b>Belum aktif di Battle</b> adalah data katalog dan belum bisa digunakan; gunakan skill yang tersedia dan berstatus Ready di PlayerBattle. Tidak semua kartu berelemen punya efek pasif yang sama.</p><div class="guide-inline-links"><RouterLink to="/cards">Buka katalog kartu →</RouterLink><RouterLink to="/fusion">Lihat resep fusion →</RouterLink></div></article>
       </div>
 
@@ -486,6 +488,9 @@ const joinGame = async () => {
 .legend-chip i{font-size:9px}
 .legend-chip.element-fire,.unit-art b.element-fire,.identity-chip.element-fire{--legend-bg:#fff0e9;--legend-border:#ffd1bd;--legend-ink:#b54e24}
 .legend-chip.element-water,.unit-art b.element-water,.identity-chip.element-water{--legend-bg:#e9f5ff;--legend-border:#c6e3ff;--legend-ink:#2373b4}
+.legend-chip.element-forest,.unit-art b.element-forest,.identity-chip.element-forest{--legend-bg:#edf8e9;--legend-border:#cde8c2;--legend-ink:#4b8738}
+.legend-chip.element-thunder,.unit-art b.element-thunder,.identity-chip.element-thunder{--legend-bg:#fff9dc;--legend-border:#f4e49a;--legend-ink:#8d7100}
+.legend-chip.element-knight,.unit-art b.element-knight,.identity-chip.element-knight{--legend-bg:#eef2f4;--legend-border:#cbd8de;--legend-ink:#45616d}
 .legend-chip.element-grass,.unit-art b.element-grass,.identity-chip.element-grass{--legend-bg:#edf8e9;--legend-border:#cde8c2;--legend-ink:#4b8738}
 .legend-chip.element-electric,.unit-art b.element-electric,.identity-chip.element-electric{--legend-bg:#fff9dc;--legend-border:#f4e49a;--legend-ink:#8d7100}
 .legend-chip.element-ice,.unit-art b.element-ice,.identity-chip.element-ice{--legend-bg:#e8fbfb;--legend-border:#c1ebeb;--legend-ink:#237e83}

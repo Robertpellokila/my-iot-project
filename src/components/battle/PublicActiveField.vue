@@ -1056,6 +1056,16 @@ const currentTurn =
         ?.current_turn ??
       "p1",
   );
+const actionPointsEnabled = computed(() =>
+  String(props.battle?.ruleset ?? "").toLowerCase() === "tcg_v1" &&
+  Boolean(props.battle?.action_points_enabled),
+);
+const player1ActionPoints = computed(() =>
+  Math.max(0, Number(props.battle?.player1_action_points ?? 0) || 0),
+);
+const player2ActionPoints = computed(() =>
+  Math.max(0, Number(props.battle?.player2_action_points ?? 0) || 0),
+);
 const turnText =
   computed(() => {
     if (
@@ -1107,6 +1117,8 @@ const p2Avatar =
         ?.player2_avatar_url ??
       "",
   );
+const isAvatarImage = (value) =>
+  /^(https?:\/\/|\/|data:image\/)/i.test(String(value ?? "").trim());
 /* =========================================================
    POSITION CAPTURE
 ========================================================= */
@@ -1166,14 +1178,8 @@ onUpdated(() => {
           ref="p1AvatarRef"
           class="avatar blue"
         >
-          <img
-            v-if="p1Avatar"
-            :src="p1Avatar"
-            :alt="p1Name"
-          />
-          <span v-else>
-            👦🏻
-          </span>
+          <img v-if="isAvatarImage(p1Avatar)" :src="p1Avatar" :alt="p1Name" />
+          <span v-else>{{ p1Avatar || "👦🏻" }}</span>
         </div>
         <div class="player-info">
           <div class="player-name-row">
@@ -1282,6 +1288,9 @@ onUpdated(() => {
           <span>
             MAX ACTIVE
             {{ maxActive }}
+          </span>
+          <span v-if="actionPointsEnabled" class="public-ap-meta">
+            POIN GILIRAN · P1 {{ player1ActionPoints }} / P2 {{ player2ActionPoints }}
           </span>
           <span>
             {{
@@ -1397,14 +1406,8 @@ onUpdated(() => {
           ref="p2AvatarRef"
           class="avatar red"
         >
-          <img
-            v-if="p2Avatar"
-            :src="p2Avatar"
-            :alt="p2Name"
-          />
-          <span v-else>
-            🧑🏽‍🦱
-          </span>
+          <img v-if="isAvatarImage(p2Avatar)" :src="p2Avatar" :alt="p2Name" />
+          <span v-else>{{ p2Avatar || "🧑🏽‍🦱" }}</span>
         </div>
       </section>
     </header>
@@ -2168,6 +2171,12 @@ onUpdated(() => {
   background: #eef5f8;
   font-size: 4.6px;
   font-weight: 900;
+}
+.battle-meta .public-ap-meta {
+  padding-inline: 7px;
+  color: #187a32;
+  background: #e9f7e9;
+  font-size: 5.8px;
 }
 /* =========================================================
    FIELD

@@ -93,6 +93,12 @@ const props = defineProps({
 // =========================================================
 
 const isDisplayOnly = computed(() => Boolean(props.displayOnly));
+const displayedMaxActive = computed(() =>
+  Math.max(1, Number(props.sharedBattle?.max_active ?? 4) || 4),
+);
+const displayedMaxBench = computed(() =>
+  Math.max(0, Number(props.sharedBattle?.max_bench ?? 4) || 0),
+);
 
 // =========================================================
 // AUDIO
@@ -1277,6 +1283,8 @@ onMounted(() => {
       :player2-active="displayPlayer2Active"
       :player1-bench="displayPlayer1Bench"
       :player2-bench="displayPlayer2Bench"
+      :max-active="displayedMaxActive"
+      :max-bench="displayedMaxBench"
       :latest-battle-event="latestBattleEvent"
       :selected-card="isDisplayOnly ? null : selectedBattleCard"
       :selected-bench-card="isDisplayOnly ? null : selectedBenchCard"

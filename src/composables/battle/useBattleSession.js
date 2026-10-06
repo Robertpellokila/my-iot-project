@@ -14,6 +14,8 @@ import {
   supabase,
 } from "../../lib/supabase";
 
+import { playerErrorMessage } from "../../utils/playerErrorMessage.js";
+
 
 export const useBattleSession =
   () => {
@@ -968,9 +970,10 @@ export const useBattleSession =
           );
 
 
-          questionError.value =
-            err?.message ??
-            "Pertanyaan gagal dimuat.";
+          questionError.value = playerErrorMessage(
+            err,
+            "Pertanyaan belum dapat dimuat. Coba lagi sebentar.",
+          );
 
 
           currentQuestion.value =
@@ -1184,9 +1187,10 @@ export const useBattleSession =
           );
 
 
-          questionError.value =
-            err?.message ??
-            "Coding challenge gagal dimuat.";
+          questionError.value = playerErrorMessage(
+            err,
+            "Coding challenge belum dapat dimuat. Coba lagi sebentar.",
+          );
 
 
           return null;
@@ -1706,9 +1710,10 @@ export const useBattleSession =
           );
 
 
-          error.value =
-            err?.message ??
-            "Battle tidak ditemukan.";
+          error.value = playerErrorMessage(
+            err,
+            "Battle tidak ditemukan atau tidak dapat dimuat.",
+          );
 
 
           battle.value =

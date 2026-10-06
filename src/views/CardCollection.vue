@@ -9,6 +9,7 @@ import {
 import {
   supabase,
 } from "../lib/supabase";
+import { normalizeTcgType } from "../utils/tcgTypes.js";
 
 
 // =========================================================
@@ -49,11 +50,12 @@ const pageSize = 12;
 
 const elements = [
   "All",
+  "Knight",
   "Fire",
   "Water",
-  "Grass",
-  "Electric",
-  "Ice",
+  "Forest",
+  "Thunder",
+  "Light",
   "Dark",
 ];
 
@@ -171,13 +173,8 @@ const filteredCards =
             selectedElement.value ===
               "All"
             ||
-            String(
-              card.element ??
-              ""
-            )
-              .toLowerCase() ===
-            selectedElement.value
-              .toLowerCase();
+            normalizeTcgType(card.element) ===
+              normalizeTcgType(selectedElement.value);
 
 
           return (
@@ -233,17 +230,8 @@ const elementCount =
     }
 
 
-    const matching = cards.value.filter(
-      card =>
-        String(
-          card.element ??
-          ""
-        )
-          .toLowerCase() ===
-        String(
-          element
-        )
-          .toLowerCase()
+    const matching = cards.value.filter((card) =>
+      normalizeTcgType(card.element) === normalizeTcgType(element),
     );
     return new Set(matching.map((card) => String(card.name ?? "").trim().toLocaleLowerCase())).size;
 
@@ -296,12 +284,14 @@ const emptySlots =
 const normalizeElement =
   element => {
 
-    return String(
+    const raw = String(
       element ??
       "Neutral"
     )
       .trim()
       .toLowerCase();
+
+    return normalizeTcgType(raw) ?? raw;
 
   };
 
@@ -317,13 +307,25 @@ const elementLabel =
         "WATER",
 
       grass:
-        "GRASS",
+        "FOREST",
 
       electric:
-        "ELECTRIC",
+        "THUNDER",
+
+      forest:
+        "FOREST",
+
+      thunder:
+        "THUNDER",
+
+      knight:
+        "KNIGHT",
+
+      light:
+        "LIGHT",
 
       ice:
-        "ICE",
+        "WATER",
 
       dark:
         "DARK",
@@ -363,8 +365,20 @@ const elementIcon =
       electric:
         "⚡",
 
+      forest:
+        "🌿",
+
+      thunder:
+        "⚡",
+
+      knight:
+        "🛡️",
+
+      light:
+        "✨",
+
       ice:
-        "❄️",
+        "💧",
 
       dark:
         "🌑",
@@ -2323,6 +2337,20 @@ input {
     );
 }
 
+.album-card.forest {
+  background: linear-gradient(135deg, #d7f3d3, #79c77c);
+}
+.album-card.thunder {
+  background: linear-gradient(135deg, #fff6bc, #ffd83c);
+}
+.album-card.knight {
+  background: linear-gradient(135deg, #e8edf0, #aebdc5);
+}
+.album-card.light {
+  color: #493b14;
+  background: linear-gradient(135deg, #fff9db, #f4dc86);
+}
+
 
 .album-card.grass {
   background:
@@ -2978,6 +3006,20 @@ input {
       #d9f2ff,
       #67b7f5
     );
+}
+
+.detail-card.forest {
+  background: linear-gradient(135deg, #ddf5da, #75c679);
+}
+.detail-card.thunder {
+  background: linear-gradient(135deg, #fff8ca, #ffdb42);
+}
+.detail-card.knight {
+  background: linear-gradient(135deg, #edf1f2, #a9bac3);
+}
+.detail-card.light {
+  color: #493b14;
+  background: linear-gradient(135deg, #fffbe7, #f1db8e);
 }
 
 

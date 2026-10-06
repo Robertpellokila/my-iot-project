@@ -1058,38 +1058,6 @@ card,
 
   );
 
-/*
-
-  * Saat card Bench mulai di-drag,
-
-  * viewer ditutup supaya Active Field
-
-  * terlihat sebagai drop target.
-
-  */
-
-setTimeout(() => {
-
-localViewerOpen.value =
-
-false;
-
-emit(
-
-"viewer-close",
-
-{
-
-zone:
-
-props.zone,
-
-},
-
-  );
-
-}, 70);
-
 };
 
 // =========================================================
@@ -1121,6 +1089,10 @@ emit(
 card,
 
   );
+
+localViewerOpen.value = false;
+
+emit("viewer-close", { zone: props.zone });
 
 /*
 

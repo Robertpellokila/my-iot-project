@@ -470,6 +470,10 @@ const startCardDrag = (
   event.dataTransfer.effectAllowed =
     "move";
 
+  document.body.classList.add(
+    "tcg-card-dragging",
+  );
+
   event.dataTransfer.setData(
     "application/x-battle-card",
     JSON.stringify(
@@ -493,6 +497,10 @@ const startCardDrag = (
 const endCardDrag = (
   card,
 ) => {
+  document.body.classList.remove(
+    "tcg-card-dragging",
+  );
+
   if (
     !props.interactive
   ) {
@@ -513,6 +521,10 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  document.body.classList.remove(
+    "tcg-card-dragging",
+  );
+
   window.removeEventListener(
     "keydown",
     onKeydown,
@@ -750,6 +762,7 @@ onUnmounted(() => {
                       v-if="
                         card.image_url
                       "
+                      draggable="false"
                       :src="
                         card.image_url
                       "
@@ -1572,6 +1585,24 @@ button {
 
 .wheel-card.draggable.active:active {
   cursor: grabbing;
+}
+
+.wheel-card.draggable {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: element;
+}
+
+.wheel-card.draggable * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+:global(body.tcg-card-dragging .pile-viewer-overlay) {
+  pointer-events: none;
+  opacity: 0.12;
+  transition: opacity 120ms ease;
 }
 
 .wheel-card-image {

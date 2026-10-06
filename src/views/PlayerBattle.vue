@@ -12,6 +12,8 @@ import { useBattleUiSync } from "../composables/battle/useBattleUiSync";
 import BattleZoneStack from "../components/battle/BattleZoneStack.vue";
 import CardStatusVfx from "../components/battle/CardStatusVfx.vue";
 import { normalizeBattleStatusKey } from "../composables/battle/elementalStatus.js";
+import { playerErrorMessage, safePlayerMessage } from "../utils/playerErrorMessage.js";
+import { formatTcgType, getTcgComboTypeKey } from "../utils/tcgTypes.js";
 
 // =========================================================
 // ROUTE
@@ -34,6 +36,60 @@ const player = computed(() =>
 );
 
 const token = computed(() => String(route.query.token ?? "").trim());
+
+const playerAvatarOptions = [
+  "🐻", "🐼", "🐸", "🐱", "🐶", "🐰", "🦊", "🐵",
+  "🐨", "🐯", "🐧", "🐙", "🦄", "🐲", "🐤", "🐢",
+];
+
+const avatarPickerOpen = ref(false);
+const avatarDraft = ref("");
+const avatarSaving = ref(false);
+const avatarSaveError = ref("");
+
+const ownAvatar = computed(() => {
+  const key = player.value === "p1" ? "player1_avatar_url" : "player2_avatar_url";
+  return String(battle.value?.[key] ?? "").trim();
+});
+
+const avatarSelectionRequired = computed(() =>
+  Boolean(battle.value) && !playerAvatarOptions.includes(ownAvatar.value),
+);
+const ownAvatarImage = computed(() =>
+  /^(https?:\/\/|\/|data:image\/)/i.test(ownAvatar.value) ? ownAvatar.value : "",
+);
+
+const openAvatarPicker = () => {
+  avatarSaveError.value = "";
+  avatarDraft.value = playerAvatarOptions.includes(ownAvatar.value)
+    ? ownAvatar.value
+    : "";
+  avatarPickerOpen.value = true;
+};
+
+const savePlayerAvatar = async () => {
+  if (!playerAvatarOptions.includes(avatarDraft.value) || avatarSaving.value) return;
+  avatarSaving.value = true;
+  avatarSaveError.value = "";
+  try {
+    const { data, error: rpcError } = await supabase.rpc("set_battle_player_avatar", {
+      p_code: code.value,
+      p_player: player.value,
+      p_token: token.value,
+      p_avatar: avatarDraft.value,
+    });
+    if (rpcError) throw rpcError;
+    if (!data?.ok) throw new Error(data?.message || "Avatar belum berhasil disimpan.");
+
+    const key = player.value === "p1" ? "player1_avatar_url" : "player2_avatar_url";
+    if (battle.value) battle.value[key] = avatarDraft.value;
+    avatarPickerOpen.value = false;
+  } catch (saveError) {
+    avatarSaveError.value = playerErrorMessage(saveError, "Avatar belum berhasil disimpan. Coba lagi.");
+  } finally {
+    avatarSaving.value = false;
+  }
+};
 
 // =========================================================
 // BATTLE SESSION
@@ -60,6 +116,8 @@ const {
 
   maxActive,
   maxBench,
+
+  refreshBattle,
 
   latestBattleEvent,
 
@@ -116,6 +174,12 @@ const fusionLoading = ref(false);
 const fusionLoadError = ref("");
 const fusionLastMessage = ref("");
 const selectedFusionRecipeId = ref(null);
+
+const comboAttackModalOpen = ref(false);
+const comboParticipantIds = ref([]);
+const comboPrimaryCardId = ref(null);
+const comboTargetCardId = ref(null);
+const comboRuleCatalog = ref([]);
 
 // =========================================================
 // PHASE 3D.13 - FUSION BATTLE HISTORY
@@ -202,7 +266,7 @@ const loadFusionHistory = async () => {
   } catch (err) {
     console.error("Load Fusion History:", err);
     fusionHistoryError.value =
-      err?.message ?? "Gagal memuat Fusion history.";
+      playerErrorMessage(err, "Fusion history belum dapat dimuat. Coba muat ulang battle.");
   } finally {
     fusionHistoryLoading.value = false;
   }
@@ -393,8 +457,11 @@ const showToast = (type, title, message = "") => {
   toast.value = {
     show: true,
     type,
-    title,
-    message,
+    title: safePlayerMessage(title, "BATTLE UPDATE"),
+    message: safePlayerMessage(
+      message,
+      "Aksi belum dapat diproses. Perbarui battle lalu coba lagi.",
+    ),
   };
 
   toastTimer = setTimeout(() => {
@@ -895,6 +962,8 @@ const startActiveCardDrag = (event, card) => {
     "active",
   );
 
+  document.body.classList.add("tcg-card-dragging");
+
   void syncStartDrag(
     card,
     "active",
@@ -902,6 +971,7 @@ const startActiveCardDrag = (event, card) => {
 };
 
 const endActiveCardDrag = () => {
+  document.body.classList.remove("tcg-card-dragging");
   activeDropOver.value = false;
 
   void syncDragTarget(null);
@@ -965,7 +1035,8 @@ const allowActiveDrop = (event) => {
     waitingForRfid.value ||
     questionActive.value ||
     battleFinished.value ||
-    !isMyTurn.value
+    !isMyTurn.value ||
+    !canSpendActionPoints(configuredActionPointCost("switch", 1))
   ) {
     return;
   }
@@ -1062,10 +1133,15 @@ const handleActiveDrop = async (event) => {
   }
 
   try {
-    await sendBenchAction(
-      "return_from_bench",
-      card,
-    );
+    const hasOpenActiveSlot = activeCards.value.length < maxActive.value;
+    const currentActive = selectedCard.value ?? activeCards.value[0];
+    if (actionPointsEnabled.value && !hasOpenActiveSlot && currentActive) {
+      await sendBenchAction("switch_active", card, {
+        active_card_id: getCardId(currentActive),
+      });
+    } else {
+      await sendBenchAction("return_from_bench", card);
+    }
   } finally {
     void syncDragTarget(null);
 
@@ -2026,6 +2102,98 @@ const isTcgV1 =
       "tcg_v1",
   );
 
+const actionPointsEnabled = computed(
+  () => isTcgV1.value && Boolean(battle.value?.action_points_enabled),
+);
+
+const configuredActionPointCost = (action, fallback = 1) => {
+  const value = Number(battle.value?.action_costs?.[action]);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+};
+
+const actionPointsPerTurn = computed(() =>
+  Math.max(1, Number(battle.value?.action_points_per_turn ?? 3) || 3),
+);
+
+const maxAttacksPerCard = computed(() =>
+  Math.max(1, Number(battle.value?.max_attacks_per_card ?? 1) || 1),
+);
+
+const tripleComboEnabled = computed(() => Boolean(battle.value?.triple_combo_enabled));
+const formationEnabled = computed(() => Boolean(battle.value?.formation_enabled));
+const comboEnabled = computed(() => battle.value?.combo_enabled !== false);
+
+const cardAttacksUsedThisTurn = (card) => {
+  const currentTurn = Number(battle.value?.turn_index ?? 1);
+  if (Number(card?.attack_turn_index ?? -1) === currentTurn) {
+    return Math.max(0, Number(card?.attacks_this_turn ?? 0));
+  }
+  return Number(card?.last_attacked_turn ?? -1) === currentTurn
+    ? maxAttacksPerCard.value
+    : 0;
+};
+
+const comboEligibleActiveCards = computed(() =>
+  activeCards.value.filter((card) =>
+    Number(card?.current_hp ?? card?.hp ?? 0) > 0 &&
+    !card?.exhausted &&
+    cardAttacksUsedThisTurn(card) < maxAttacksPerCard.value,
+  ),
+);
+
+const selectedComboParticipants = computed(() =>
+  comboParticipantIds.value
+    .map((id) => comboEligibleActiveCards.value.find((card) => String(getCardId(card)) === String(id)))
+    .filter(Boolean),
+);
+
+const comboActionPointCost = computed(() =>
+  selectedComboParticipants.value.length >= 4
+    ? configuredActionPointCost("ultimate_combo", 3)
+    : selectedComboParticipants.value.length >= 3
+    ? configuredActionPointCost("triple_combo", 3)
+    : configuredActionPointCost("combo_attack", 2),
+);
+
+const comboTypeKey = computed(() =>
+  selectedComboParticipants.value.length >= 2
+    ? getTcgComboTypeKey(selectedComboParticipants.value.map((card) => card.element))
+    : null,
+);
+
+const selectedComboRule = computed(() =>
+  comboRuleCatalog.value.find((rule) => rule.type_keys?.join("+") === comboTypeKey.value) ?? null,
+);
+
+const ownActionPoints = computed(() =>
+  Math.max(
+    0,
+    Number(
+      player.value === "p1"
+        ? battle.value?.player1_action_points
+        : battle.value?.player2_action_points,
+    ) || 0,
+  ),
+);
+
+const enemyActionPoints = computed(() =>
+  Math.max(
+    0,
+    Number(
+      player.value === "p1"
+        ? battle.value?.player2_action_points
+        : battle.value?.player1_action_points,
+    ) || 0,
+  ),
+);
+
+const maxBenchSlots = computed(() =>
+  Math.max(0, Number(battle.value?.max_bench ?? 4) || 0),
+);
+
+const canSpendActionPoints = (cost = 1) =>
+  !actionPointsEnabled.value || ownActionPoints.value >= cost;
+
 // =========================================================
 // GRAVEYARD
 // =========================================================
@@ -2553,6 +2721,14 @@ const selectedCard =
       ) ?? null,
   );
 
+const selectedCardAlreadyAttacked = computed(() =>
+  Boolean(
+    selectedCard.value &&
+      actionPointsEnabled.value &&
+      cardAttacksUsedThisTurn(selectedCard.value) >= maxAttacksPerCard.value,
+  ),
+);
+
 const selectedTargetCard =
   computed(
     () =>
@@ -2661,7 +2837,8 @@ const readyFusions = computed(() =>
 const canFusionUi = computed(() =>
   Boolean(
     fusionFeatureEnabled.value &&
-      readyFusions.value.length > 0,
+      readyFusions.value.length > 0 &&
+      canSpendActionPoints(configuredActionPointCost("fusion", 2)),
   ),
 );
 
@@ -2790,7 +2967,10 @@ const loadPlayerFusions = async () => {
     }
   } catch (err) {
     console.error("Load Fusion Recipes:", err);
-    fusionLoadError.value = err?.message ?? "Gagal memuat Fusion Recipe.";
+    fusionLoadError.value = playerErrorMessage(
+      err,
+      "Resep Fusion belum dapat dimuat. Coba muat ulang battle.",
+    );
     runtimeFusions.value = [];
     selectedFusionRecipeId.value = null;
   } finally {
@@ -2972,7 +3152,7 @@ const submitFusion = async () => {
     console.error("Fusion:", err);
     errorToast(
       "FUSION ERROR",
-      err?.message ?? "Gagal melakukan Fusion.",
+      playerErrorMessage(err, "Fusion gagal diproses. Coba lagi."),
     );
   } finally {
     actionLoading.value = false;
@@ -3074,6 +3254,14 @@ const loadSelectedCardSpecialSkills = async () => {
   }
 };
 
+const specialSkillActionPointCost = (skill) => {
+  const skillOverride = Number(skill?.limits?.action_points);
+  if (Number.isInteger(skillOverride) && skillOverride >= 0 && skillOverride <= 10) {
+    return skillOverride;
+  }
+  return configuredActionPointCost("special_skill", 1);
+};
+
 const specialSkillReadyState = (skill) => {
   if (!skill) {
     return {
@@ -3137,6 +3325,15 @@ const specialSkillReadyState = (skill) => {
       ready: false,
       status: `${ownSkill.value}/${costValue} GAUGE`,
       reason: `Membutuhkan ${costValue} Skill Gauge.`,
+    };
+  }
+
+  const actionPointCost = specialSkillActionPointCost(skill);
+  if (actionPointsEnabled.value && ownActionPoints.value < actionPointCost) {
+    return {
+      ready: false,
+      status: `${actionPointCost} POIN GILIRAN DIBUTUHKAN`,
+      reason: `Skill ini membutuhkan ${actionPointCost} poin giliran. Poinmu saat ini ${ownActionPoints.value}.`,
     };
   }
 
@@ -3671,7 +3868,9 @@ const canAttackUi =
     () =>
       Boolean(
         selectedCard.value,
-      ),
+      ) &&
+      !selectedCardAlreadyAttacked.value &&
+      canSpendActionPoints(configuredActionPointCost("attack", 1)),
   );
 
 const canDefenseUi =
@@ -3679,7 +3878,8 @@ const canDefenseUi =
     () =>
       Boolean(
         selectedCard.value,
-      ),
+      ) &&
+      canSpendActionPoints(configuredActionPointCost("defense", 1)),
   );
 
 const canUltimateUi =
@@ -3690,7 +3890,8 @@ const canUltimateUi =
       ) &&
       enemyActiveCards.value.length > 0 &&
       ownSkill.value >=
-        100,
+        100 &&
+      canSpendActionPoints(configuredActionPointCost("ultimate", 2)),
   );
 
 const canHealUi =
@@ -3703,24 +3904,24 @@ const canHealUi =
       ownHp.value <=
         ownMaxHp.value *
           0.5 &&
-      !ownHealUsed.value,
+      !ownHealUsed.value &&
+      canSpendActionPoints(configuredActionPointCost("heal", 1)),
   );
 
 const canSynergyUi =
   computed(
     () =>
       Boolean(
-        selectedSynergyInfo
+      selectedSynergyInfo
           .value
           ?.ready,
-      ),
+      ) &&
+      canSpendActionPoints(configuredActionPointCost("synergy", 1)),
   );
 
 const canSummonUi =
   computed(() => {
-    const activeSpace =
-      activeCards.value.length <
-      maxActive.value;
+    const activeSpace = activeCards.value.length < maxActive.value;
 
     if (!isTcgV1.value) {
       return activeSpace;
@@ -3729,12 +3930,65 @@ const canSummonUi =
     return (
       activeSpace &&
       ownDeckRemaining.value >
-        0
+        0 &&
+      canSpendActionPoints(configuredActionPointCost("summon", 1))
     );
   });
 
+const canComboAttackUi = computed(() =>
+  actionPointsEnabled.value &&
+    comboEnabled.value &&
+    comboEligibleActiveCards.value.length >= 2 &&
+    canSpendActionPoints(configuredActionPointCost("combo_attack", 2)),
+);
+
 const skillLockText =
   (type) => {
+    if (type === "combo") {
+      if (!isTcgV1.value) return "TCG ONLY";
+      if (!actionPointsEnabled.value) return "POIN GILIRAN NONAKTIF · BATTLE BARU";
+      if (!comboEnabled.value) return "COMBO OFF IN SETUP";
+      if (comboEligibleActiveCards.value.length < 2) {
+        return activeCards.value.length < 2
+          ? "NEED 2 ACTIVE CARDS"
+          : "ACTIVE CARDS ALREADY USED / BLOCKED";
+      }
+      if (!canSpendActionPoints(configuredActionPointCost("combo_attack", 2))) {
+        return `${ownActionPoints.value} POIN GILIRAN TERSISA`;
+      }
+    }
+
+    if (
+      type === "attack" &&
+      selectedCardAlreadyAttacked.value
+    ) {
+      return "ALREADY ATTACKED";
+    }
+
+    const actionKey = { combo: "combo_attack", special: "special_skill" }[type] ?? type;
+    const apCost = configuredActionPointCost(actionKey, {
+      attack: 1,
+      defense: 1,
+      ultimate: 2,
+      heal: 1,
+      synergy: 1,
+      summon: 1,
+      special: 1,
+      fusion: 2,
+      combo: 2,
+    }[type] ?? 1);
+    if (
+      actionPointsEnabled.value &&
+      apCost &&
+      !canSpendActionPoints(apCost)
+    ) {
+      return `${ownActionPoints.value} POIN GILIRAN TERSISA`;
+    }
+
+    if (type === "summon" && activeCards.value.length >= maxActive.value) {
+      return "ACTIVE FULL · MOVE A CARD TO BENCH";
+    }
+
     if (
       type === "attack" &&
       !selectedCard.value
@@ -3817,7 +4071,10 @@ const skillLockText =
         return "DECK EMPTY";
       }
 
-      return "ACTIVE FULL";
+      return activeCards.value.length >= maxActive.value &&
+        benchCards.value.length >= maxBench.value
+        ? "FIELD FULL"
+        : "ACTIVE + BENCH FULL";
     }
 
     if (type === "special") {
@@ -3941,9 +4198,11 @@ const skillInfoItems =
       {
         key: "defense",
         icon: "🛡️",
-        title: "DEFENSE",
+        title: actionPointsEnabled.value ? "DEFENSE STAT · PASSIVE" : "DEFENSE",
         status:
-          ownDefending.value
+          actionPointsEnabled.value
+            ? "PASSIVE"
+            : ownDefending.value
             ? "ACTIVE"
             : card
               ? "READY"
@@ -3951,9 +4210,13 @@ const skillInfoItems =
         ready:
           Boolean(card),
         effect:
-          "Next incoming damage ×0.50 (-50%).",
+          actionPointsEnabled.value
+            ? "DEF mengurangi damage serangan kartu secara otomatis. Shield hanya berasal dari skill kartu."
+            : "Next incoming damage ×0.50 (-50%).",
         detail:
-          "Memberi +5 Ultimate Gauge. Defense dikonsumsi saat serangan lawan mengenainya.",
+          actionPointsEnabled.value
+            ? "Tidak ada tombol Defense manual di TCG v1. Periksa stat DEF pada kartu dan aktifkan skill Shield bila tersedia."
+            : "Memberi +5 Ultimate Gauge. Defense dikonsumsi saat serangan lawan mengenainya.",
       },
 
       {
@@ -4035,12 +4298,12 @@ const skillInfoItems =
           canSummonUi.value,
         effect:
           isTcgV1.value
-            ? `RFID → Active. Physical Deck tersisa ${ownDeckRemaining.value}/${ownDeckTotal.value}.`
+            ? `Scan RFID → Active. Physical Deck tersisa ${ownDeckRemaining.value}/${ownDeckTotal.value}.`
             : "Scan RFID untuk menambahkan card ke Active Deck.",
         detail:
-          `Active ${activeCards.value.length}/${maxActive.value}. Summon membutuhkan slot Active yang tersedia${
+          `Active ${activeCards.value.length}/${maxActive.value} • Bench ${benchCards.value.length}/${maxBench.value}. Summon hanya memakai slot Active yang tersedia${
             isTcgV1.value
-              ? " dan Physical Deck > 0."
+              ? " dan Physical Deck > 0. Jika Active penuh, pindahkan satu kartu ke Bench sebelum summon."
               : "."
           }`,
       },
@@ -4071,7 +4334,7 @@ const specialActionInfo = computed(() => {
       ? skill.description || describeSpecialEffects(skill).join(" • ")
       : "Kemampuan bawaan kartu TCG V1.",
     detail: skill
-      ? `${formatSpecialTarget(skill)} • ${formatSpecialCost(skill)} • ${formatSpecialLimits(skill)}`
+      ? `${specialSkillActionPointCost(skill)} poin giliran • ${formatSpecialTarget(skill)} • ${formatSpecialCost(skill)} • ${formatSpecialLimits(skill)}`
       : "Pilih card yang mempunyai Special Skill.",
   };
 });
@@ -4292,7 +4555,10 @@ const submitSpecialSkill = async () => {
     await loadSelectedCardSpecialSkills();
   } catch (err) {
     console.error("Special Skill:", err);
-    errorToast("SPECIAL SKILL ERROR", err?.message ?? "Gagal menggunakan Special Skill.");
+    errorToast(
+      "SPECIAL SKILL ERROR",
+      playerErrorMessage(err, "Skill gagal digunakan. Perbarui battle lalu coba lagi."),
+    );
   } finally {
     actionLoading.value = false;
   }
@@ -4481,6 +4747,20 @@ const beginAttackAction =
         "Pilih Active Card yang akan menyerang.",
       );
 
+      return;
+    }
+
+    if (selectedCardAlreadyAttacked.value) {
+      warningToast(
+        "ATTACK SUDAH DIPAKAI",
+        `Kartu ini sudah memakai ${maxAttacksPerCard.value} kesempatan serang pada giliran ini.`,
+      );
+      return;
+    }
+
+    const attackApCost = configuredActionPointCost("attack", 1);
+    if (!canSpendActionPoints(attackApCost)) {
+      warningToast("POIN GILIRAN TIDAK CUKUP", `Serangan membutuhkan ${attackApCost} poin giliran.`);
       return;
     }
 
@@ -4711,8 +4991,7 @@ const submitDirectAttack =
       errorToast(
         "DIRECT ATTACK ERROR",
 
-        err?.message ??
-          "Gagal memproses Direct Attack.",
+        playerErrorMessage(err, "Direct Attack gagal diproses. Perbarui battle lalu coba lagi."),
       );
     } finally {
       actionLoading.value =
@@ -4932,8 +5211,7 @@ const submitTargetedAttack =
       errorToast(
         "ATTACK ERROR",
 
-        err?.message ??
-          "Gagal memproses targeted attack.",
+        playerErrorMessage(err, "Serangan gagal diproses. Perbarui battle lalu coba lagi."),
       );
     } finally {
       actionLoading.value =
@@ -4944,6 +5222,129 @@ const submitTargetedAttack =
 // =========================================================
 // SUBMIT ACTION
 // =========================================================
+
+const openComboAttackModal = () => {
+  if (!validateActionTurn()) return;
+  if (!canComboAttackUi.value) {
+    warningToast("COMBO BELUM SIAP", `Combo membutuhkan sedikitnya dua kartu Active yang masih memiliki kesempatan menyerang dan ${configuredActionPointCost("combo_attack", 2)} poin giliran.`);
+    return;
+  }
+
+  const primary = comboEligibleActiveCards.value.find((card) =>
+    String(getCardId(card)) === String(getCardId(selectedCard.value)),
+  ) ?? comboEligibleActiveCards.value[0];
+  const defaultParticipants = [
+    primary,
+    ...comboEligibleActiveCards.value.filter((card) => String(getCardId(card)) !== String(getCardId(primary))).slice(0, 1),
+  ].filter(Boolean);
+  comboParticipantIds.value = defaultParticipants.map((card) => getCardId(card));
+  comboPrimaryCardId.value = getCardId(primary) ?? null;
+  comboTargetCardId.value = getCardId(enemyActiveCards.value[0]) ?? null;
+  comboAttackModalOpen.value = true;
+  if (!comboRuleCatalog.value.length) {
+    void supabase
+      .from("tcg_combo_rule_catalog")
+      .select("rule_kind,type_keys,combo_name,ap_cost,bonus_damage,assist_multipliers,status_key,status_target,effect_json")
+      .eq("enabled", true)
+      .then(({ data, error: queryError }) => {
+        if (queryError) return;
+        comboRuleCatalog.value = Array.isArray(data) ? data : [];
+      });
+  }
+};
+
+const toggleComboParticipant = (card) => {
+  const id = getCardId(card);
+  if (!id) return;
+  const exists = comboParticipantIds.value.some((item) => String(item) === String(id));
+  if (exists) {
+    comboParticipantIds.value = comboParticipantIds.value.filter((item) => String(item) !== String(id));
+    if (String(comboPrimaryCardId.value) === String(id)) {
+      comboPrimaryCardId.value = comboParticipantIds.value[0] ?? null;
+    }
+    return;
+  }
+  const maxParticipants = formationEnabled.value ? 4 : tripleComboEnabled.value ? 3 : 2;
+  if (comboParticipantIds.value.length >= maxParticipants) {
+    warningToast("BATAS PESERTA", `Battle ini membatasi combo ke ${maxParticipants} kartu.`);
+    return;
+  }
+  comboParticipantIds.value = [...comboParticipantIds.value, id];
+  if (!comboPrimaryCardId.value) comboPrimaryCardId.value = id;
+};
+
+const setComboPrimary = (card) => {
+  const id = getCardId(card);
+  if (!id) return;
+  if (!comboParticipantIds.value.some((item) => String(item) === String(id))) {
+    toggleComboParticipant(card);
+  }
+  if (comboParticipantIds.value.some((item) => String(item) === String(id))) {
+    comboPrimaryCardId.value = id;
+  }
+};
+
+const closeComboAttackModal = () => {
+  comboAttackModalOpen.value = false;
+};
+
+const submitComboAttack = async () => {
+  if (!validateActionTurn()) return;
+  if (selectedComboParticipants.value.length < 2 || !comboPrimaryCardId.value) {
+    warningToast("PILIH KARTU ACTIVE", "Pilih minimal dua kartu Active dan tentukan kartu utama.");
+    return;
+  }
+  if (selectedComboParticipants.value.length === 3 && !tripleComboEnabled.value) {
+    warningToast("TRIPLE COMBO NONAKTIF", "Game Setup belum mengaktifkan Triple Combo.");
+    return;
+  }
+  if (selectedComboParticipants.value.length === 4 && !formationEnabled.value) {
+    warningToast("FORMATION NONAKTIF", "Game Setup belum mengaktifkan Formation.");
+    return;
+  }
+  if (!canSpendActionPoints(comboActionPointCost.value)) {
+    warningToast("POIN GILIRAN TIDAK CUKUP", `Combo ini membutuhkan ${comboActionPointCost.value} poin giliran.`);
+    return;
+  }
+  if (enemyActiveCards.value.length && !comboTargetCardId.value) {
+    warningToast("PILIH TARGET", `Pilih Active Card milik ${enemyName.value}.`);
+    return;
+  }
+
+  actionLoading.value = true;
+  try {
+    const { data, error: rpcError } = await supabase.rpc("submit_battle_action", {
+      p_code: code.value,
+      p_player: player.value,
+      p_token: token.value,
+      p_action: "combo_attack",
+      p_card_id: comboPrimaryCardId.value,
+      p_payload: {
+        participant_card_ids: [
+          comboPrimaryCardId.value,
+          ...comboParticipantIds.value.filter((id) => String(id) !== String(comboPrimaryCardId.value)),
+        ],
+        target_card_id: comboTargetCardId.value || null,
+      },
+    });
+    if (rpcError) throw rpcError;
+    if (data?.ok === false) {
+      warningToast("COMBO DITOLAK", data?.message ?? "Combo Attack tidak dapat dilakukan.");
+      return;
+    }
+
+    closeComboAttackModal();
+    selectedCardId.value = null;
+    successToast(
+      data?.combo_name ?? "COMBO ATTACK",
+      `${data?.damage ?? 0} damage${data?.healing ? ` • pulih ${data.healing} HP` : ""}. ${selectedComboParticipants.value.length} kartu Active memakai kesempatan serangnya.`,
+    );
+  } catch (err) {
+    errorToast("COMBO ERROR", playerErrorMessage(err, "Combo Attack gagal. Perbarui battle lalu coba lagi."));
+  } finally {
+    actionLoading.value = false;
+  }
+};
 
 const submitAction =
   async (actionType) => {
@@ -4983,9 +5384,26 @@ const submitAction =
       return;
     }
 
-    const cardRequired =
-      actionType !==
-      "summon";
+    const cardRequired = !["summon", "end_turn", "pass_turn"].includes(actionType);
+
+    const defaultActionCost = {
+      attack: 1,
+      defense: 1,
+      ultimate: 2,
+      heal: 1,
+      synergy: 1,
+      summon: 1,
+      special_skill: 1,
+      fusion: 2,
+    }[actionType] ?? 0;
+    const actionCost = configuredActionPointCost(actionType, defaultActionCost);
+    if (actionPointsEnabled.value && actionCost > ownActionPoints.value) {
+      warningToast(
+        "POIN GILIRAN TIDAK CUKUP",
+        `${actionType.toUpperCase()} membutuhkan ${actionCost} poin giliran; tersisa ${ownActionPoints.value}.`,
+      );
+      return;
+    }
 
     if (
       cardRequired &&
@@ -5166,8 +5584,7 @@ const submitAction =
       errorToast(
         "ACTION ERROR",
 
-        err?.message ??
-          "Gagal memproses action.",
+        playerErrorMessage(err, "Aksi gagal diproses. Perbarui battle lalu coba lagi."),
       );
     } finally {
       actionLoading.value =
@@ -5183,6 +5600,7 @@ const sendBenchAction =
   async (
     actionType,
     card,
+    payload = {},
   ) => {
     if (
       !validateActionTurn()
@@ -5217,7 +5635,7 @@ const sendBenchAction =
             p_card_id:
               card.id,
 
-            p_payload: {},
+            p_payload: payload,
           },
         );
 
@@ -5248,8 +5666,7 @@ const sendBenchAction =
       errorToast(
         "BENCH ERROR",
 
-        err?.message ??
-          "Gagal memproses Bench.",
+        playerErrorMessage(err, "Kartu gagal dipindahkan. Coba lagi."),
       );
     } finally {
       actionLoading.value =
@@ -5625,6 +6042,10 @@ const answerQuestion =
 
       void playSound("wrong", 0.8);
 
+      // The second wrong answer resolves the round on the server. Refresh
+      // this player's session too, so the quiz closes even if realtime is late.
+      void refreshBattle();
+
       warningToast(
         "JAWABAN SALAH",
 
@@ -5654,8 +6075,7 @@ const answerQuestion =
       errorToast(
         "QUESTION ERROR",
 
-        err?.message ??
-          "Gagal mengirim jawaban. Silakan coba lagi.",
+        playerErrorMessage(err, "Jawaban belum dapat dikirim. Silakan coba lagi."),
       );
     } finally {
       if (
@@ -5822,7 +6242,10 @@ const chooseQuestionBonus =
       );
     } catch (err) {
       console.error("Pilih bonus skill:", err);
-      errorToast("SKILL ERROR", err?.message ?? "Pilihan skill gagal disimpan.");
+      errorToast(
+        "SKILL ERROR",
+        playerErrorMessage(err, "Pilihan skill gagal disimpan. Coba lagi."),
+      );
     } finally {
       bonusChoiceSubmitting.value = false;
     }
@@ -6005,8 +6428,7 @@ const useBonusSkill =
       errorToast(
         "BONUS ERROR",
 
-        err?.message ??
-          "Gagal menggunakan bonus skill.",
+        playerErrorMessage(err, "Bonus skill gagal digunakan. Coba lagi."),
       );
     } finally {
       bonusUsingId.value =
@@ -6720,6 +7142,8 @@ onMounted(
 
 onUnmounted(
   async () => {
+    document.body.classList.remove("tcg-card-dragging");
+
     if (turnClockTickInterval) {
       window.clearInterval(turnClockTickInterval);
       turnClockTickInterval = null;
@@ -6816,6 +7240,49 @@ onUnmounted(
         class="incoming-impact-flash"
         :class="incomingImpactFlash"
       />
+    </Transition>
+
+    <Transition name="target-picker">
+      <div v-if="avatarSelectionRequired || avatarPickerOpen" class="avatar-picker-overlay">
+        <div
+          class="avatar-picker-backdrop"
+          @click="!avatarSelectionRequired && (avatarPickerOpen = false)"
+        />
+        <section class="avatar-picker-panel" role="dialog" aria-modal="true" aria-labelledby="avatar-picker-title">
+          <span class="avatar-picker-eyebrow">TIMEDOOR BATTLE</span>
+          <h2 id="avatar-picker-title">Pilih avatar pemain</h2>
+          <p>Avatar ini akan terlihat di halaman battle dan layar pertandingan.</p>
+          <div class="avatar-picker-grid" role="radiogroup" aria-label="Pilihan avatar">
+            <button
+              v-for="avatar in playerAvatarOptions"
+              :key="avatar"
+              type="button"
+              class="avatar-choice"
+              :class="{ selected: avatarDraft === avatar }"
+              role="radio"
+              :aria-checked="avatarDraft === avatar"
+              :aria-label="`Pilih avatar ${avatar}`"
+              @click="avatarDraft = avatar; avatarSaveError = ''"
+            >{{ avatar }}</button>
+          </div>
+          <p v-if="avatarSaveError" class="avatar-picker-error" role="alert">{{ avatarSaveError }}</p>
+          <div class="avatar-picker-actions">
+            <button
+              v-if="!avatarSelectionRequired"
+              type="button"
+              class="avatar-cancel"
+              :disabled="avatarSaving"
+              @click="avatarPickerOpen = false"
+            >Nanti</button>
+            <button
+              type="button"
+              class="avatar-confirm"
+              :disabled="!avatarDraft || avatarSaving"
+              @click="savePlayerAvatar"
+            >{{ avatarSaving ? "Menyimpan…" : "Pakai avatar ini" }}</button>
+          </div>
+        </section>
+      </div>
     </Transition>
 
     <!-- PHASE 3C.1 • NECRO SOUL REBIRTH -->
@@ -7036,13 +7503,16 @@ onUnmounted(
 
       <header class="top-hud">
         <section class="player-identity">
-          <div class="player-avatar">
-            {{
-              player === "p1"
-                ? "👨🏻"
-                : "👩🏻"
-            }}
-          </div>
+          <button
+            type="button"
+            class="player-avatar"
+            :aria-label="`Avatar ${playerName}. Klik untuk mengganti avatar.`"
+            title="Ganti avatar"
+            @click="openAvatarPicker"
+          >
+            <img v-if="ownAvatarImage" :src="ownAvatarImage" :alt="`Avatar ${playerName}`" />
+            <span v-else>{{ ownAvatar || (player === "p1" ? "👦🏻" : "🧑🏽‍🦱") }}</span>
+          </button>
 
           <div class="identity-copy">
             <span class="hud-label">
@@ -7180,6 +7650,11 @@ onUnmounted(
                 battle.total_rounds ??
                 "-"
               }}
+            </span>
+
+            <span v-if="actionPointsEnabled" class="turn-ap-summary" title="Poin Giliran dipakai untuk melakukan aksi. Poin terisi kembali saat giliranmu dimulai.">
+              <b>{{ ownActionPoints }} Poin Giliran</b> tersisa
+              <small>• lawan {{ enemyActionPoints }} poin</small>
             </span>
 
             <span
@@ -7405,6 +7880,7 @@ onUnmounted(
           "
           :allow-drop="
             isMyTurn &&
+            canSpendActionPoints(configuredActionPointCost('switch', 1)) &&
             !actionLoading &&
             !waitingForRfid &&
             !battleWaiting &&
@@ -7413,6 +7889,7 @@ onUnmounted(
           "
           :draggable-cards="
             isMyTurn &&
+            canSpendActionPoints(configuredActionPointCost('switch', 1)) &&
             !actionLoading &&
             !waitingForRfid &&
             !battleWaiting &&
@@ -7507,7 +7984,10 @@ onUnmounted(
             ↓ DROP BENCH CARD TO RETURN ACTIVE
           </div>
 
-          <div class="deck-slots">
+          <div
+            class="deck-slots"
+            :style="{ '--active-slot-count': maxActive }"
+          >
             <article
               v-for="card in activeCards"
               :key="
@@ -7652,6 +8132,7 @@ onUnmounted(
                     v-if="
                       card.image_url
                     "
+                    draggable="false"
                     :src="
                       card.image_url
                     "
@@ -8507,6 +8988,10 @@ onUnmounted(
 
                   <div class="special-metric-grid">
                     <div>
+                      <span>POIN GILIRAN</span>
+                      <strong>{{ specialSkillActionPointCost(selectedSpecialSkill) }} poin</strong>
+                    </div>
+                    <div>
                       <span>TARGET</span>
                       <strong>{{ formatSpecialTarget(selectedSpecialSkill) }}</strong>
                     </div>
@@ -8602,10 +9087,96 @@ onUnmounted(
                   "
                   @click="submitSpecialSkill"
                 >
-                  {{ actionLoading ? "ACTIVATING..." : "USE SPECIAL SKILL" }}
+                  {{ actionLoading ? "ACTIVATING..." : `USE SPECIAL SKILL • ${specialSkillActionPointCost(selectedSpecialSkill)} poin` }}
                 </button>
               </footer>
             </template>
+          </section>
+        </div>
+      </Transition>
+
+      <!-- ASSIST / TYPE COMBO ATTACK -->
+
+      <Transition name="target-picker">
+        <div
+          v-if="comboAttackModalOpen"
+          class="action-detail-overlay combo-attack-overlay"
+          @click.self="closeComboAttackModal"
+        >
+          <div class="action-detail-backdrop" @click="closeComboAttackModal" />
+          <section class="combo-attack-modal" @click.stop>
+            <header class="combo-attack-header">
+              <div>
+                <span class="eyebrow">COMBO ATTACK • {{ comboActionPointCost }} POIN GILIRAN</span>
+                <h2>Pilih kartu Active</h2>
+                <p>Pilih minimal dua kartu Active yang belum menyerang. Kartu Bench tidak dapat ikut combo; kartu utama menyumbang ATK penuh dan kartu bantuan mengikuti multiplier aturan combo.</p>
+              </div>
+              <button type="button" class="modal-close" aria-label="Tutup" @click="closeComboAttackModal">✕</button>
+            </header>
+
+            <div class="combo-choice-section">
+              <strong>ACTIVE CARD · PILIH {{ tripleComboEnabled ? "2–3" : "2" }}{{ formationEnabled ? " ATAU 4" : "" }}</strong>
+              <div class="combo-card-options">
+                <div
+                  v-for="card in comboEligibleActiveCards"
+                  :key="getCardId(card)"
+                  class="combo-card-option-wrap"
+                  :class="{ selected: comboParticipantIds.some((id) => String(id) === String(getCardId(card))) }"
+                >
+                  <button type="button" class="combo-card-option" @click="toggleComboParticipant(card)">
+                    <img v-if="card.avatar_url || card.image_url" :src="card.avatar_url || card.image_url" :alt="card.name" />
+                    <span class="combo-card-option-copy">
+                      <b>{{ card.name }}</b>
+                  <small>{{ formatTcgType(card.element) }} • ATK {{ card.attack ?? 0 }}<template v-if="String(comboPrimaryCardId) !== String(getCardId(card))"> → kontribusi bantuan</template></small>
+                    </span>
+                    <span v-if="comboParticipantIds.some((id) => String(id) === String(getCardId(card)))" class="combo-choice-check">✓</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="combo-primary-choice"
+                    :class="{ selected: String(comboPrimaryCardId) === String(getCardId(card)) }"
+                    :disabled="!comboParticipantIds.some((id) => String(id) === String(getCardId(card)))"
+                    @click="setComboPrimary(card)"
+                  >{{ String(comboPrimaryCardId) === String(getCardId(card)) ? "UTAMA" : "JADIKAN UTAMA" }}</button>
+                </div>
+              </div>
+              <p v-if="comboEligibleActiveCards.length < 2" class="combo-direct-note">Perlu dua kartu Active yang belum menggunakan kesempatan serangnya.</p>
+              <p v-if="comboRuleCatalog.length && selectedComboParticipants.length >= 2" class="combo-synergy-preview">
+                <b>{{ selectedComboRule?.combo_name ?? (battle?.generic_combo_enabled && selectedComboParticipants.length === 2 ? "Combined Strike" : "Combo belum memiliki aturan tipe") }}</b>
+                <span>{{ selectedComboParticipants.map((card) => formatTcgType(card.element)).join(" + ") }}</span>
+                <small>{{ selectedComboRule?.effect_json?.summary ?? (selectedComboRule ? "Efek synergy aktif" : battle?.generic_combo_enabled && selectedComboParticipants.length === 2 ? "Serangan bantuan tanpa bonus tipe" : "Pilih kombinasi yang memiliki synergy") }}</small>
+              </p>
+            </div>
+
+            <div v-if="enemyActiveCards.length" class="combo-choice-section">
+              <strong>TARGET ACTIVE LAWAN</strong>
+              <div class="combo-card-options">
+                <button
+                  v-for="card in enemyActiveCards"
+                  :key="getCardId(card)"
+                  type="button"
+                  class="combo-card-option target"
+                  :class="{ selected: String(comboTargetCardId) === String(getCardId(card)) }"
+                  @click="comboTargetCardId = getCardId(card)"
+                >
+                  <img v-if="card.avatar_url || card.image_url" :src="card.avatar_url || card.image_url" :alt="card.name" />
+                  <span class="combo-card-option-copy">
+                    <b>{{ card.name }}</b>
+                    <small>HP {{ card.current_hp ?? card.hp }} • DEF {{ card.defense ?? 0 }}</small>
+                  </span>
+                  <span v-if="String(comboTargetCardId) === String(getCardId(card))" class="combo-choice-check">✓</span>
+                </button>
+              </div>
+            </div>
+            <p v-else class="combo-direct-note">Tidak ada Active Card lawan. Combo akan mengenai HP player lawan jika Direct Attack diizinkan.</p>
+
+            <footer class="combo-attack-actions">
+              <span>{{ ownActionPoints }} poin giliran tersisa</span>
+              <button type="button" class="modal-primary secondary" @click="closeComboAttackModal">BATAL</button>
+              <button type="button" class="modal-primary combo-submit" :disabled="actionLoading || selectedComboParticipants.length < 2 || (enemyActiveCards.length > 0 && !comboTargetCardId) || !canSpendActionPoints(comboActionPointCost)" @click="submitComboAttack">
+                {{ actionLoading ? "MENYERANG..." : `COMBO ATTACK • ${comboActionPointCost} POIN` }}
+              </button>
+            </footer>
           </section>
         </div>
       </Transition>
@@ -9087,6 +9658,7 @@ onUnmounted(
           'battle'
         "
         class="control-console"
+        :class="{ 'action-points-console': actionPointsEnabled }"
       >
         <div
           class="
@@ -9118,7 +9690,8 @@ onUnmounted(
             actionLoading ||
             waitingForRfid ||
             questionActive ||
-            battleFinished
+            battleFinished ||
+            !canAttackUi
           "
           @click="
             beginAttackAction
@@ -9142,16 +9715,30 @@ onUnmounted(
             {{
               isTcgV1
                 ? directAttackAvailable
-                  ? "50% ATK → HP"
-                  : "TARGETED"
+                  ? `${actionPointsEnabled ? `${configuredActionPointCost("attack", 1)} POIN • ` : ""}50% ATK → HP`
+                  : `${actionPointsEnabled ? `${configuredActionPointCost("attack", 1)} POIN • ` : ""}TARGETED`
                 : "BASIC"
             }}
           </small>
         </button>
 
+        <button
+          v-if="isTcgV1"
+          type="button"
+          class="console-skill combo-attack-skill"
+          :class="{ unavailable: !canComboAttackUi }"
+          :disabled="actionLoading || waitingForRfid || questionActive || battleFinished || !canComboAttackUi"
+          @click="openComboAttackModal"
+        >
+          <span class="console-icon">⚔️</span>
+          <strong>COMBO</strong>
+          <small>{{ canComboAttackUi ? `${formationEnabled ? "2–4 ACTIVE" : tripleComboEnabled ? "2–3 ACTIVE" : "2 ACTIVE"} • biaya sesuai jumlah peserta` : skillLockText("combo") }}</small>
+        </button>
+
         <!-- DEFENSE -->
 
         <button
+          v-if="!actionPointsEnabled"
           type="button"
           class="
             console-skill
@@ -9192,7 +9779,7 @@ onUnmounted(
               ownDefending
                 ? "ACTIVE • -50%"
                 : canDefenseUi
-                  ? "-50% NEXT HIT • +10 GAUGE"
+                  ? `${actionPointsEnabled ? "1 POIN • " : ""}-50% NEXT HIT • +10 GAUGE`
                   : skillLockText(
                       "defense",
                     )
@@ -9255,7 +9842,7 @@ onUnmounted(
             </small>
 
             <small v-else>
-              +
+              {{ actionPointsEnabled ? `${configuredActionPointCost("summon", 1)} POIN • scan kartu ke Active` : "+" }}
             </small>
           </div>
         </button>
@@ -9296,7 +9883,7 @@ onUnmounted(
           <small>
             {{
               canUltimateUi
-                ? "AOE ×2 • READY"
+                ? `${actionPointsEnabled ? `${configuredActionPointCost("ultimate", 2)} POIN • ` : ""}AOE ×2 • READY`
                 : skillLockText(
                     "ultimate",
                   )
@@ -9342,7 +9929,7 @@ onUnmounted(
               ownHealUsed
                 ? "USED"
                 : canHealUi
-                  ? "35% MAX HP • READY"
+                  ? `${actionPointsEnabled ? `${configuredActionPointCost("heal", 1)} POIN • ` : ""}35% MAX HP • READY`
                   : skillLockText(
                       "heal",
                     )
@@ -9392,7 +9979,7 @@ onUnmounted(
                       .toUpperCase()
                   } • ${
                     selectedElementCount
-                  } CARDS`
+                  } CARDS${actionPointsEnabled ? ` • ${configuredActionPointCost("synergy", 1)} POIN` : ""}`
                 : skillLockText(
                     "synergy",
                   )
@@ -9414,7 +10001,8 @@ onUnmounted(
             questionActive ||
             battleFinished ||
             !selectedCard ||
-            !runtimeSpecialSkills.length
+            !runtimeSpecialSkills.length ||
+            !canSpecialUi
           "
           @click="openSpecialSkillModal()"
         >
@@ -9427,7 +10015,7 @@ onUnmounted(
           <small>
             {{
               canSpecialUi
-                ? `${readySpecialSkills[0]?.name || "READY"} • READY`
+                ? `${readySpecialSkills[0]?.name || "READY"} • READY${actionPointsEnabled ? ` • ${specialSkillActionPointCost(readySpecialSkills[0])} POIN` : ""}`
                 : skillLockText("special")
             }}
           </small>
@@ -9446,7 +10034,8 @@ onUnmounted(
             waitingForRfid ||
             questionActive ||
             battleFinished ||
-            !fusionFeatureEnabled
+            !fusionFeatureEnabled ||
+            (actionPointsEnabled && !canSpendActionPoints(configuredActionPointCost('fusion', 2)))
           "
           @click="openFusionModal()"
         >
@@ -9469,6 +10058,18 @@ onUnmounted(
                       : "DISABLED"
             }}
           </small>
+        </button>
+
+        <button
+          v-if="actionPointsEnabled"
+          type="button"
+          class="console-skill end-turn-skill"
+          :disabled="actionLoading || waitingForRfid || questionActive || battleFinished || !isMyTurn"
+          @click="submitAction('end_turn')"
+        >
+          <span class="console-icon">⏭</span>
+          <strong>END TURN</strong>
+          <small>{{ ownActionPoints }} poin giliran • akhiri giliran</small>
         </button>
 
         <div
@@ -9716,6 +10317,9 @@ onUnmounted(
                   <strong>{{ questionRecommendation.topic }}</strong>
                   <a v-if="questionRecommendation.url" :href="questionRecommendation.url" target="_blank" rel="noopener noreferrer">BUKA MATERI ↗</a>
                 </div>
+                <small v-if="questionResult === 'wrong' && questionActive" class="question-waiting-opponent">
+                  Jawaban tersimpan. Menunggu pemain lain menyelesaikan kuis.
+                </small>
                 <div v-if="questionResult === 'correct' && questionRewardChoices.length" class="question-bonus-choice">
                   <div>
                     <strong>Pilih 1 bonus skill</strong>
@@ -10604,6 +11208,140 @@ button {
     );
 
   font-size: 33px;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.player-avatar:hover {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 10px 28px rgba(47, 118, 168, 0.24);
+}
+
+.player-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 13000;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.avatar-picker-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 39, 54, 0.48);
+  backdrop-filter: blur(10px);
+}
+
+.avatar-picker-panel {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 560px);
+  padding: 30px;
+  border: 1px solid rgba(74, 167, 113, 0.22);
+  border-radius: 28px;
+  color: #173d2b;
+  background: linear-gradient(145deg, #fff, #f1fbf1);
+  box-shadow: 0 28px 90px rgba(7, 34, 24, 0.28);
+  text-align: center;
+}
+
+.avatar-picker-eyebrow {
+  color: #15963b;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.18em;
+}
+
+.avatar-picker-panel h2 {
+  margin: 8px 0 6px;
+  color: #123c27;
+  font-size: clamp(23px, 4vw, 30px);
+}
+
+.avatar-picker-panel > p {
+  margin: 0 0 20px;
+  color: #668171;
+  font-size: 14px;
+}
+
+.avatar-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.avatar-choice {
+  aspect-ratio: 1;
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #d8eadb;
+  border-radius: 17px;
+  color: #234c35;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(25, 73, 45, 0.06);
+  cursor: pointer;
+  font-size: clamp(25px, 5vw, 34px);
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.avatar-choice:hover {
+  transform: translateY(-3px);
+}
+
+.avatar-choice.selected {
+  border: 2px solid #14a83a;
+  background: #e6f8e8;
+  box-shadow: 0 0 0 3px rgba(20, 168, 58, 0.12);
+}
+
+.avatar-picker-error {
+  margin: 14px 0 0 !important;
+  color: #b83343 !important;
+  font-weight: 750;
+}
+
+.avatar-picker-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.avatar-picker-actions button {
+  min-height: 46px;
+  padding: 0 20px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  cursor: pointer;
+  font-weight: 850;
+}
+
+.avatar-picker-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.avatar-cancel {
+  border-color: #d8eadb !important;
+  color: #4e715a;
+  background: white;
+}
+
+.avatar-confirm {
+  color: white;
+  background: #11a936;
+  box-shadow: 0 8px 18px rgba(17, 169, 54, 0.2);
 }
 
 .identity-copy span,
@@ -11256,7 +11994,7 @@ button {
   width:
     min(
       100%,
-      1550px
+      1900px
     );
 
   position: relative;
@@ -11266,12 +12004,12 @@ button {
   display: grid;
 
   grid-template-columns:
-    158px
+    210px
     minmax(
       0,
       1fr
     )
-    158px;
+    210px;
 
   align-items:
     start;
@@ -11412,6 +12150,17 @@ button {
   draggable="true"
 ] {
   cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: element;
+}
+
+.active-draggable-card[
+  draggable="true"
+] * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .active-draggable-card[
@@ -11597,18 +12346,19 @@ button {
 
   display: grid;
 
-  grid-template-columns:
-    repeat(
-      auto-fit,
-      minmax(
-        150px,
-        1fr
-      )
-    );
+  grid-template-columns: repeat(var(--active-slot-count, 4), minmax(190px, 1fr));
 
   align-items: start;
+  justify-content: center;
 
   gap: 18px;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 2px 10px;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(90, 153, 187, .45) transparent;
 }
 
 /* =========================================================
@@ -11794,6 +12544,8 @@ button {
 
 .cyber-card {
   min-height: 290px;
+  width: 100%;
+  max-width: 350px;
 
   position: relative;
 
@@ -12067,7 +12819,9 @@ button {
 
 .cyber-card-image {
   width: 100%;
-  height: 170px;
+  aspect-ratio: 1 / 1;
+  height: auto;
+  max-height: 290px;
 
   overflow: hidden;
 
@@ -12093,7 +12847,7 @@ button {
 
   display: block;
 
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .image-placeholder {
@@ -15831,6 +16585,7 @@ small {
 .recommended-material { display:grid; justify-items:start; gap:5px; margin-top:11px; padding-top:10px; border-top:1px solid #dfe9df; }
 .recommended-material strong { color:#1a5f30; font-size:12px; text-transform:capitalize; }
 .question-learning-feedback > small { display:block; margin-top:8px; color:#4c7655; font-weight:700; }
+.question-learning-feedback > .question-waiting-opponent { color:#8a641d; }
 .question-bonus-choice { display:grid; gap:10px; margin-top:13px; padding-top:12px; border-top:1px solid #dcebdc; }
 .question-bonus-choice > div:first-child { display:grid; gap:3px; }
 .question-bonus-choice > div:first-child strong { color:#176d2e; font-size:12px; }
@@ -16474,20 +17229,7 @@ h2 {
   }
 
   .deck-slots {
-    grid-template-columns:
-      repeat(
-        4,
-        minmax(
-          120px,
-          1fr
-        )
-      );
-
     gap: 12px;
-  }
-
-  .cyber-card-image {
-    height: 145px;
   }
 
   .control-console {
@@ -16720,24 +17462,11 @@ h2 {
   }
 
   .deck-slots {
-    grid-template-columns:
-      repeat(
-        2,
-        minmax(
-          0,
-          1fr
-        )
-      );
-
     gap: 10px;
   }
 
   .cyber-card {
     min-height: 265px;
-  }
-
-  .cyber-card-image {
-    height: 125px;
   }
 
   .empty-card {
@@ -16925,18 +17654,28 @@ h2 {
 @media (
   max-width: 480px
 ) {
-  .deck-slots {
-    grid-template-columns:
-      1fr
-      1fr;
+  .avatar-picker-panel {
+    padding: 22px 16px;
+    border-radius: 22px;
+  }
+
+  .avatar-picker-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .avatar-choice {
+    border-radius: 15px;
+    font-size: 32px;
+  }
+
+  .avatar-picker-actions button {
+    min-height: 44px;
+    padding: 0 14px;
   }
 
   .cyber-card {
     min-height: 245px;
-  }
-
-  .cyber-card-image {
-    height: 105px;
   }
 
   .cyber-card-inner
@@ -17966,6 +18705,84 @@ h2 {
 .bonus-item small { color: #607865; }
 .bonus-item { border-color: #cfe4cf; background: linear-gradient(145deg, #fff, #f2f9ef); }
 .bonus-item-icon { background: #e6f5e5; }
+
+.turn-ap-summary {
+  color: #245b33;
+  font-weight: 800;
+}
+.turn-ap-summary b {
+  display: inline-grid;
+  min-width: 38px;
+  min-height: 24px;
+  place-items: center;
+  margin-right: 4px;
+  padding: 0 7px;
+  border: 1px solid #b7dfb8;
+  border-radius: 999px;
+  color: #11762c;
+  background: #eaf7e8;
+}
+.turn-ap-summary small { color: #66816a; font-weight: 700; }
+
+.control-console.action-points-console {
+  grid-template-columns: 20px repeat(2, minmax(0, 1fr)) minmax(120px, 1.1fr) repeat(6, minmax(0, 1fr)) 20px;
+}
+.combo-attack-skill { border-color: #b9dcbc; background: linear-gradient(150deg, #f8fff6, #e7f6e5); color: #1b6330; }
+.combo-attack-skill .console-icon { color: #108c32; }
+.end-turn-skill { border-color: #d7e5d6; background: #f7faf5; color: #47634b; }
+.end-turn-skill .console-icon { color: #6c8d6f; }
+
+.combo-attack-modal {
+  position: relative;
+  z-index: 2;
+  width: min(760px, calc(100vw - 28px));
+  max-height: min(88vh, 900px);
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid #d7ead6;
+  border-radius: 24px;
+  color: #21472b;
+  background: linear-gradient(145deg, #fff, #f4faf1);
+  box-shadow: 0 24px 80px rgba(24, 66, 34, .24);
+}
+.combo-attack-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+.combo-attack-header h2 { margin: 7px 0 6px; color: #173e24; font-size: clamp(22px, 4vw, 30px); }
+.combo-attack-header p { max-width: 620px; margin: 0; color: #647c67; line-height: 1.5; }
+.combo-choice-section { margin-top: 16px; }
+.combo-choice-section > strong { display: block; margin-bottom: 9px; color: #397247; font-size: 11px; letter-spacing: .12em; }
+.combo-card-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.combo-card-option-wrap { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 6px; }
+.combo-card-option-wrap .combo-card-option { min-height: 78px; }
+.combo-primary-choice { align-self: stretch; max-width: 116px; padding: 8px; border: 1px solid #d6e7d4; border-radius: 12px; color: #397247; background: #f7fbf5; font-size: 9px; font-weight: 900; cursor: pointer; }
+.combo-primary-choice:disabled { opacity: .5; cursor: not-allowed; }
+.combo-primary-choice.selected { border-color: #20a342; color: #fff; background: #20a342; }
+.combo-card-option { min-width: 0; display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid #d6e7d4; border-radius: 14px; text-align: left; color: #21472b; background: #fff; cursor: pointer; }
+.combo-card-option.selected { border-color: #20a342; background: #edf8e9; box-shadow: 0 0 0 2px rgba(24, 169, 58, .12); }
+.combo-card-option img { width: 48px; height: 58px; flex: 0 0 auto; border-radius: 8px; object-fit: cover; background: #e6f2e2; }
+.combo-card-option-copy { min-width: 0; display: grid; gap: 4px; }
+.combo-card-option-copy b { overflow: hidden; color: #20482b; text-overflow: ellipsis; white-space: nowrap; }
+.combo-card-option-copy small { color: #66806a; font-size: 11px; line-height: 1.35; }
+.combo-choice-check { margin-left: auto; color: #108c32; font-weight: 900; }
+.combo-synergy-preview { display: grid; gap: 4px; margin: 12px 0 0; padding: 13px 15px; border: 1px solid #c8e5c5; border-radius: 14px; color: #245633; background: linear-gradient(120deg, #f1faef, #fff); }
+.combo-synergy-preview > span { color: #398348; font-size: 12px; font-weight: 850; }
+.combo-synergy-preview > small { color: #66806a; line-height: 1.4; }
+.combo-direct-note { margin: 14px 0 0; padding: 12px 14px; border: 1px solid #d4e6d2; border-radius: 12px; color: #5c765f; background: #f4faf1; }
+.combo-attack-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+.combo-attack-actions > span { margin-right: auto; color: #397247; font-size: 13px; font-weight: 850; }
+
+@media (max-width: 1150px) {
+  .control-console.action-points-console { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .control-console.action-points-console { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .combo-attack-modal { padding: 18px; }
+}
+@media (max-width: 560px) {
+  .combo-card-options { grid-template-columns: 1fr; }
+  .combo-primary-choice { max-width: 100px; }
+  .combo-attack-actions { flex-wrap: wrap; }
+  .combo-attack-actions > span { width: 100%; }
+}
 
 
 </style>
