@@ -1,0 +1,30 @@
+import {test,expect} from '@playwright/test';
+import {readFileSync} from 'node:fs';
+const config=['.env','.env.local'].map(p=>{try{return readFileSync(p,'utf8')}catch{return ''}}).join('\n');
+const endpoint=config.match(/^VITE_SUPABASE_URL\s*=\s*["']?([^\s"']+)/m)[1];
+test('all public routes follow Album publication, revoke on focus and never load the full card catalog',async({page})=>{
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));let published=true,offline=false;const requests=[];
+ const cards=[{id:'visible',name:'Chosen Coby',card_code:'COB-003',element:'Knight',rarity:'Rare',hp:120,attack:30,defense:14,skills:[{id:'shown-skill',name:'Visible guard',description:'Shield 8',metadata:{catalog_only:false}}]},{id:'fusion',name:'Chosen Fusion',card_code:'F01',element:'Forest',rarity:'Epic',fusion_only:true,hp:160,attack:45,defense:14,skills:[]}];
+ await page.route(`${endpoint}/**`,r=>{
+  const url=new URL(r.request().url());requests.push(url);const resource=url.pathname.split('/').at(-1);
+  if(resource==='get_landing_cards')return r.fulfill(offline?{status:503,json:{message:'Offline'}}:{json:published?cards:[]});
+  if(resource==='game_cards')return r.fulfill({json:[...cards,{id:'hidden',name:'NEVER PUBLIC',element:'Water'}]});
+  if(resource==='get_landing_fusion_recipes')return r.fulfill({json:[{id:'recipe',result_game_card_id:'fusion',is_active:true,name:'Recipe',materials:[{id:'material',recipe_id:'recipe',material_type:'exact_card',quantity:1,card_code:'COB-003',metadata:{}}]}]});
+  if(resource==='special_skills')return r.fulfill({json:[{id:'shown-skill',name:'Visible guard',is_active:true,catalog_status:'active',metadata:{},limits:{cooldown_turns:2}},{id:'hidden-skill',name:'NEVER PUBLIC SKILL',is_active:true,catalog_status:'active',metadata:{}}]});
+  return r.fulfill({json:[]});
+ });
+ await page.goto('/cards');await expect(page.locator('.unit-card')).toHaveCount(1);await expect(page.locator('.unit-card')).toContainText('Chosen Coby');await expect(page.locator('.unit-card')).toContainText('Visible guard');await expect(page.getByText('NEVER PUBLIC',{exact:true})).toHaveCount(0);
+ await page.getByRole('link',{name:'Fusion',exact:true}).click();await expect(page.locator('.fusion-recipe')).toHaveCount(1);await expect(page.locator('.fusion-recipe')).toContainText('Chosen Fusion');await expect(page.locator('.fusion-recipe')).toContainText('Chosen Coby');await expect(page.locator('.recipe-disclosure small')).toHaveText('1 resep');
+ await page.getByRole('link',{name:'Skill',exact:true}).click();await expect(page.locator('.skill-card')).toHaveCount(1);await expect(page.locator('.skill-card')).toContainText('Cooldown 2 giliran pemilik');
+ await page.getByRole('link',{name:'Home',exact:true}).click();await expect(page.locator('.featured-card')).toHaveCount(2);
+ await page.getByRole('link',{name:'Kartu',exact:true}).click();await page.locator('.unit-card').click();await expect(page.getByRole('dialog')).toBeVisible();
+ published=false;await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await expect(page.locator('.unit-card')).toHaveCount(0);await expect(page.getByRole('dialog')).toHaveCount(0);
+ published=true;await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await expect(page.locator('.unit-card')).toHaveCount(1);
+ offline=true;await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await expect(page.getByRole('alert')).toContainText('Katalog publik belum dapat dimuat');await expect(page.locator('.unit-card')).toHaveCount(0);
+ offline=false;await page.getByRole('button',{name:'Coba lagi',exact:true}).click();await expect(page.locator('.unit-card')).toHaveCount(1);
+ expect(requests.filter(u=>u.pathname.endsWith('/game_cards'))).toHaveLength(0);
+ expect(requests.filter(u=>u.pathname.endsWith('/fusion_recipes'))).toHaveLength(0);
+ expect(requests.filter(u=>u.pathname.endsWith('/fusion_recipe_materials'))).toHaveLength(0);
+ expect(requests.filter(u=>u.pathname.endsWith('/get_landing_fusion_recipes'))).not.toHaveLength(0);
+ for(const url of requests.filter(u=>u.pathname.endsWith('/special_skills')))expect(url.searchParams.get('id')).toBe('in.(shown-skill)');expect(errors).toEqual([]);
+});

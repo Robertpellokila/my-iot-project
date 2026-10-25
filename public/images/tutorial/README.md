@@ -1,11 +1,26 @@
-# Slot GIF tutorial
+# Panduan battle interaktif
 
-Tambahkan GIF tutorial di folder ini. Halaman Home akan memuatnya otomatis dan menampilkan placeholder sampai file tersedia.
+Home memakai screenshot Player Battle dan Public Battle (Stadium) dengan penanda
+bernomor yang membuka penjelasan menu. Teks/aturan ada di `src/data/battleGuide.js`;
+koordinat ada di `src/data/battle-guide-screens.json`.
 
-- `deck-shuffle.gif` — kartu pemain + 20 kartu arena, shuffle, lalu ambil 20 kartu teratas.
-- `playerbattle-overview.gif` — ringkasan panel dan menu PlayerBattle.
-- `summon-attack.gif` — summon dengan RFID dan alur memilih target attack.
-- `bench-graveyard.gif` — membuka bench/graveyard dan mengelola kartu.
-- `quiz-fusion-effects.gif` — quiz, memilih bonus skill, fusion, dan efek status.
+Perbarui screenshot setelah layout berubah:
 
-Sumber file yang dilayani browser berada di `/images/tutorial/<nama-file>.gif`.
+```sh
+node scripts/capture-battle-guide.mjs
+```
+
+Script menjalankan Vite terpisah pada port 5185 dan Chrome headless, memakai
+fixture Alya/Raka, memalsukan permintaan battle, dan memblokir realtime. Tidak ada
+akun, UID, atau pertandingan sungguhan yang diubah. Ilustrasi yang sudah publik
+dapat dibaca lewat RPC publik; ilustrasi starter lokal menjadi fallback offline.
+Chrome dan konfigurasi Vite project diperlukan.
+
+Fixture kartu dan kedua skill dibagi dengan tes panel aksi melalui
+`scripts/lib/battle-demo.mjs`. Screenshot pemain memilih Coby sehingga konteks
+kartu, kedua skill, AP, dan panel aksi terbaru terlihat. Perbarui juga penjelasan
+di `battleGuide.js` jika label/alur tombol berubah.
+
+Output: `player-battle-guide.jpg`, `public-battle-guide.jpg`, dan koordinat penanda.
+Kedua gambar lazy-loaded dengan ukuran tetap. Ponsel menyediakan daftar tombol
+menu yang sama dan menggulir ke penjelasan setelah penanda dipilih.

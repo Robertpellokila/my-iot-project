@@ -8,10 +8,14 @@ import { supabase } from "../lib/supabase";
 import { useBattleSession } from "../composables/battle/useBattleSession";
 
 import { useBattleUiSync } from "../composables/battle/useBattleUiSync";
+import { usePublicBattleToasts } from '../composables/battle/usePublicBattleToasts.js';
 
 import PublicActiveField from "../components/battle/PublicActiveField.vue";
+import PublicBattleMusic from '../components/battle/PublicBattleMusic.vue';
+import PublicSkillCinematic from '../components/battle/PublicSkillCinematic.vue';
+import PublicQuizDisplay from '../components/battle/PublicQuizDisplay.vue';
+import { isPublicBattleLayout, normalizePublicBattleLayout } from "../utils/publicBattleLayouts";
 
-import BattleZoneStack from "../components/battle/BattleZoneStack.vue";
 
 const route = useRoute();
 
@@ -50,11 +54,19 @@ const {
   questionError,
 
   loadBattle,
+  refreshBattle,
 
   resetSession,
 } = useBattleSession();
 
 const activeFieldRef = ref(null);
+const latestQuizEvent = ref(null);
+const latestSkillEvent = ref(null);
+let refreshingPublicBattle = false;
+// The shared link also carries the choice for installations awaiting migration 026.
+const publicLayout = computed(() => isPublicBattleLayout(route.query.layout)
+  ? route.query.layout
+  : normalizePublicBattleLayout(battle.value?.public_layout));
 const publicPageRef = ref(null);
 const fullscreenActive = ref(false);
 let statusPollTimer = null;
@@ -109,6 +121,8 @@ const STATUS_REFRESH_EVENT_TYPES = new Set([
   "status_stack_changed",
   "turn_changed",
   "turn_ended",
+  "card_move",
+  "turn_end",
 ]);
 
 // RPC is the source of truth; polling is an intentional fallback when the
@@ -139,19 +153,12 @@ const loadStatusEffects = async () => {
 
 const {
   players: liveUi,
+  spotlight: liveSpotlight,
 
   connect: connectBattleUi,
 
   disconnect: disconnectBattleUi,
 } = useBattleUiSync();
-
-const liveTurnPlayer = computed(() => {
-  if (String(battle.value?.status ?? "").toLowerCase() !== "battle") return null;
-  const turn = String(battle.value?.current_turn ?? "").trim().toLowerCase();
-  if (["p1", "player1", "player_1"].includes(turn)) return "p1";
-  if (["p2", "player2", "player_2"].includes(turn)) return "p2";
-  return null;
-});
 
 /* =========================================================
    SOUND SYSTEM
@@ -398,10 +405,6 @@ const fusionHistoryLoading = ref(false);
 
 const fusionHistoryError = ref("");
 
-const fusionAnnouncement = ref(null);
-
-let fusionAnnouncementTimer = null;
-
 const fusionHistoryMaterials = (event) =>
   Array.isArray(event?.payload?.materials) ? event.payload.materials : [];
 
@@ -500,22 +503,6 @@ const showFusionAnnouncement = (event) => {
   }
 
   void playSound("fusion", 0.92);
-
-  fusionAnnouncement.value = event;
-
-  if (fusionAnnouncementTimer) {
-    clearTimeout(fusionAnnouncementTimer);
-  }
-
-  fusionAnnouncementTimer = setTimeout(
-    () => {
-      fusionAnnouncement.value = null;
-
-      fusionAnnouncementTimer = null;
-    },
-
-    4200,
-  );
 };
 
 
@@ -1333,6 +1320,12 @@ const fetchBattleCardById = async (id) => {
   return data ? normalizeBattleCard(data) : null;
 };
 
+const { current: actionToast, receive: receiveActionToast } = usePublicBattleToasts({
+  battle,
+  findCard: findBattleCardById,
+  fetchCard: fetchBattleCardById,
+});
+
 /* =========================================================
 
    POSITION
@@ -1719,6 +1712,9 @@ const subscribeCombatEvents = () => {
       },
 
       ({ new: event }) => {
+        if (String(event?.type).startsWith('question_')) latestQuizEvent.value = event;
+        receiveActionToast(event);
+        if (event?.type === 'special_skill') { latestSkillEvent.value = event; void loadStatusEffects(); }
         if (event?.type === "attack") {
           void startCombatAnimation(event);
         }
@@ -1848,6 +1844,8 @@ watch(
     }
 
     const eventType = String(event.type ?? "").toLowerCase();
+    if (eventType.startsWith('question_')) latestQuizEvent.value = event;
+    receiveActionToast(event);
 
     if (STATUS_REFRESH_EVENT_TYPES.has(eventType)) {
       void loadStatusEffects();
@@ -1876,11 +1874,11 @@ watch(
       void playSound("summon", 0.82);
     }
 
-    if (event.type === "bench") {
+    if (event.type === "bench" || (event.type === 'card_move' && event.payload?.action === 'move_to_bench')) {
       void playSound("bench", 0.72);
     }
 
-    if (event.type === "swap") {
+    if (event.type === "swap" || (event.type === 'card_move' && ['return_from_bench', 'switch_active'].includes(event.payload?.action))) {
       void playSound("swap", 0.78);
     }
 
@@ -1940,6 +1938,10 @@ onMounted(() => {
   statusPollTimer = window.setInterval(() => {
     if (document.visibilityState === 'visible' && battle.value?.id &&
         battle.value.status !== 'finished') void loadStatusEffects();
+    if (document.visibilityState === 'visible' && battle.value?.id && battle.value.status !== 'finished' && !refreshingPublicBattle) {
+      refreshingPublicBattle = true;
+      void refreshBattle().finally(() => { refreshingPublicBattle = false; });
+    }
   }, 2500);
   // Browser mengizinkan audio setelah minimal satu interaksi user.
   window.addEventListener("pointerdown", handleAudioUnlockInteraction, {
@@ -1969,12 +1971,6 @@ onUnmounted(async () => {
   if (eventAnnouncementTimer) {
     clearTimeout(eventAnnouncementTimer);
     eventAnnouncementTimer = null;
-  }
-
-  if (fusionAnnouncementTimer) {
-    clearTimeout(fusionAnnouncementTimer);
-
-    fusionAnnouncementTimer = null;
   }
 
   await Promise.all([
@@ -2031,6 +2027,8 @@ onUnmounted(async () => {
         </strong>
       </button>
 
+      <PublicBattleMusic :ducked="combatAnimation.active || ultimateAnimation.active || showQuestion" />
+
       <button
         type="button"
         class="public-fullscreen-control"
@@ -2041,61 +2039,6 @@ onUnmounted(async () => {
         <span aria-hidden="true">{{ fullscreenActive ? '⤡' : '⛶' }}</span>
         <strong>{{ fullscreenActive ? 'EXIT FULLSCREEN' : 'TV FULLSCREEN' }}</strong>
       </button>
-
-      <!-- =================================================
-           PHASE 3D.13 • FUSION EVENT ANNOUNCEMENT
-      ================================================== -->
-
-      <Transition name="fusion-pop">
-        <div v-if="fusionAnnouncement" class="fusion-event-toast">
-          <div class="fusion-event-icon">
-            {{ fusionAnnouncement.payload?.recipe_icon ?? "🧬" }}
-          </div>
-
-          <div class="fusion-event-copy">
-            <small>
-              {{
-                String(
-                  fusionAnnouncement.source_player ?? "PLAYER",
-                ).toUpperCase()
-              }}
-              •
-              {{ fusionHistoryKindLabel(fusionAnnouncement) }}
-            </small>
-
-            <strong>
-              {{ fusionAnnouncement.payload?.recipe_name ?? "Fusion" }}
-            </strong>
-
-            <span>
-              →
-              {{ fusionAnnouncement.payload?.result?.name ?? "Fusion Result" }}
-            </span>
-          </div>
-        </div>
-      </Transition>
-
-      <!-- =================================================
-           PHASE 3D.16 • NORMALIZED EVENT ANNOUNCEMENT
-      ================================================== -->
-
-      <Transition name="event-pop">
-        <div
-          v-if="eventAnnouncement"
-          class="battle-event-toast"
-          :class="eventAnnouncement.tone"
-        >
-          <div class="battle-event-toast-icon">
-            {{ eventAnnouncement.icon }}
-          </div>
-
-          <div class="battle-event-toast-copy">
-            <small>{{ eventAnnouncement.eyebrow }}</small>
-            <strong>{{ eventAnnouncement.title }}</strong>
-            <span>{{ eventAnnouncement.message }}</span>
-          </div>
-        </div>
-      </Transition>
 
       <!-- =================================================
            PHASE 3D.13 • FUSION HISTORY BUTTON
@@ -2252,118 +2195,35 @@ onUnmounted(async () => {
         </div>
       </Transition>
 
-      <div class="public-arena-shell">
-        <!-- P1 -->
-
-        <aside class="public-zone-rail">
-          <div class="zone-player-label blue">
-            <span> PLAYER 1 </span>
-
-            <strong>
-              {{ battle.player1_name ?? "Player 1" }}
-            </strong>
-          </div>
-
-          <BattleZoneStack
-            zone="bench"
-            side="left"
-            accent="blue"
-            :cards="player1Bench"
-            :max="Number(battle.max_bench ?? 4)"
-            :readonly="true"
-            :allow-drop="false"
-            :draggable-cards="false"
-            :mirror-only="true"
-            :viewer-open="liveTurnPlayer === 'p1' && liveUi.p1.viewerZone === 'bench'"
-            :viewer-index="liveUi.p1.viewerIndex"
-          />
-
-          <div class="deck-counter blue">
-            <span> PHYSICAL DECK </span>
-
-            <strong>
-              {{ player1DeckRemaining }}
-
-              /
-
-              {{ player1DeckTotal }}
-            </strong>
-          </div>
-
-          <BattleZoneStack
-            zone="graveyard"
-            side="left"
-            accent="blue"
-            :cards="player1Graveyard"
-            :readonly="true"
-            :mirror-only="true"
-            :viewer-open="liveTurnPlayer === 'p1' && liveUi.p1.viewerZone === 'graveyard'"
-            :viewer-index="liveUi.p1.viewerIndex"
-          />
-        </aside>
-
-        <!-- CENTER -->
-
-        <section class="public-arena-center">
-          <PublicActiveField
-            ref="activeFieldRef"
-            :battle="battle"
-            :player1-active="player1Active"
-            :player2-active="player2Active"
-            :player1-bench-count="player1Bench.length"
-            :player2-bench-count="player2Bench.length"
-            :combat-fx="fieldCombatFx"
-            :status-effects="activeStatusEffects"
-          />
-        </section>
-
-        <!-- P2 -->
-
-        <aside class="public-zone-rail">
-          <div class="zone-player-label red">
-            <span> PLAYER 2 </span>
-
-            <strong>
-              {{ battle.player2_name ?? "Player 2" }}
-            </strong>
-          </div>
-
-          <BattleZoneStack
-            zone="bench"
-            side="right"
-            accent="red"
-            :cards="player2Bench"
-            :max="Number(battle.max_bench ?? 4)"
-            :readonly="true"
-            :mirror-only="true"
-            :viewer-open="liveTurnPlayer === 'p2' && liveUi.p2.viewerZone === 'bench'"
-            :viewer-index="liveUi.p2.viewerIndex"
-          />
-
-          <div class="deck-counter red">
-            <span> PHYSICAL DECK </span>
-
-            <strong>
-              {{ player2DeckRemaining }}
-
-              /
-
-              {{ player2DeckTotal }}
-            </strong>
-          </div>
-
-          <BattleZoneStack
-            zone="graveyard"
-            side="right"
-            accent="red"
-            :cards="player2Graveyard"
-            :readonly="true"
-            :mirror-only="true"
-            :viewer-open="liveTurnPlayer === 'p2' && liveUi.p2.viewerZone === 'graveyard'"
-            :viewer-index="liveUi.p2.viewerIndex"
-          />
-        </aside>
+      <div class="tbc-public-frame">
+        <PublicQuizDisplay :battle="battle" :question="currentQuestion" :round="currentQuestionRound" :active="showQuestion" :loading="questionLoading" :error="questionError || ''" :event="latestQuizEvent" />
+        <PublicSkillCinematic :battle="battle" :live-ui="liveUi" :event="latestSkillEvent" :paused="showQuestion" :cards="[...player1Active, ...player2Active, ...player1Bench, ...player2Bench]" />
+        <PublicActiveField
+          :layout="publicLayout"
+          ref="activeFieldRef"
+          :battle="battle"
+          :spotlight="liveSpotlight"
+          :live-ui="liveUi"
+          :player1-graveyard="player1Graveyard"
+          :player2-graveyard="player2Graveyard"
+          :player1-active="player1Active"
+          :player2-active="player2Active"
+          :player1-bench-count="player1Bench.length"
+          :player2-bench-count="player2Bench.length"
+          :player1-bench="player1Bench"
+          :player2-bench="player2Bench"
+          :player1-graveyard-count="player1Graveyard.length"
+          :player2-graveyard-count="player2Graveyard.length"
+          :player1-deck-remaining="player1DeckRemaining"
+          :player2-deck-remaining="player2DeckRemaining"
+          :announcement="eventAnnouncement"
+          :action-toast="actionToast"
+          :combat-fx="fieldCombatFx"
+          :status-effects="activeStatusEffects"
+        />
       </div>
+
+      <p class="tbc-orientation-hint">Putar layar untuk melihat arena lebih besar.</p>
 
       <!-- =================================================
            PHASE 3D.16 • ULTIMATE AOE CINEMATIC
@@ -2615,230 +2475,106 @@ onUnmounted(async () => {
   box-sizing: border-box;
 }
 
+/* Keep the reference composition together at every viewport size. */
 .public-battle-page {
-  width: 100vw;
-
-  height: 100dvh;
-
   position: fixed;
-
   inset: 0;
-
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
-
-  background: linear-gradient(
-    180deg,
-    #dff3ff,
-    #edf9ff 46%,
-
-    #e3f3e7
-  );
-
+  overscroll-behavior: none;
+  color: #fff9e7;
+  background: #030d22;
   font-family: Inter, system-ui, sans-serif;
 }
 
-/* =========================================================
-   SOUND CONTROL
-========================================================= */
+.tbc-public-frame {
+  position: relative;
+  width: min(100vw, calc(100dvh * 1540 / 810));
+  aspect-ratio: 1540 / 810;
+  container-type: size;
+  flex: none;
+  overflow: hidden;
+}
 
-.public-sound-control {
+.tbc-orientation-hint { display: none; }
+@media (orientation: portrait) and (max-width: 760px) {
+  .tbc-orientation-hint { display: block; position: absolute; top: calc(50% + 28vw); margin: 16px; font-size: 12px; text-align: center; color: #b9ccec; }
+}
+
+.tbc-mirror-viewers {
+  display: none;
+}
+
+.public-sound-control,
+.public-fullscreen-control,
+.fusion-history-trigger {
   position: fixed;
-  left: 50%;
-  bottom: 12px;
   z-index: 9500;
-  transform: translateX(-50%);
-
-  min-height: 34px;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-
-  padding: 0 12px;
-  border: 1px solid rgba(73, 135, 173, 0.24);
-  border-radius: 999px;
-
-  color: #526f82;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 8px 24px rgba(45, 77, 96, 0.14);
-  backdrop-filter: blur(10px);
-
+  justify-content: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 4px 8px;
+  border: 1px solid #dcb85780;
+  border-radius: 5px;
+  color: #f2d57e;
+  background: #06152ce6;
+  box-shadow: 0 2px 9px #0005;
+  backdrop-filter: blur(6px);
   cursor: pointer;
   user-select: none;
-  transition:
-    transform 0.18s ease,
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    background 0.18s ease;
+  transition: background 150ms ease, border-color 150ms ease;
 }
 
-.public-sound-control:hover {
-  transform: translateX(-50%) translateY(-2px);
-  border-color: rgba(41, 174, 231, 0.46);
-  box-shadow: 0 12px 28px rgba(45, 77, 96, 0.2);
+.public-sound-control:hover,
+.public-fullscreen-control:hover,
+.fusion-history-trigger:hover {
+  border-color: #ffe398;
+  background: #10274ef2;
 }
 
-.public-sound-control span {
-  font-size: 14px;
+.public-sound-control:focus-visible,
+.public-fullscreen-control:focus-visible,
+.fusion-history-trigger:focus-visible {
+  outline: 2px solid #fff0b4;
+  outline-offset: 2px;
 }
 
-.public-sound-control strong {
-  font-size: 7px;
-  font-weight: 1000;
-  letter-spacing: 0.08em;
+.public-sound-control { left: 4px; bottom: 4px; }
+.public-fullscreen-control { right: 4px; bottom: 4px; }
+.fusion-history-trigger { left: 4px; bottom: 34px; }
+
+.public-sound-control span,
+.public-fullscreen-control span,
+.fusion-history-trigger > span {
+  font-size: 13px;
+  line-height: 1;
 }
 
-.public-sound-control.enabled {
-  color: #087ba4;
-  border-color: rgba(25, 171, 223, 0.35);
-  background: rgba(232, 250, 255, 0.94);
+.public-sound-control strong,
+.public-fullscreen-control strong,
+.fusion-history-trigger strong {
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .035em;
 }
 
-.public-sound-control.locked {
-  animation: soundControlPulse 1.8s ease-in-out infinite;
-}
-
-@keyframes soundControlPulse {
-  0%, 100% {
-    box-shadow: 0 8px 24px rgba(45, 77, 96, 0.14);
-  }
-
-  50% {
-    box-shadow:
-      0 8px 24px rgba(45, 77, 96, 0.16),
-      0 0 0 5px rgba(43, 192, 239, 0.1);
-  }
-}
-
-/* =========================================================
-
-   MAIN
-
-========================================================= */
-
-.public-arena-shell {
-  width: 100%;
-
-  height: 100%;
-
+.fusion-history-trigger > b {
   display: grid;
-
-  grid-template-columns:
-    165px
-    minmax(0, 1fr)
-    165px;
-
-  gap: 10px;
-
-  padding: 8px 10px;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: #f2d57e;
+  background: #f2d57e18;
+  font-size: 8px;
 }
-
-.public-arena-center {
-  min-width: 0;
-
-  min-height: 0;
-}
-
-/* =========================================================
-
-   RAIL
-
-========================================================= */
-
-.public-zone-rail {
-  min-height: 0;
-
-  display: grid;
-
-  grid-template-rows:
-    50px
-    minmax(0, 1fr)
-    34px
-    minmax(0, 1fr);
-
-  gap: 8px;
-}
-
-.zone-player-label {
-  display: flex;
-
-  flex-direction: column;
-
-  justify-content: center;
-
-  padding: 7px 11px;
-
-  border-radius: 12px;
-
-  background: #ffffff;
-}
-
-.zone-player-label span {
-  font-size: 6px;
-
-  font-weight: 1000;
-}
-
-.zone-player-label strong {
-  color: #17324a;
-
-  font-size: 12px;
-}
-
-.zone-player-label.blue {
-  border-left: 4px solid #27aae6;
-}
-
-.zone-player-label.red {
-  border-right: 4px solid #ec5578;
-
-  text-align: right;
-}
-
-.public-zone-rail :deep(.battle-zone-stack) {
-  width: 100%;
-
-  height: 100%;
-
-  min-height: 0;
-}
-
-.deck-counter {
-  display: flex;
-
-  align-items: center;
-
-  justify-content: space-between;
-
-  padding: 0 10px;
-
-  border-radius: 9px;
-
-  background: #ffffff;
-}
-
-.deck-counter span {
-  font-size: 5.5px;
-
-  font-weight: 950;
-}
-
-.deck-counter strong {
-  font-size: 10px;
-}
-
-.deck-counter.blue strong {
-  color: #168bc7;
-}
-
-.deck-counter.red strong {
-  color: #d54867;
-}
-
-/* =========================================================
-
-   STATE
-
-========================================================= */
 
 .public-state {
   width: 100%;
@@ -3460,13 +3196,6 @@ onUnmounted(async () => {
 ========================================================= */
 
 @media (max-width: 1300px) {
-  .public-arena-shell {
-    grid-template-columns:
-      145px
-      minmax(0, 1fr)
-      145px;
-  }
-
   .combat-breakdown {
     width: 280px;
   }
@@ -3481,163 +3210,6 @@ onUnmounted(async () => {
    FUSION EVENT / HISTORY
    Added on top of the user's existing PublicBattle UI.
 ========================================================= */
-
-.fusion-event-toast {
-  position: fixed;
-
-  top: 22px;
-  left: 50%;
-
-  z-index: 9500;
-
-  transform: translateX(-50%);
-
-  display: flex;
-  align-items: center;
-  gap: 12px;
-
-  min-width: min(420px, 88vw);
-
-  padding: 12px 16px;
-
-  border: 1px solid rgba(118, 86, 196, 0.22);
-
-  border-radius: 16px;
-
-  background: rgba(255, 255, 255, 0.96);
-
-  box-shadow: 0 18px 46px rgba(56, 87, 105, 0.17);
-
-  color: #31546a;
-
-  backdrop-filter: blur(16px);
-}
-
-.fusion-event-icon {
-  width: 42px;
-  height: 42px;
-
-  flex: 0 0 auto;
-
-  display: grid;
-  place-items: center;
-
-  border-radius: 13px;
-
-  background: linear-gradient(
-    145deg,
-    rgba(122, 87, 198, 0.13),
-    rgba(83, 164, 206, 0.09)
-  );
-
-  font-size: 21px;
-}
-
-.fusion-event-copy {
-  min-width: 0;
-
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.fusion-event-copy small {
-  color: #7d64bd;
-
-  font-size: 7px;
-
-  font-weight: 1000;
-
-  letter-spacing: 0.09em;
-}
-
-.fusion-event-copy strong {
-  overflow: hidden;
-
-  color: #31546a;
-
-  font-size: 13px;
-
-  text-overflow: ellipsis;
-
-  white-space: nowrap;
-}
-
-.fusion-event-copy span {
-  color: #708d9f;
-
-  font-size: 10px;
-
-  font-weight: 850;
-}
-
-.fusion-history-trigger {
-  position: fixed;
-
-  top: 118px;
-  left: 50%;
-
-  z-index: 500;
-
-  transform:
-    translateX(-50%);
-
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-
-  padding:
-    7px 11px;
-
-  border:
-    1px solid
-    rgba(90, 133, 157, 0.18);
-
-  border-radius:
-    999px;
-
-  background:
-    rgba(255, 255, 255, 0.94);
-
-  box-shadow:
-    0 8px 20px
-    rgba(61, 106, 129, 0.10);
-
-  color:
-    #486c82;
-
-  font-size:
-    7px;
-
-  font-weight:
-    1000;
-
-  letter-spacing:
-    0.05em;
-
-  cursor: pointer;
-
-  backdrop-filter:
-    blur(12px);
-}
-
-.fusion-history-trigger > span {
-  font-size: 13px;
-}
-
-.fusion-history-trigger > b {
-  min-width: 19px;
-  height: 19px;
-
-  display: grid;
-  place-items: center;
-
-  border-radius: 999px;
-
-  color: #6f55b1;
-
-  background: rgba(111, 85, 177, 0.1);
-}
 
 .fusion-history-overlay {
   position: fixed;
@@ -3992,11 +3564,6 @@ onUnmounted(async () => {
 }
 
 @media (max-width: 760px) {
-  .fusion-history-trigger {
-    top: 10px;
-    right: 10px;
-  }
-
   .fusion-history-overlay {
     padding: 10px;
   }
@@ -4012,100 +3579,6 @@ onUnmounted(async () => {
   }
 }
 
-
-/* =========================================================
-   PHASE 3D.16 • NORMALIZED EVENT TOAST
-========================================================= */
-
-.battle-event-toast {
-  position: fixed;
-  top: 88px;
-  left: 50%;
-  z-index: 12550;
-  transform: translateX(-50%);
-
-  min-width: min(520px, 82vw);
-  max-width: min(720px, 90vw);
-
-  display: flex;
-  align-items: center;
-  gap: 14px;
-
-  padding: 12px 16px;
-  border: 1px solid rgba(75, 112, 135, 0.18);
-  border-radius: 18px;
-  background: rgba(250, 253, 255, 0.96);
-  box-shadow: 0 18px 48px rgba(25, 48, 65, 0.22);
-  backdrop-filter: blur(18px);
-}
-
-.battle-event-toast.fire {
-  border-color: rgba(255, 141, 48, 0.82);
-  background: linear-gradient(120deg, rgba(99, 24, 6, .98), rgba(184, 53, 13, .96));
-  color: #fff4d8;
-  box-shadow: 0 0 36px rgba(243, 104, 18, .55), 0 12px 35px rgba(78, 15, 2, .42);
-}
-.battle-event-toast.fire .battle-event-toast-copy small,
-.battle-event-toast.fire .battle-event-toast-copy span { color: #ffe6bb; }
-.battle-event-toast.fire .battle-event-toast-icon {
-  background: rgba(255, 210, 100, .18);
-}
-
-.battle-event-toast.necro {
-  border-color: rgba(116, 76, 170, 0.34);
-  background:
-    linear-gradient(135deg, rgba(250, 248, 255, 0.97), rgba(238, 248, 255, 0.96));
-  box-shadow:
-    0 18px 48px rgba(55, 34, 92, 0.24),
-    0 0 34px rgba(118, 80, 178, 0.14);
-}
-
-.battle-event-toast-icon {
-  width: 44px;
-  height: 44px;
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  border-radius: 14px;
-  background: rgba(106, 82, 172, 0.10);
-  font-size: 22px;
-}
-
-.battle-event-toast-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.battle-event-toast-copy small {
-  color: #8b78b7;
-  font-size: 7px;
-  font-weight: 950;
-  letter-spacing: 0.09em;
-}
-
-.battle-event-toast-copy strong {
-  color: #29495f;
-  font-size: 14px;
-}
-
-.battle-event-toast-copy span {
-  color: #6f8797;
-  font-size: 9px;
-  font-weight: 750;
-}
-
-.event-pop-enter-active,
-.event-pop-leave-active {
-  transition: opacity 0.24s ease, transform 0.24s ease;
-}
-
-.event-pop-enter-from,
-.event-pop-leave-to {
-  opacity: 0;
-  transform: translate(-50%, -16px) scale(0.96);
-}
 
 /* =========================================================
    PHASE 3D.16 • ULTIMATE AOE CINEMATIC
@@ -4395,7 +3868,7 @@ onUnmounted(async () => {
 }
 
 
-/* PHASE 3D.20: Spectator-first stage. Every piece fits inside the TV viewport. */
+/* Spectator mode owns the viewport, including when the browser goes fullscreen. */
 :global(body.public-tv-mode),
 :global(body.public-tv-mode #app) {
   margin: 0;
@@ -4404,67 +3877,21 @@ onUnmounted(async () => {
   overflow: hidden !important;
   overscroll-behavior: none;
 }
-.public-battle-page {
-  width: 100%;
-  height: 100dvh;
-  height: 100vh; /* fallback */
-  height: 100dvh;
-  overscroll-behavior: none;
-}
-.public-arena-shell {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-  padding: clamp(5px, .6vh, 12px);
-  gap: clamp(5px, .6vw, 12px);
-  grid-template-columns:
-    clamp(90px, 8.3vw, 146px)
-    minmax(0, 1fr)
-    clamp(90px, 8.3vw, 146px);
-}
-.public-zone-rail {
-  min-height: 0;
-  min-width: 0;
-  grid-template-rows: minmax(0, 1fr) 28px minmax(0, 1fr);
-  gap: clamp(4px, .55vh, 9px);
-  overflow: hidden;
-}
-/* Player names and HP are already prominent in the main scoreboard. */
-.zone-player-label { display: none; }
-.public-arena-center { overflow: hidden; min-width: 0; min-height: 0; }
-.public-zone-rail :deep(.battle-zone-stack) { min-height: 0; min-width: 0; overflow: hidden; }
-.deck-counter { min-height: 0; }
-.public-fullscreen-control {
-  position: fixed;
-  right: clamp(9px, 1.25vw, 20px);
-  bottom: clamp(9px, 1.1vh, 17px);
-  z-index: 9500;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 12px;
-  color: #17485f;
-  background: rgba(255,255,255,.93);
-  border: 1px solid rgba(29,140,190,.30);
-  border-radius: 999px;
-  box-shadow: 0 8px 30px rgba(24,61,81,.14);
-  cursor: pointer;
-}
-.public-fullscreen-control span { font-size: 19px; line-height: 1; }
-.public-fullscreen-control strong { font-size: 10px; font-weight: 900; letter-spacing: .04em; }
-@media (max-width: 900px) {
-  .public-arena-shell {
-    grid-template-columns: clamp(57px, 7vw, 84px) minmax(0,1fr) clamp(57px, 7vw, 84px);
-    gap: 4px; padding: 4px;
-  }
-  .public-fullscreen-control strong { display: none; }
-  .public-fullscreen-control { padding: 6px 9px; }
-}
-@media (max-height: 630px) {
-  .public-zone-rail { grid-template-rows:minmax(0,1fr) 22px minmax(0,1fr); gap:3px; }
-  .public-fullscreen-control { bottom: 4px; padding:5px 8px; }
-  .public-sound-control { bottom: 4px; min-height:27px; }
-}
 
+@media (max-width: 760px), (max-height: 500px) {
+  .public-sound-control strong,
+  .public-fullscreen-control strong,
+  .fusion-history-trigger strong {
+    display: none;
+  }
+
+  .public-sound-control,
+  .public-fullscreen-control,
+  .fusion-history-trigger {
+    min-height: 22px;
+    padding: 3px 5px;
+  }
+
+  .fusion-history-trigger { bottom: 31px; }
+}
 </style>

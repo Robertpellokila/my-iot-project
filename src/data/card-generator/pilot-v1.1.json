@@ -1,0 +1,2414 @@
+{
+  "id": "tbc-pilot-v1.1-audited-necromancer",
+  "version": "1.1.0",
+  "expected_counts": {
+    "base": 30,
+    "fusion": 12
+  },
+  "source_document": "TBC_Pilot_Set_30_Base_12_Fusion_v1_1_Audited_Necromancer.docx",
+  "source_sha256": "4e06c23eafc69ca4b64cb45ac18b19760afd48477958cbb221cce0fa600a46c1",
+  "types": [
+    "Knight",
+    "Fire",
+    "Water",
+    "Forest",
+    "Thunder",
+    "Light",
+    "Dark"
+  ],
+  "rules": {
+    "fusion_ap": 2,
+    "signature_fusions_active_per_player": 1,
+    "shield_stacks": false,
+    "heal_cap": "max_hp",
+    "root_blocks": "voluntary_switch_only"
+  },
+  "cards": [
+    {
+      "card_code": "COB-003",
+      "name": "Coby — Circuit Buddy",
+      "kind": "base",
+      "type": "Knight",
+      "rarity": "Common",
+      "role": "Leader / Support",
+      "stats": {
+        "hp": 108,
+        "attack": 30,
+        "defense": 9
+      },
+      "skills": [
+        {
+          "name": "Spark Link",
+          "description": "Serangan normal; +3 damage jika ada ally di Bench.",
+          "source_text": "Spark Link — Serangan normal; +3 damage jika ada ally di Bench.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal",
+            "+3 damage jika ada ally di Bench."
+          ]
+        },
+        {
+          "name": "Banner Cover",
+          "description": "Beri Shield 8 ke 1 ally. CD 2.",
+          "source_text": "Banner Cover — Beri Shield 8 ke 1 ally. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Beri Shield 8 ke 1 ally. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 2,
+        "row": 1
+      },
+      "production_mapping": {
+        "card_code": "COB_003",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "TOC-003",
+      "name": "Tochi — Sprout Keeper",
+      "kind": "base",
+      "type": "Forest",
+      "rarity": "Common",
+      "role": "Sustain / Guard",
+      "stats": {
+        "hp": 110,
+        "attack": 29,
+        "defense": 10
+      },
+      "skills": [
+        {
+          "name": "Leaf Swipe",
+          "description": "Serangan normal; +3 damage jika diri memiliki Shield.",
+          "source_text": "Leaf Swipe — Serangan normal; +3 damage jika diri memiliki Shield.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal",
+            "+3 damage jika diri memiliki Shield."
+          ]
+        },
+        {
+          "name": "Camo Guard",
+          "description": "+4 DEF pada diri sampai menerima 1 hit. CD 2.",
+          "source_text": "Camo Guard — +4 DEF pada diri sampai menerima 1 hit. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "+4 DEF pada diri sampai menerima 1 hit. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 2,
+        "row": 2
+      },
+      "production_mapping": {
+        "card_code": "TOC_003",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "FAL-003",
+      "name": "Falcon — Draft Glider",
+      "kind": "base",
+      "type": "Light",
+      "rarity": "Common",
+      "role": "Initiator / Switch",
+      "stats": {
+        "hp": 102,
+        "attack": 31,
+        "defense": 8
+      },
+      "skills": [
+        {
+          "name": "Wing Tap",
+          "description": "Serangan normal; +3 damage pada aksi pertama setelah summon.",
+          "source_text": "Wing Tap — Serangan normal; +3 damage pada aksi pertama setelah summon.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal",
+            "+3 damage pada aksi pertama setelah summon."
+          ]
+        },
+        {
+          "name": "Wind Relay",
+          "description": "Switch 1 ally sebagai aksi; tidak menarik kartu. CD 2.",
+          "source_text": "Wind Relay — Switch 1 ally sebagai aksi; tidak menarik kartu. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Switch 1 ally sebagai aksi",
+            "tidak menarik kartu. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 2,
+        "row": 3
+      },
+      "production_mapping": {
+        "card_code": "FAL_003",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "FOX-003",
+      "name": "Byte Fox — Quick Cache",
+      "kind": "base",
+      "type": "Thunder",
+      "rarity": "Common",
+      "role": "Combo / Mobility",
+      "stats": {
+        "hp": 100,
+        "attack": 32,
+        "defense": 8
+      },
+      "skills": [
+        {
+          "name": "Byte Swipe",
+          "description": "Serangan normal; +3 damage jika baru masuk Active.",
+          "source_text": "Byte Swipe — Serangan normal; +3 damage jika baru masuk Active.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal",
+            "+3 damage jika baru masuk Active."
+          ]
+        },
+        {
+          "name": "Smoke Pixel",
+          "description": "Kurangi 7 damage dari hit berikutnya ke diri. CD 2.",
+          "source_text": "Smoke Pixel — Kurangi 7 damage dari hit berikutnya ke diri. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Kurangi 7 damage dari hit berikutnya ke diri. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 2,
+        "row": 4
+      },
+      "production_mapping": {
+        "card_code": "FOX_003",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "RAB-003",
+      "name": "Pixel Rabbit — Patch Bunny",
+      "kind": "base",
+      "type": "Light",
+      "rarity": "Common",
+      "role": "Builder / Heal",
+      "stats": {
+        "hp": 112,
+        "attack": 27,
+        "defense": 10
+      },
+      "skills": [
+        {
+          "name": "Block Bonk",
+          "description": "Serangan normal; +3 damage jika diri memiliki Shield.",
+          "source_text": "Block Bonk — Serangan normal; +3 damage jika diri memiliki Shield.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal",
+            "+3 damage jika diri memiliki Shield."
+          ]
+        },
+        {
+          "name": "Patch Kit",
+          "description": "Pulihkan 7 HP pada 1 ally. CD 2.",
+          "source_text": "Patch Kit — Pulihkan 7 HP pada 1 ally. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Pulihkan 7 HP pada 1 ally. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 2,
+        "row": 5
+      },
+      "production_mapping": {
+        "card_code": "RAB_003",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "PIC-003",
+      "name": "Pico Cat — Soot Sneaker",
+      "kind": "base",
+      "type": "Fire",
+      "rarity": "Common",
+      "role": "Scout / Feint",
+      "stats": {
+        "hp": 102,
+        "attack": 31,
+        "defense": 8
+      },
+      "skills": [
+        {
+          "name": "Ember Tap",
+          "description": "Serangan normal dan menerapkan Burn 1.",
+          "source_text": "Ember Tap — Serangan normal dan menerapkan Burn 1.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal dan menerapkan Burn 1."
+          ]
+        },
+        {
+          "name": "Soot Screen",
+          "description": "+4 DEF pada 1 ally sampai menerima 1 hit. CD 2.",
+          "source_text": "Soot Screen — +4 DEF pada 1 ally sampai menerima 1 hit. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "+4 DEF pada 1 ally sampai menerima 1 hit. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 2,
+        "row": 6
+      },
+      "production_mapping": {
+        "card_code": "PIC_003",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "COB-006",
+      "name": "Coby — Arc Vanguard",
+      "kind": "base",
+      "type": "Knight",
+      "rarity": "Rare",
+      "role": "Leader / Support",
+      "stats": {
+        "hp": 120,
+        "attack": 33,
+        "defense": 11
+      },
+      "skills": [
+        {
+          "name": "Arc Rally",
+          "description": "Serangan normal +6 setelah kamu Summon ally. CD 2.",
+          "source_text": "Arc Rally — Serangan normal +6 setelah kamu Summon ally. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +6 setelah kamu Summon ally. CD 2."
+          ]
+        },
+        {
+          "name": "Team Spirit",
+          "description": "Pilih: heal 12 pada 1 ally ATAU +4 DEF sampai 1 hit. CD 2.",
+          "source_text": "Team Spirit — Pilih: heal 12 pada 1 ally ATAU +4 DEF sampai 1 hit. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Pilih: heal 12 pada 1 ally ATAU +4 DEF sampai 1 hit. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [
+        "F01"
+      ],
+      "source": {
+        "table": 2,
+        "row": 7
+      },
+      "production_mapping": {
+        "card_code": "COB_006",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "COB-007",
+      "name": "Coby — Volt Commander",
+      "kind": "base",
+      "type": "Thunder",
+      "rarity": "Rare",
+      "role": "Leader / Tempo",
+      "stats": {
+        "hp": 124,
+        "attack": 35,
+        "defense": 12
+      },
+      "skills": [
+        {
+          "name": "Flag Jab",
+          "description": "Serangan normal; +3 damage jika ada ally di Bench.",
+          "source_text": "Flag Jab — Serangan normal; +3 damage jika ada ally di Bench.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal",
+            "+3 damage jika ada ally di Bench."
+          ]
+        },
+        {
+          "name": "Team Spirit",
+          "description": "Pilih: heal 12 pada 1 ally ATAU +4 DEF sampai 1 hit. CD 2.",
+          "source_text": "Team Spirit — Pilih: heal 12 pada 1 ally ATAU +4 DEF sampai 1 hit. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Pilih: heal 12 pada 1 ally ATAU +4 DEF sampai 1 hit. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [
+        "F02"
+      ],
+      "source": {
+        "table": 2,
+        "row": 8
+      },
+      "production_mapping": {
+        "card_code": "COB_007",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "COB-008",
+      "name": "Coby — Thunder Standard",
+      "kind": "base",
+      "type": "Thunder",
+      "rarity": "Epic",
+      "role": "Leader / Switch",
+      "stats": {
+        "hp": 128,
+        "attack": 35,
+        "defense": 12
+      },
+      "skills": [
+        {
+          "name": "Charge Formation",
+          "description": "Serangan normal +6 setelah ally melakukan Switch legal. CD 2.",
+          "source_text": "Charge Formation — Serangan normal +6 setelah ally melakukan Switch legal. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +6 setelah ally melakukan Switch legal. CD 2."
+          ]
+        },
+        {
+          "name": "Banner Cover",
+          "description": "Beri Shield 10 ke 1 ally. CD 2.",
+          "source_text": "Banner Cover — Beri Shield 10 ke 1 ally. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Beri Shield 10 ke 1 ally. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [
+        "F02",
+        "F12"
+      ],
+      "source": {
+        "table": 2,
+        "row": 9
+      },
+      "production_mapping": {
+        "card_code": "COB_008",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "TOC-005",
+      "name": "Tochi — Vine Tactician",
+      "kind": "base",
+      "type": "Forest",
+      "rarity": "Uncommon",
+      "role": "Control / Sustain",
+      "stats": {
+        "hp": 118,
+        "attack": 30,
+        "defense": 12
+      },
+      "skills": [
+        {
+          "name": "Leaf Swipe",
+          "description": "Serangan normal; +3 damage jika diri memiliki Shield.",
+          "source_text": "Leaf Swipe — Serangan normal; +3 damage jika diri memiliki Shield.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal",
+            "+3 damage jika diri memiliki Shield."
+          ]
+        },
+        {
+          "name": "Vine Trick",
+          "description": "Serangan normal; target tidak dapat melakukan Switch sukarela sampai akhir turn berikutnya. CD 2.",
+          "source_text": "Vine Trick — Serangan normal; target tidak dapat melakukan Switch sukarela sampai akhir turn berikutnya. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal",
+            "target tidak dapat melakukan Switch sukarela sampai akhir turn berikutnya. CD 2."
+          ]
+        }
+      ],
+      "tags": [
+        "fusion:ROOT_CONTROL"
+      ],
+      "source_fusions": [
+        "F08"
+      ],
+      "source": {
+        "table": 2,
+        "row": 10
+      },
+      "production_mapping": {
+        "card_code": "TOC_005",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "TOC-006",
+      "name": "Tochi — Forest Scout",
+      "kind": "base",
+      "type": "Forest",
+      "rarity": "Rare",
+      "role": "Control / Sustain",
+      "stats": {
+        "hp": 121,
+        "attack": 32,
+        "defense": 12
+      },
+      "skills": [
+        {
+          "name": "Vine Trick",
+          "description": "Serangan normal; cegah 1 Switch sukarela target. CD 2.",
+          "source_text": "Vine Trick — Serangan normal; cegah 1 Switch sukarela target. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal",
+            "cegah 1 Switch sukarela target. CD 2."
+          ]
+        },
+        {
+          "name": "Green Recovery",
+          "description": "Pulihkan diri 10 HP pada akhir turn berikutnya. CD 2.",
+          "source_text": "Green Recovery — Pulihkan diri 10 HP pada akhir turn berikutnya. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Pulihkan diri 10 HP pada akhir turn berikutnya. CD 2."
+          ]
+        }
+      ],
+      "tags": [
+        "fusion:ROOT_CONTROL"
+      ],
+      "source_fusions": [
+        "F01",
+        "F08"
+      ],
+      "source": {
+        "table": 3,
+        "row": 1
+      },
+      "production_mapping": {
+        "card_code": "TOC_006",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "TOC-008",
+      "name": "Tochi — Emerald Illusion",
+      "kind": "base",
+      "type": "Forest",
+      "rarity": "Epic",
+      "role": "Control / Trick",
+      "stats": {
+        "hp": 128,
+        "attack": 33,
+        "defense": 13
+      },
+      "skills": [
+        {
+          "name": "Thorn Circuit",
+          "description": "Serangan normal +5 jika target sedang Root. CD 2.",
+          "source_text": "Thorn Circuit — Serangan normal +5 jika target sedang Root. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +5 jika target sedang Root. CD 2."
+          ]
+        },
+        {
+          "name": "Camo Guard",
+          "description": "+4 DEF pada diri sampai menerima 1 hit. CD 2.",
+          "source_text": "Camo Guard — +4 DEF pada diri sampai menerima 1 hit. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "+4 DEF pada diri sampai menerima 1 hit. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [
+        "F12"
+      ],
+      "source": {
+        "table": 3,
+        "row": 2
+      },
+      "production_mapping": {
+        "card_code": "TOC_008",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "FAL-006",
+      "name": "Falcon — Gale Diver",
+      "kind": "base",
+      "type": "Light",
+      "rarity": "Rare",
+      "role": "Initiator / Speed",
+      "stats": {
+        "hp": 111,
+        "attack": 34,
+        "defense": 9
+      },
+      "skills": [
+        {
+          "name": "Aerial Cut",
+          "description": "Serangan normal +4 jika baru berpindah dari Bench.",
+          "source_text": "Aerial Cut — Serangan normal +4 jika baru berpindah dari Bench.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +4 jika baru berpindah dari Bench."
+          ]
+        },
+        {
+          "name": "Safe Draft",
+          "description": "+5 DEF pada 1 ally sampai menerima 1 hit. CD 2.",
+          "source_text": "Safe Draft — +5 DEF pada 1 ally sampai menerima 1 hit. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "+5 DEF pada 1 ally sampai menerima 1 hit. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [
+        "F07"
+      ],
+      "source": {
+        "table": 3,
+        "row": 3
+      },
+      "production_mapping": {
+        "card_code": "FAL_006",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "FAL-007",
+      "name": "Falcon — Storm Navigator",
+      "kind": "base",
+      "type": "Thunder",
+      "rarity": "Rare",
+      "role": "Initiator / Switch",
+      "stats": {
+        "hp": 116,
+        "attack": 35,
+        "defense": 10
+      },
+      "skills": [
+        {
+          "name": "Storm Route",
+          "description": "Serangan normal +4 setelah Switch legal.",
+          "source_text": "Storm Route — Serangan normal +4 setelah Switch legal.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +4 setelah Switch legal."
+          ]
+        },
+        {
+          "name": "Wind Relay",
+          "description": "Switch 1 ally sebagai aksi; tidak menarik kartu. CD 2.",
+          "source_text": "Wind Relay — Switch 1 ally sebagai aksi; tidak menarik kartu. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Switch 1 ally sebagai aksi",
+            "tidak menarik kartu. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [
+        "F02"
+      ],
+      "source": {
+        "table": 3,
+        "row": 4
+      },
+      "production_mapping": {
+        "card_code": "FAL_007",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "FOX-006",
+      "name": "Byte Fox — Byte Raider",
+      "kind": "base",
+      "type": "Thunder",
+      "rarity": "Rare",
+      "role": "Assassin / Combo",
+      "stats": {
+        "hp": 108,
+        "attack": 36,
+        "defense": 9
+      },
+      "skills": [
+        {
+          "name": "Byte Raider",
+          "description": "Serangan normal +5 jika baru masuk Active. CD 1.",
+          "source_text": "Byte Raider — Serangan normal +5 jika baru masuk Active. CD 1.",
+          "cooldown_turns": 1,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +5 jika baru masuk Active. CD 1."
+          ]
+        },
+        {
+          "name": "Smoke Pixel",
+          "description": "Kurangi 8 damage dari hit berikutnya ke diri. CD 2.",
+          "source_text": "Smoke Pixel — Kurangi 8 damage dari hit berikutnya ke diri. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Kurangi 8 damage dari hit berikutnya ke diri. CD 2."
+          ]
+        }
+      ],
+      "tags": [
+        "fusion:AGILE_CODE"
+      ],
+      "source_fusions": [
+        "F03",
+        "F07"
+      ],
+      "source": {
+        "table": 3,
+        "row": 5
+      },
+      "production_mapping": {
+        "card_code": "FOX_006",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "FOX-007",
+      "name": "Byte Fox — Turbo Fox",
+      "kind": "base",
+      "type": "Thunder",
+      "rarity": "Rare",
+      "role": "Assassin / Combo",
+      "stats": {
+        "hp": 112,
+        "attack": 37,
+        "defense": 9
+      },
+      "skills": [
+        {
+          "name": "Turbo Route",
+          "description": "Serangan normal +5 setelah Switch legal. CD 1.",
+          "source_text": "Turbo Route — Serangan normal +5 setelah Switch legal. CD 1.",
+          "cooldown_turns": 1,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +5 setelah Switch legal. CD 1."
+          ]
+        },
+        {
+          "name": "Quick Step",
+          "description": "+5 DEF pada diri sampai menerima 1 hit. CD 2.",
+          "source_text": "Quick Step — +5 DEF pada diri sampai menerima 1 hit. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "+5 DEF pada diri sampai menerima 1 hit. CD 2."
+          ]
+        }
+      ],
+      "tags": [
+        "fusion:AGILE_CODE"
+      ],
+      "source_fusions": [
+        "F03"
+      ],
+      "source": {
+        "table": 3,
+        "row": 6
+      },
+      "production_mapping": {
+        "card_code": "FOX_007",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "RAB-006",
+      "name": "Pixel Rabbit — Pixel Medic",
+      "kind": "base",
+      "type": "Light",
+      "rarity": "Rare",
+      "role": "Builder / Heal",
+      "stats": {
+        "hp": 124,
+        "attack": 30,
+        "defense": 13
+      },
+      "skills": [
+        {
+          "name": "Patch Pulse",
+          "description": "Pulihkan 12 HP pada 1 ally. CD 2.",
+          "source_text": "Patch Pulse — Pulihkan 12 HP pada 1 ally. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Pulihkan 12 HP pada 1 ally. CD 2."
+          ]
+        },
+        {
+          "name": "Mini Wall",
+          "description": "Beri Shield 10 pada 1 ally. CD 2.",
+          "source_text": "Mini Wall — Beri Shield 10 pada 1 ally. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Beri Shield 10 pada 1 ally. CD 2."
+          ]
+        }
+      ],
+      "tags": [
+        "fusion:BUILD_SHIELD"
+      ],
+      "source_fusions": [
+        "F03"
+      ],
+      "source": {
+        "table": 3,
+        "row": 7
+      },
+      "production_mapping": {
+        "card_code": "RAB_006",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "RAB-007",
+      "name": "Pixel Rabbit — Canopy Constructor",
+      "kind": "base",
+      "type": "Forest",
+      "rarity": "Rare",
+      "role": "Builder / Shield",
+      "stats": {
+        "hp": 128,
+        "attack": 31,
+        "defense": 14
+      },
+      "skills": [
+        {
+          "name": "Block Wall",
+          "description": "Beri Shield 12 pada 1 ally. CD 2.",
+          "source_text": "Block Wall — Beri Shield 12 pada 1 ally. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Beri Shield 12 pada 1 ally. CD 2."
+          ]
+        },
+        {
+          "name": "Canopy Brace",
+          "description": "+5 DEF pada 1 ally sampai menerima 1 hit. CD 2.",
+          "source_text": "Canopy Brace — +5 DEF pada 1 ally sampai menerima 1 hit. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "+5 DEF pada 1 ally sampai menerima 1 hit. CD 2."
+          ]
+        }
+      ],
+      "tags": [
+        "fusion:BUILD_SHIELD"
+      ],
+      "source_fusions": [
+        "F03",
+        "F10"
+      ],
+      "source": {
+        "table": 3,
+        "row": 8
+      },
+      "production_mapping": {
+        "card_code": "RAB_007",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "NUL-006",
+      "name": "Null Cat — Void Claw",
+      "kind": "base",
+      "type": "Dark",
+      "rarity": "Rare",
+      "role": "Debuff / Necromancer",
+      "stats": {
+        "hp": 112,
+        "attack": 34,
+        "defense": 10
+      },
+      "skills": [
+        {
+          "name": "Void Claw",
+          "description": "Serangan normal +4 jika target sedang terkena debuff.",
+          "source_text": "Void Claw — Serangan normal +4 jika target sedang terkena debuff.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +4 jika target sedang terkena debuff."
+          ]
+        },
+        {
+          "name": "Necro Recall",
+          "description": "Sekali/battle, saat NUL-006 Active, habiskan 2 AP: pilih 1 Base Card non-Fusion di Graveyard yang bukan fusion_consumed; kembalikan ke Bench dengan 40% Max HP. Kartu yang dibangkitkan tidak boleh Attack/Skill sampai turn berikutnya dan penggunaan once-per-battle tidak di-reset.",
+          "source_text": "Necro Recall — Sekali/battle, saat NUL-006 Active, habiskan 2 AP: pilih 1 Base Card non-Fusion di Graveyard yang bukan fusion_consumed; kembalikan ke Bench dengan 40% Max HP. Kartu yang dibangkitkan tidak boleh Attack/Skill sampai turn berikutnya dan penggunaan once-per-battle tidak di-reset.",
+          "cooldown_turns": null,
+          "ap_cost": 2,
+          "once_per_battle": true,
+          "effect_clauses": [
+            "Sekali/battle, saat NUL-006 Active, habiskan 2 AP: pilih 1 Base Card non-Fusion di Graveyard yang bukan fusion_consumed",
+            "kembalikan ke Bench dengan 40% Max HP. Kartu yang dibangkitkan tidak boleh Attack/Skill sampai turn berikutnya dan penggunaan once-per-battle tidak di-reset."
+          ]
+        }
+      ],
+      "tags": [
+        "fusion:DARK_CONTROL"
+      ],
+      "source_fusions": [
+        "F08"
+      ],
+      "source": {
+        "table": 3,
+        "row": 9
+      },
+      "production_mapping": {
+        "card_code": "NUL_006",
+        "rfid_uid": null
+      },
+      "necro_recall": {
+        "once_per_battle": true,
+        "ap_cost": 2,
+        "requires_caster_zone": "active",
+        "material_kind": "base",
+        "allow_fusion": false,
+        "allow_fusion_consumed": false,
+        "destination": "bench",
+        "max_hp_ratio": 0.4,
+        "attack_skill_locked_until_next_turn": true,
+        "reset_once_per_battle": false
+      }
+    },
+    {
+      "card_code": "NUL-007",
+      "name": "Null Cat — Night Disabler",
+      "kind": "base",
+      "type": "Dark",
+      "rarity": "Rare",
+      "role": "Disrupt / Control",
+      "stats": {
+        "hp": 118,
+        "attack": 35,
+        "defense": 11
+      },
+      "skills": [
+        {
+          "name": "Night Slash",
+          "description": "Serangan normal +3 pada target yang tidak memiliki Shield.",
+          "source_text": "Night Slash — Serangan normal +3 pada target yang tidak memiliki Shield.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +3 pada target yang tidak memiliki Shield."
+          ]
+        },
+        {
+          "name": "Signal Break",
+          "description": "Target tidak dapat memakai Skill 2 sampai akhir turn berikutnya. CD 3.",
+          "source_text": "Signal Break — Target tidak dapat memakai Skill 2 sampai akhir turn berikutnya. CD 3.",
+          "cooldown_turns": 3,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Target tidak dapat memakai Skill 2 sampai akhir turn berikutnya. CD 3."
+          ]
+        }
+      ],
+      "tags": [
+        "fusion:DARK_CONTROL"
+      ],
+      "source_fusions": [
+        "F04",
+        "F08"
+      ],
+      "source": {
+        "table": 3,
+        "row": 10
+      },
+      "production_mapping": {
+        "card_code": "NUL_007",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "PAN-007",
+      "name": "Spark Panda — Chain Caster",
+      "kind": "base",
+      "type": "Thunder",
+      "rarity": "Rare",
+      "role": "Combo / Chain",
+      "stats": {
+        "hp": 116,
+        "attack": 36,
+        "defense": 10
+      },
+      "skills": [
+        {
+          "name": "Bolt Punch",
+          "description": "Serangan normal +3 pada target tanpa Shield.",
+          "source_text": "Bolt Punch — Serangan normal +3 pada target tanpa Shield.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +3 pada target tanpa Shield."
+          ]
+        },
+        {
+          "name": "Thunder Chain",
+          "description": "Serang maks. 2 target, masing-masing 0.65× ATK. CD 3.",
+          "source_text": "Thunder Chain — Serang maks. 2 target, masing-masing 0.65× ATK. CD 3.",
+          "cooldown_turns": 3,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serang maks. 2 target, masing-masing 0.65× ATK. CD 3."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [
+        "F04"
+      ],
+      "source": {
+        "table": 4,
+        "row": 1
+      },
+      "production_mapping": {
+        "card_code": "PAN_007",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "OTT-006",
+      "name": "Script Otter — Aqua Scripter",
+      "kind": "base",
+      "type": "Water",
+      "rarity": "Rare",
+      "role": "Cleanse / Utility",
+      "stats": {
+        "hp": 122,
+        "attack": 30,
+        "defense": 12
+      },
+      "skills": [
+        {
+          "name": "Aqua Script",
+          "description": "Serangan normal +3 jika ada ally di bawah 50% HP.",
+          "source_text": "Aqua Script — Serangan normal +3 jika ada ally di bawah 50% HP.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +3 jika ada ally di bawah 50% HP."
+          ]
+        },
+        {
+          "name": "Clean Code",
+          "description": "Hapus 1 debuff biasa dari 1 ally. CD 2.",
+          "source_text": "Clean Code — Hapus 1 debuff biasa dari 1 ally. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Hapus 1 debuff biasa dari 1 ally. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [
+        "F05",
+        "F09",
+        "F11"
+      ],
+      "source": {
+        "table": 4,
+        "row": 2
+      },
+      "production_mapping": {
+        "card_code": "OTT_006",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "OTT-007",
+      "name": "Script Otter — Coral Physician",
+      "kind": "base",
+      "type": "Water",
+      "rarity": "Rare",
+      "role": "Heal / Utility",
+      "stats": {
+        "hp": 127,
+        "attack": 31,
+        "defense": 13
+      },
+      "skills": [
+        {
+          "name": "Coral Mend",
+          "description": "Pulihkan 12 HP pada 1 ally. CD 2.",
+          "source_text": "Coral Mend — Pulihkan 12 HP pada 1 ally. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Pulihkan 12 HP pada 1 ally. CD 2."
+          ]
+        },
+        {
+          "name": "Tidal Note",
+          "description": "+4 DEF pada 1 ally sampai menerima 1 hit. CD 2.",
+          "source_text": "Tidal Note — +4 DEF pada 1 ally sampai menerima 1 hit. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "+4 DEF pada 1 ally sampai menerima 1 hit. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [
+        "F05",
+        "F09",
+        "F11"
+      ],
+      "source": {
+        "table": 4,
+        "row": 3
+      },
+      "production_mapping": {
+        "card_code": "OTT_007",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "OTT-008",
+      "name": "Script Otter — Ocean Compiler",
+      "kind": "base",
+      "type": "Water",
+      "rarity": "Epic",
+      "role": "Support / Utility",
+      "stats": {
+        "hp": 132,
+        "attack": 32,
+        "defense": 13
+      },
+      "skills": [
+        {
+          "name": "Ocean Compile",
+          "description": "Pilih: heal 14 pada 1 ally ATAU cleanse 1 debuff. CD 3.",
+          "source_text": "Ocean Compile — Pilih: heal 14 pada 1 ally ATAU cleanse 1 debuff. CD 3.",
+          "cooldown_turns": 3,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Pilih: heal 14 pada 1 ally ATAU cleanse 1 debuff. CD 3."
+          ]
+        },
+        {
+          "name": "Flow Buffer",
+          "description": "Beri Shield 10 pada 1 ally. CD 2.",
+          "source_text": "Flow Buffer — Beri Shield 10 pada 1 ally. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Beri Shield 10 pada 1 ally. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [
+        "F12"
+      ],
+      "source": {
+        "table": 4,
+        "row": 4
+      },
+      "production_mapping": {
+        "card_code": "OTT_008",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "WLF-006",
+      "name": "Vector Wolf — Blaze Tracker",
+      "kind": "base",
+      "type": "Fire",
+      "rarity": "Rare",
+      "role": "Mark / Aggro",
+      "stats": {
+        "hp": 112,
+        "attack": 36,
+        "defense": 9
+      },
+      "skills": [
+        {
+          "name": "Blaze Track",
+          "description": "Serangan normal dan menerapkan Burn 1.",
+          "source_text": "Blaze Track — Serangan normal dan menerapkan Burn 1.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal dan menerapkan Burn 1."
+          ]
+        },
+        {
+          "name": "Mark Prey",
+          "description": "Serangan normal ally berikutnya ke target mendapat +6 damage. CD 2.",
+          "source_text": "Mark Prey — Serangan normal ally berikutnya ke target mendapat +6 damage. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal ally berikutnya ke target mendapat +6 damage. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [
+        "F05"
+      ],
+      "source": {
+        "table": 4,
+        "row": 5
+      },
+      "production_mapping": {
+        "card_code": "WLF_006",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "WLF-007",
+      "name": "Vector Wolf — Inferno Duelist",
+      "kind": "base",
+      "type": "Fire",
+      "rarity": "Rare",
+      "role": "Duelist / Burn",
+      "stats": {
+        "hp": 118,
+        "attack": 38,
+        "defense": 10
+      },
+      "skills": [
+        {
+          "name": "Inferno Duel",
+          "description": "Serangan normal +4 jika target memiliki Burn.",
+          "source_text": "Inferno Duel — Serangan normal +4 jika target memiliki Burn.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +4 jika target memiliki Burn."
+          ]
+        },
+        {
+          "name": "Heat Guard",
+          "description": "+4 DEF pada diri sampai menerima 1 hit. CD 2.",
+          "source_text": "Heat Guard — +4 DEF pada diri sampai menerima 1 hit. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "+4 DEF pada diri sampai menerima 1 hit. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [
+        "F10"
+      ],
+      "source": {
+        "table": 4,
+        "row": 6
+      },
+      "production_mapping": {
+        "card_code": "WLF_007",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "TUR-006",
+      "name": "Cache Turtle — Tidal Defender",
+      "kind": "base",
+      "type": "Water",
+      "rarity": "Rare",
+      "role": "Tank / Guard",
+      "stats": {
+        "hp": 130,
+        "attack": 28,
+        "defense": 14
+      },
+      "skills": [
+        {
+          "name": "Tide Bump",
+          "description": "Serangan normal +3 jika HP diri di atas 50%.",
+          "source_text": "Tide Bump — Serangan normal +3 jika HP diri di atas 50%.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +3 jika HP diri di atas 50%."
+          ]
+        },
+        {
+          "name": "Shell Brace",
+          "description": "+6 DEF pada diri sampai menerima 1 hit. CD 2.",
+          "source_text": "Shell Brace — +6 DEF pada diri sampai menerima 1 hit. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "+6 DEF pada diri sampai menerima 1 hit. CD 2."
+          ]
+        }
+      ],
+      "tags": [
+        "fusion:WATER_GUARD"
+      ],
+      "source_fusions": [
+        "F06",
+        "F09"
+      ],
+      "source": {
+        "table": 4,
+        "row": 7
+      },
+      "production_mapping": {
+        "card_code": "TUR_006",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "TUR-007",
+      "name": "Cache Turtle — Reef Fortress",
+      "kind": "base",
+      "type": "Water",
+      "rarity": "Rare",
+      "role": "Tank / Shield",
+      "stats": {
+        "hp": 134,
+        "attack": 30,
+        "defense": 15
+      },
+      "skills": [
+        {
+          "name": "Undertow Slam",
+          "description": "Serangan normal; kurangi damage serangan target berikutnya sebesar 4. CD 2.",
+          "source_text": "Undertow Slam — Serangan normal; kurangi damage serangan target berikutnya sebesar 4. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal",
+            "kurangi damage serangan target berikutnya sebesar 4. CD 2."
+          ]
+        },
+        {
+          "name": "Reef Cover",
+          "description": "Beri Shield 12 pada 1 ally. CD 3.",
+          "source_text": "Reef Cover — Beri Shield 12 pada 1 ally. CD 3.",
+          "cooldown_turns": 3,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Beri Shield 12 pada 1 ally. CD 3."
+          ]
+        }
+      ],
+      "tags": [
+        "fusion:WATER_GUARD"
+      ],
+      "source_fusions": [
+        "F06",
+        "F09"
+      ],
+      "source": {
+        "table": 4,
+        "row": 8
+      },
+      "production_mapping": {
+        "card_code": "TUR_007",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "PIC-006",
+      "name": "Pico Cat — Blaze Decoy",
+      "kind": "base",
+      "type": "Fire",
+      "rarity": "Rare",
+      "role": "Feint / Protect",
+      "stats": {
+        "hp": 112,
+        "attack": 34,
+        "defense": 10
+      },
+      "skills": [
+        {
+          "name": "Ember Dash",
+          "description": "Serangan normal; +4 DEF pada diri sampai menerima 1 hit. CD 2.",
+          "source_text": "Ember Dash — Serangan normal; +4 DEF pada diri sampai menerima 1 hit. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal",
+            "+4 DEF pada diri sampai menerima 1 hit. CD 2."
+          ]
+        },
+        {
+          "name": "Flare Feint",
+          "description": "Kurangi 8 damage dari hit berikutnya ke 1 ally. CD 2.",
+          "source_text": "Flare Feint — Kurangi 8 damage dari hit berikutnya ke 1 ally. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Kurangi 8 damage dari hit berikutnya ke 1 ally. CD 2."
+          ]
+        }
+      ],
+      "tags": [
+        "fusion:FIRE_FEINT"
+      ],
+      "source_fusions": [
+        "F06"
+      ],
+      "source": {
+        "table": 4,
+        "row": 9
+      },
+      "production_mapping": {
+        "card_code": "PIC_006",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "PIC-007",
+      "name": "Pico Cat — Cinder Scout",
+      "kind": "base",
+      "type": "Fire",
+      "rarity": "Rare",
+      "role": "Scout / Burn",
+      "stats": {
+        "hp": 118,
+        "attack": 36,
+        "defense": 11
+      },
+      "skills": [
+        {
+          "name": "Flame Hop",
+          "description": "Serangan normal +3 saat baru masuk Active dan menerapkan Burn 1.",
+          "source_text": "Flame Hop — Serangan normal +3 saat baru masuk Active dan menerapkan Burn 1.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +3 saat baru masuk Active dan menerapkan Burn 1."
+          ]
+        },
+        {
+          "name": "Flare Feint",
+          "description": "Kurangi 8 damage dari hit berikutnya ke 1 ally. CD 2.",
+          "source_text": "Flare Feint — Kurangi 8 damage dari hit berikutnya ke 1 ally. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Kurangi 8 damage dari hit berikutnya ke 1 ally. CD 2."
+          ]
+        }
+      ],
+      "tags": [
+        "fusion:FIRE_FEINT"
+      ],
+      "source_fusions": [
+        "F06",
+        "F11"
+      ],
+      "source": {
+        "table": 4,
+        "row": 10
+      },
+      "production_mapping": {
+        "card_code": "PIC_007",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "F01",
+      "name": "Circuit Grove Guardian",
+      "kind": "fusion",
+      "type": "Forest",
+      "rarity": "Legendary",
+      "role": "Tank / Support",
+      "stats": {
+        "hp": 185,
+        "attack": 44,
+        "defense": 24
+      },
+      "skills": [
+        {
+          "name": "Grove Aegis",
+          "description": "Beri Shield 16 pada 1 ally. CD 2.",
+          "source_text": "Grove Aegis — Beri Shield 16 pada 1 ally. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Beri Shield 16 pada 1 ally. CD 2."
+          ]
+        },
+        {
+          "name": "Regrowth Protocol",
+          "description": "Pulihkan 8 HP sekarang dan 8 HP pada akhir turn berikutnya. CD 3.",
+          "source_text": "Regrowth Protocol — Pulihkan 8 HP sekarang dan 8 HP pada akhir turn berikutnya. CD 3.",
+          "cooldown_turns": 3,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Pulihkan 8 HP sekarang dan 8 HP pada akhir turn berikutnya. CD 3."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 5,
+        "row": 1
+      },
+      "production_mapping": {
+        "card_code": "F01",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "F02",
+      "name": "Tempest Flag Marshal",
+      "kind": "fusion",
+      "type": "Thunder",
+      "rarity": "Legendary",
+      "role": "Tempo / Burst",
+      "stats": {
+        "hp": 165,
+        "attack": 50,
+        "defense": 20
+      },
+      "skills": [
+        {
+          "name": "Tempest Vanguard",
+          "description": "Serangan normal +8 setelah Switch legal.",
+          "source_text": "Tempest Vanguard — Serangan normal +8 setelah Switch legal.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +8 setelah Switch legal."
+          ]
+        },
+        {
+          "name": "Storm Standard",
+          "description": "+6 ATK pada 1 ally sampai akhir turn. CD 2.",
+          "source_text": "Storm Standard — +6 ATK pada 1 ally sampai akhir turn. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "+6 ATK pada 1 ally sampai akhir turn. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 5,
+        "row": 2
+      },
+      "production_mapping": {
+        "card_code": "F02",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "F03",
+      "name": "Byte Sprout Hacker",
+      "kind": "fusion",
+      "type": "Forest",
+      "rarity": "Epic",
+      "role": "Combo / Shield",
+      "stats": {
+        "hp": 160,
+        "attack": 47,
+        "defense": 18
+      },
+      "skills": [
+        {
+          "name": "Sprout Firewall",
+          "description": "Beri Shield 12 pada diri. CD 2.",
+          "source_text": "Sprout Firewall — Beri Shield 12 pada diri. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Beri Shield 12 pada diri. CD 2."
+          ]
+        },
+        {
+          "name": "Byte Ambush",
+          "description": "Serangan normal +8 setelah Switch legal. CD 1.",
+          "source_text": "Byte Ambush — Serangan normal +8 setelah Switch legal. CD 1.",
+          "cooldown_turns": 1,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +8 setelah Switch legal. CD 1."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 5,
+        "row": 3
+      },
+      "production_mapping": {
+        "card_code": "F03",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "F04",
+      "name": "Eclipse Signal",
+      "kind": "fusion",
+      "type": "Dark",
+      "rarity": "Mythic",
+      "role": "Control / Disrupt",
+      "stats": {
+        "hp": 165,
+        "attack": 48,
+        "defense": 20
+      },
+      "skills": [
+        {
+          "name": "Eclipse Lock",
+          "description": "Target tidak dapat memakai Skill 2 sampai akhir turn berikutnya. CD 3.",
+          "source_text": "Eclipse Lock — Target tidak dapat memakai Skill 2 sampai akhir turn berikutnya. CD 3.",
+          "cooldown_turns": 3,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Target tidak dapat memakai Skill 2 sampai akhir turn berikutnya. CD 3."
+          ]
+        },
+        {
+          "name": "Dark Signal",
+          "description": "Kurangi ATK target 5 sampai akhir turn berikutnya. CD 2.",
+          "source_text": "Dark Signal — Kurangi ATK target 5 sampai akhir turn berikutnya. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Kurangi ATK target 5 sampai akhir turn berikutnya. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 5,
+        "row": 4
+      },
+      "production_mapping": {
+        "card_code": "F04",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "F05",
+      "name": "Aqua Vector Sentinel",
+      "kind": "fusion",
+      "type": "Water",
+      "rarity": "Legendary",
+      "role": "Cleanse / Mark",
+      "stats": {
+        "hp": 180,
+        "attack": 44,
+        "defense": 23
+      },
+      "skills": [
+        {
+          "name": "Aqua Purge",
+          "description": "Hapus 1 debuff biasa dari 1 ally. CD 2.",
+          "source_text": "Aqua Purge — Hapus 1 debuff biasa dari 1 ally. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Hapus 1 debuff biasa dari 1 ally. CD 2."
+          ]
+        },
+        {
+          "name": "Vector Mark",
+          "description": "Serangan normal ally berikutnya ke target mendapat +8 damage. CD 2.",
+          "source_text": "Vector Mark — Serangan normal ally berikutnya ke target mendapat +8 damage. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal ally berikutnya ke target mendapat +8 damage. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 5,
+        "row": 5
+      },
+      "production_mapping": {
+        "card_code": "F05",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "F06",
+      "name": "Steam Fortress",
+      "kind": "fusion",
+      "type": "Fire",
+      "rarity": "Legendary",
+      "role": "Tank / Burn",
+      "stats": {
+        "hp": 195,
+        "attack": 45,
+        "defense": 25
+      },
+      "skills": [
+        {
+          "name": "Steam Guard",
+          "description": "+8 DEF pada diri sampai menerima 1 hit. CD 2.",
+          "source_text": "Steam Guard — +8 DEF pada diri sampai menerima 1 hit. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "+8 DEF pada diri sampai menerima 1 hit. CD 2."
+          ]
+        },
+        {
+          "name": "Pressure Burst",
+          "description": "Serangan normal +5 dan menerapkan Burn 1. CD 2.",
+          "source_text": "Pressure Burst — Serangan normal +5 dan menerapkan Burn 1. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +5 dan menerapkan Burn 1. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 5,
+        "row": 6
+      },
+      "production_mapping": {
+        "card_code": "F06",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "F07",
+      "name": "Skybyte Runner",
+      "kind": "fusion",
+      "type": "Thunder",
+      "rarity": "Epic",
+      "role": "Speed / Switch",
+      "stats": {
+        "hp": 150,
+        "attack": 52,
+        "defense": 17
+      },
+      "skills": [
+        {
+          "name": "Rapid Shift",
+          "description": "Switch posisi dengan 1 Bench sebagai aksi; tidak menarik kartu. CD 2.",
+          "source_text": "Rapid Shift — Switch posisi dengan 1 Bench sebagai aksi; tidak menarik kartu. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Switch posisi dengan 1 Bench sebagai aksi",
+            "tidak menarik kartu. CD 2."
+          ]
+        },
+        {
+          "name": "Velocity Strike",
+          "description": "Serangan normal +8 jika baru melakukan Switch. CD 1.",
+          "source_text": "Velocity Strike — Serangan normal +8 jika baru melakukan Switch. CD 1.",
+          "cooldown_turns": 1,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal +8 jika baru melakukan Switch. CD 1."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 6,
+        "row": 1
+      },
+      "production_mapping": {
+        "card_code": "F07",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "F08",
+      "name": "Phantom Bloom",
+      "kind": "fusion",
+      "type": "Dark",
+      "rarity": "Mythic",
+      "role": "Root / Debuff",
+      "stats": {
+        "hp": 175,
+        "attack": 45,
+        "defense": 22
+      },
+      "skills": [
+        {
+          "name": "Phantom Root",
+          "description": "Cegah 1 Switch sukarela target sampai akhir turn berikutnya. CD 3.",
+          "source_text": "Phantom Root — Cegah 1 Switch sukarela target sampai akhir turn berikutnya. CD 3.",
+          "cooldown_turns": 3,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Cegah 1 Switch sukarela target sampai akhir turn berikutnya. CD 3."
+          ]
+        },
+        {
+          "name": "Bloom Decay",
+          "description": "Kurangi DEF target 5 sampai akhir turn berikutnya. CD 2.",
+          "source_text": "Bloom Decay — Kurangi DEF target 5 sampai akhir turn berikutnya. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Kurangi DEF target 5 sampai akhir turn berikutnya. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 6,
+        "row": 2
+      },
+      "production_mapping": {
+        "card_code": "F08",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "F09",
+      "name": "Hydro Cache Engine",
+      "kind": "fusion",
+      "type": "Water",
+      "rarity": "Legendary",
+      "role": "Heal / Shield",
+      "stats": {
+        "hp": 190,
+        "attack": 42,
+        "defense": 25
+      },
+      "skills": [
+        {
+          "name": "Cache Restore",
+          "description": "Pulihkan 15 HP pada 1 ally. CD 2.",
+          "source_text": "Cache Restore — Pulihkan 15 HP pada 1 ally. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Pulihkan 15 HP pada 1 ally. CD 2."
+          ]
+        },
+        {
+          "name": "Hydro Barrier",
+          "description": "Beri Shield 15 pada 1 ally. CD 2. Tidak dapat dipakai pada turn yang sama dengan Cache Restore.",
+          "source_text": "Hydro Barrier — Beri Shield 15 pada 1 ally. CD 2. Tidak dapat dipakai pada turn yang sama dengan Cache Restore.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Beri Shield 15 pada 1 ally. CD 2. Tidak dapat dipakai pada turn yang sama dengan Cache Restore."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 6,
+        "row": 3
+      },
+      "production_mapping": {
+        "card_code": "F09",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "F10",
+      "name": "Pixel Ember Pack",
+      "kind": "fusion",
+      "type": "Fire",
+      "rarity": "Legendary",
+      "role": "Protect / Mark",
+      "stats": {
+        "hp": 170,
+        "attack": 50,
+        "defense": 20
+      },
+      "skills": [
+        {
+          "name": "Pixel Pack Guard",
+          "description": "Beri Shield 12 pada 1 ally. CD 2.",
+          "source_text": "Pixel Pack Guard — Beri Shield 12 pada 1 ally. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Beri Shield 12 pada 1 ally. CD 2."
+          ]
+        },
+        {
+          "name": "Ember Mark",
+          "description": "Serangan normal ally berikutnya ke target mendapat +10 damage. CD 2.",
+          "source_text": "Ember Mark — Serangan normal ally berikutnya ke target mendapat +10 damage. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Serangan normal ally berikutnya ke target mendapat +10 damage. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 6,
+        "row": 4
+      },
+      "production_mapping": {
+        "card_code": "F10",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "F11",
+      "name": "Spirit Current",
+      "kind": "fusion",
+      "type": "Light",
+      "rarity": "Legendary",
+      "role": "Cleanse / Support",
+      "stats": {
+        "hp": 175,
+        "attack": 43,
+        "defense": 22
+      },
+      "skills": [
+        {
+          "name": "Spirit Wash",
+          "description": "Hapus 1 debuff biasa dan pulihkan 6 HP pada 1 ally. CD 3.",
+          "source_text": "Spirit Wash — Hapus 1 debuff biasa dan pulihkan 6 HP pada 1 ally. CD 3.",
+          "cooldown_turns": 3,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Hapus 1 debuff biasa dan pulihkan 6 HP pada 1 ally. CD 3."
+          ]
+        },
+        {
+          "name": "Guiding Current",
+          "description": "+5 DEF pada 1 ally sampai menerima 1 hit. CD 2.",
+          "source_text": "Guiding Current — +5 DEF pada 1 ally sampai menerima 1 hit. CD 2.",
+          "cooldown_turns": 2,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "+5 DEF pada 1 ally sampai menerima 1 hit. CD 2."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 6,
+        "row": 5
+      },
+      "production_mapping": {
+        "card_code": "F11",
+        "rfid_uid": null
+      }
+    },
+    {
+      "card_code": "F12",
+      "name": "Academy Nexus",
+      "kind": "fusion",
+      "type": "Light",
+      "rarity": "Mythic",
+      "role": "Triple Fusion / Team Support",
+      "stats": {
+        "hp": 195,
+        "attack": 48,
+        "defense": 24
+      },
+      "skills": [
+        {
+          "name": "Nexus Choice",
+          "description": "Sekali/battle pilih 1: heal 18, Shield 18, atau +8 ATK pada 1 ally sampai akhir turn.",
+          "source_text": "Nexus Choice — Sekali/battle pilih 1: heal 18, Shield 18, atau +8 ATK pada 1 ally sampai akhir turn.",
+          "cooldown_turns": null,
+          "ap_cost": null,
+          "once_per_battle": true,
+          "effect_clauses": [
+            "Sekali/battle pilih 1: heal 18, Shield 18, atau +8 ATK pada 1 ally sampai akhir turn."
+          ]
+        },
+        {
+          "name": "Team Sync",
+          "description": "Active dan Bench mendapat +3 DEF sampai awal turn berikutnya. CD 3.",
+          "source_text": "Team Sync — Active dan Bench mendapat +3 DEF sampai awal turn berikutnya. CD 3.",
+          "cooldown_turns": 3,
+          "ap_cost": null,
+          "once_per_battle": false,
+          "effect_clauses": [
+            "Active dan Bench mendapat +3 DEF sampai awal turn berikutnya. CD 3."
+          ]
+        }
+      ],
+      "tags": [],
+      "source_fusions": [],
+      "source": {
+        "table": 6,
+        "row": 6
+      },
+      "production_mapping": {
+        "card_code": "F12",
+        "rfid_uid": null
+      }
+    }
+  ],
+  "recipes": [
+    {
+      "id": "F01",
+      "result_code": "F01",
+      "mode": "EXACT",
+      "source_text": "[EXACT] COB-006 + TOC-006",
+      "slots": [
+        {
+          "mode": "EXACT",
+          "eligible_codes": [
+            "COB-006"
+          ]
+        },
+        {
+          "mode": "EXACT",
+          "eligible_codes": [
+            "TOC-006"
+          ]
+        }
+      ],
+      "ap_cost": 2,
+      "consumed_reason": "fusion_consumed",
+      "attack_locked_on_summon": true
+    },
+    {
+      "id": "F02",
+      "result_code": "F02",
+      "mode": "ONE_OF",
+      "source_text": "[ONE_OF] 1 dari [COB-007, COB-008] + FAL-007",
+      "slots": [
+        {
+          "mode": "ONE_OF",
+          "eligible_codes": [
+            "COB-007",
+            "COB-008"
+          ]
+        },
+        {
+          "mode": "EXACT",
+          "eligible_codes": [
+            "FAL-007"
+          ]
+        }
+      ],
+      "ap_cost": 2,
+      "consumed_reason": "fusion_consumed",
+      "attack_locked_on_summon": true
+    },
+    {
+      "id": "F03",
+      "result_code": "F03",
+      "mode": "TAG",
+      "source_text": "[TAG] fusion:AGILE_CODE [FOX-006/FOX-007] + fusion:BUILD_SHIELD [RAB-006/RAB-007]",
+      "slots": [
+        {
+          "mode": "TAG",
+          "tag": "fusion:AGILE_CODE",
+          "eligible_codes": [
+            "FOX-006",
+            "FOX-007"
+          ]
+        },
+        {
+          "mode": "TAG",
+          "tag": "fusion:BUILD_SHIELD",
+          "eligible_codes": [
+            "RAB-006",
+            "RAB-007"
+          ]
+        }
+      ],
+      "ap_cost": 2,
+      "consumed_reason": "fusion_consumed",
+      "attack_locked_on_summon": true
+    },
+    {
+      "id": "F04",
+      "result_code": "F04",
+      "mode": "EXACT",
+      "source_text": "[EXACT] NUL-007 + PAN-007",
+      "slots": [
+        {
+          "mode": "EXACT",
+          "eligible_codes": [
+            "NUL-007"
+          ]
+        },
+        {
+          "mode": "EXACT",
+          "eligible_codes": [
+            "PAN-007"
+          ]
+        }
+      ],
+      "ap_cost": 2,
+      "consumed_reason": "fusion_consumed",
+      "attack_locked_on_summon": true
+    },
+    {
+      "id": "F05",
+      "result_code": "F05",
+      "mode": "ONE_OF",
+      "source_text": "[ONE_OF] 1 dari [OTT-006, OTT-007] + WLF-006",
+      "slots": [
+        {
+          "mode": "ONE_OF",
+          "eligible_codes": [
+            "OTT-006",
+            "OTT-007"
+          ]
+        },
+        {
+          "mode": "EXACT",
+          "eligible_codes": [
+            "WLF-006"
+          ]
+        }
+      ],
+      "ap_cost": 2,
+      "consumed_reason": "fusion_consumed",
+      "attack_locked_on_summon": true
+    },
+    {
+      "id": "F06",
+      "result_code": "F06",
+      "mode": "TAG",
+      "source_text": "[TAG] fusion:WATER_GUARD [TUR-006/TUR-007] + fusion:FIRE_FEINT [PIC-006/PIC-007]",
+      "slots": [
+        {
+          "mode": "TAG",
+          "tag": "fusion:WATER_GUARD",
+          "eligible_codes": [
+            "TUR-006",
+            "TUR-007"
+          ]
+        },
+        {
+          "mode": "TAG",
+          "tag": "fusion:FIRE_FEINT",
+          "eligible_codes": [
+            "PIC-006",
+            "PIC-007"
+          ]
+        }
+      ],
+      "ap_cost": 2,
+      "consumed_reason": "fusion_consumed",
+      "attack_locked_on_summon": true
+    },
+    {
+      "id": "F07",
+      "result_code": "F07",
+      "mode": "EXACT",
+      "source_text": "[EXACT] FAL-006 + FOX-006",
+      "slots": [
+        {
+          "mode": "EXACT",
+          "eligible_codes": [
+            "FAL-006"
+          ]
+        },
+        {
+          "mode": "EXACT",
+          "eligible_codes": [
+            "FOX-006"
+          ]
+        }
+      ],
+      "ap_cost": 2,
+      "consumed_reason": "fusion_consumed",
+      "attack_locked_on_summon": true
+    },
+    {
+      "id": "F08",
+      "result_code": "F08",
+      "mode": "TAG",
+      "source_text": "[TAG] fusion:DARK_CONTROL [NUL-006/NUL-007] + fusion:ROOT_CONTROL [TOC-005/TOC-006]",
+      "slots": [
+        {
+          "mode": "TAG",
+          "tag": "fusion:DARK_CONTROL",
+          "eligible_codes": [
+            "NUL-006",
+            "NUL-007"
+          ]
+        },
+        {
+          "mode": "TAG",
+          "tag": "fusion:ROOT_CONTROL",
+          "eligible_codes": [
+            "TOC-005",
+            "TOC-006"
+          ]
+        }
+      ],
+      "ap_cost": 2,
+      "consumed_reason": "fusion_consumed",
+      "attack_locked_on_summon": true
+    },
+    {
+      "id": "F09",
+      "result_code": "F09",
+      "mode": "ONE_OF",
+      "source_text": "[ONE_OF] 1 dari [OTT-006, OTT-007] + 1 dari [TUR-006, TUR-007]",
+      "slots": [
+        {
+          "mode": "ONE_OF",
+          "eligible_codes": [
+            "OTT-006",
+            "OTT-007"
+          ]
+        },
+        {
+          "mode": "ONE_OF",
+          "eligible_codes": [
+            "TUR-006",
+            "TUR-007"
+          ]
+        }
+      ],
+      "ap_cost": 2,
+      "consumed_reason": "fusion_consumed",
+      "attack_locked_on_summon": true
+    },
+    {
+      "id": "F10",
+      "result_code": "F10",
+      "mode": "EXACT",
+      "source_text": "[EXACT] RAB-007 + WLF-007",
+      "slots": [
+        {
+          "mode": "EXACT",
+          "eligible_codes": [
+            "RAB-007"
+          ]
+        },
+        {
+          "mode": "EXACT",
+          "eligible_codes": [
+            "WLF-007"
+          ]
+        }
+      ],
+      "ap_cost": 2,
+      "consumed_reason": "fusion_consumed",
+      "attack_locked_on_summon": true
+    },
+    {
+      "id": "F11",
+      "result_code": "F11",
+      "mode": "ONE_OF",
+      "source_text": "[ONE_OF] PIC-007 + 1 dari [OTT-006, OTT-007]",
+      "slots": [
+        {
+          "mode": "EXACT",
+          "eligible_codes": [
+            "PIC-007"
+          ]
+        },
+        {
+          "mode": "ONE_OF",
+          "eligible_codes": [
+            "OTT-006",
+            "OTT-007"
+          ]
+        }
+      ],
+      "ap_cost": 2,
+      "consumed_reason": "fusion_consumed",
+      "attack_locked_on_summon": true
+    },
+    {
+      "id": "F12",
+      "result_code": "F12",
+      "mode": "EXACT",
+      "source_text": "[EXACT x3] COB-008 + TOC-008 + OTT-008",
+      "slots": [
+        {
+          "mode": "EXACT",
+          "eligible_codes": [
+            "COB-008"
+          ]
+        },
+        {
+          "mode": "EXACT",
+          "eligible_codes": [
+            "TOC-008"
+          ]
+        },
+        {
+          "mode": "EXACT",
+          "eligible_codes": [
+            "OTT-008"
+          ]
+        }
+      ],
+      "ap_cost": 2,
+      "consumed_reason": "fusion_consumed",
+      "attack_locked_on_summon": true
+    }
+  ]
+}

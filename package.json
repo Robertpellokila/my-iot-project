@@ -6,15 +6,24 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:cards": "node --test tests/card-generator/*.test.js",
+    "test:cards:visual": "playwright test -c playwright.card-generator.config.js",
+    "audit:cards": "node scripts/card-generator/audit.mjs",
+    "card:masters": "node scripts/card-generator/export-masters.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.0",
+    "blockly": "13.4.0",
+    "jspdf": "^4.2.1",
+    "jszip": "^3.10.2",
     "qrcode": "^1.5.4",
     "vue": "^3.5.42",
     "vue-router": "^5.3.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.3.14",
+    "@playwright/test": "^1.64.1",
     "@vitejs/plugin-vue": "^6.0.8",
     "vite": "^8.3.0",
     "wrangler": "^4.136.3"

@@ -1,0 +1,31 @@
+import {PGlite} from '@electric-sql/pglite';import {readFile} from 'node:fs/promises';import assert from 'node:assert/strict';
+const db=new PGlite();
+try{
+ await db.exec(`CREATE ROLE anon;CREATE ROLE authenticated;CREATE SCHEMA auth;
+ CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$ SELECT nullif(current_setting('test.uid',true),'')::uuid $$;
+ CREATE FUNCTION is_admin() RETURNS boolean LANGUAGE sql AS $$ SELECT current_setting('test.admin',true)='true' $$;
+ CREATE TABLE game_cards(id uuid PRIMARY KEY,card_code text,fusion_only boolean);
+ CREATE TABLE fusion_recipes(id uuid PRIMARY KEY,code text UNIQUE,name text,description text,icon text,result_game_card_id uuid,result_zone text DEFAULT 'active',material_destination text DEFAULT 'graveyard',min_materials int DEFAULT 2,max_materials int,requirements jsonb,result_overrides jsonb,consumes_turn boolean,is_active boolean,metadata jsonb,created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now(),cost_spec jsonb,limits jsonb,conditions jsonb,result_stat_spec jsonb,priority int);
+ CREATE TABLE fusion_recipe_materials(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),recipe_id uuid REFERENCES fusion_recipes,group_key text,material_type text,game_card_id uuid,element text,rarity text,min_level int,max_level int,quantity int,allowed_zones text[],optional boolean,metadata jsonb,created_at timestamptz DEFAULT now(),card_code text,card_codes text[],tag text,sort_order int,CHECK(min_level<=max_level));`);
+ const migration=await readFile('supabase/migrations/040_studio_fusion_recipe_editor.sql','utf8');await db.exec(migration);await db.exec(migration);
+ const result='10000000-0000-4000-8000-000000000001',other='10000000-0000-4000-8000-000000000002';
+ await db.query("INSERT INTO game_cards VALUES($1,'F01',true),($2,'COB_006',false),($3,'TOC_006',false)",[result,other,crypto.randomUUID()]);
+ const recipe={id:crypto.randomUUID(),code:'fusion_test',name:'Test Fusion',is_active:true,result_stat_spec:{hp:{mode:'fixed',value:160},attack:{mode:'material_sum_percent',value:.8},defense:{mode:'highest_material_percent',value:1}},limits:{once_per_battle:true,max_uses:1}};
+ const rows=[{material_type:'exact_card',card_code:'COB_006',quantity:1,allowed_zones:['active']},{material_type:'tag',tag:'Fusion:VINE',quantity:1,allowed_zones:['bench']},{material_type:'one_of',card_codes:['toc_006','COB_006'],quantity:1,allowed_zones:['active','bench']}];
+ const save=(r=recipe,m=rows,id=result)=>db.query('SELECT save_studio_fusion_recipe($1,$2,$3) result',[id,r,m]);
+ await assert.rejects(save(),/Admin/);await db.exec("SELECT set_config('test.uid','00000000-0000-4000-8000-000000000001',false),set_config('test.admin','true',false)");
+ let saved=(await save()).rows[0].result;assert.equal(saved.materials.length,3);assert.equal(saved.materials[1].tag,'fusion:vine');assert.ok(saved.materials[2].card_codes.includes('TOC_006'));
+ await save();assert.equal((await db.query('SELECT count(*)::int n FROM fusion_recipes')).rows[0].n,1);
+ const before=(await db.query('SELECT * FROM fusion_recipe_materials ORDER BY sort_order')).rows;
+ for(const bad of [{...rows[0],quantity:1.5},{...rows[0],allowed_zones:[]},{...rows[0],card_code:'MISSING'},{...rows[2],card_codes:[]},{...rows[1],tag:''}])await assert.rejects(save(recipe,[bad]));
+ await assert.rejects(save(recipe,[{...rows[0],min_level:10,max_level:5}]),/check constraint/);
+ await assert.rejects(save(recipe,[{...rows[0],optional:true}]),/material wajib/);
+ assert.deepEqual((await db.query('SELECT * FROM fusion_recipe_materials ORDER BY sort_order')).rows,before,'failed replacement rolls back all material deletions');
+ await assert.rejects(save({...recipe,result_stat_spec:{...recipe.result_stat_spec,hp:{mode:'fixed',value:0}}}),/statistik/);
+ await assert.rejects(save(recipe,rows,other),/kartu Fusion/);
+ const otherFusion=crypto.randomUUID();await db.query("INSERT INTO game_cards VALUES($1,'F02',true)",[otherFusion]);await assert.rejects(save(recipe,rows,otherFusion),/milik kartu/);
+ await assert.rejects(save({...recipe,updated_at:'2000-01-01T00:00:00Z'}),/diubah/);
+ assert.equal((await db.query("SELECT has_function_privilege('anon','save_studio_fusion_recipe(uuid,jsonb,jsonb)','execute') allowed")).rows[0].allowed,false);
+ await db.exec('SET ROLE authenticated');assert.ok((await save()).rows[0].result.recipe.id);await db.exec("SELECT set_config('test.admin','false',false)");await assert.rejects(save(),/Admin/);
+ console.log('PASS Fusion SQL: all material modes, uppercase codes, case-insensitive tags, stats, admin guard, cross-card protection, stale edits, idempotent ID, atomic rollback and anonymous denial.');
+}catch(error){console.error(error.message,error.where??'',error.position??'');process.exitCode=1;}finally{await db.close();}

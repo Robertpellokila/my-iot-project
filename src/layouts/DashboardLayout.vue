@@ -1,10 +1,13 @@
 <script setup>
-import { ref } from "vue";
-import { RouterLink, RouterView } from "vue-router";
+import { ref, KeepAlive } from "vue";
+import { RouterLink, RouterView, useRoute } from "vue-router";
+import CardStudioNav from "../components/card-generator/CardStudioNav.vue";
 
 import AppNavbar from "../components/AppNavbar.vue";
 
 const isSidebarOpen = ref(false);
+const route = useRoute();
+const cardStudioRoutes = ['card-generator', 'register-card'];
 
 const sections = ref({
   rfid: true,
@@ -233,16 +236,16 @@ const toggleSection = (section) => {
             <!-- ===============================================
            REGISTER CARD
       ================================================ -->
-
             <RouterLink
-              to="/admin/game/register"
+              to="/admin/cards"
               class="sidebar-link"
-              active-class="sidebar-link-active"
+              :class="{ 'sidebar-link-active':cardStudioRoutes.includes(route.name) }"
+              :aria-current="cardStudioRoutes.includes(route.name) ? 'page' : undefined"
               @click="closeSidebar"
             >
-              <span class="sidebar-icon"> 🎴 </span>
+              <span class="sidebar-icon" aria-hidden="true"> ▧ </span>
 
-              <span> Register Card </span>
+              <span> Card Studio </span>
             </RouterLink>
             <RouterLink
               to="/admin/game/album-card"
@@ -322,7 +325,13 @@ const toggleSection = (section) => {
 
     <!-- CONTENT -->
     <main class="main-content">
-      <RouterView />
+      <CardStudioNav v-if="cardStudioRoutes.includes(route.name) || route.name === 'album-card'" />
+      <RouterView v-slot="{ Component }">
+        <KeepAlive v-if="cardStudioRoutes.includes(route.name)">
+          <component :is="Component" />
+        </KeepAlive>
+        <component :is="Component" v-else />
+      </RouterView>
     </main>
   </div>
 </template>

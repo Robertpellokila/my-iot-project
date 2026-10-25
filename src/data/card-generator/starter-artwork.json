@@ -1,0 +1,15 @@
+{
+  "TOC-003": {
+    "url": "/images/card-generator/tochi-sprout-keeper-v1.png",
+    "path": "images/card-generator/tochi-sprout-keeper-v1.png",
+    "sha256": "91f9ac6e13232df241a115e30e897d39f3dc04eb8d7b10fd23b6132c38aa8af0",
+    "width": 1536,
+    "height": 1024,
+    "x": 0,
+    "y": 0,
+    "scale": 1,
+    "fit": "cover",
+    "origin": "imagegen-reference-draft",
+    "approval_status": "not_reviewed"
+  }
+}

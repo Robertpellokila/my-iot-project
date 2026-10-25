@@ -1,0 +1,1269 @@
+{
+  "dataset_id": "tbc-pilot-v1.1-audited-necromancer",
+  "source_sha256": "4e06c23eafc69ca4b64cb45ac18b19760afd48477958cbb221cce0fa600a46c1",
+  "read_only": true,
+  "production_rows": 161,
+  "existing_artwork_candidates": [
+    {
+      "card_code": "TOC_010",
+      "name": "Tochi — Worldtree Tochi",
+      "image_url": "https://cuougxtyddbfdpzpzcfm.supabase.co/storage/v1/object/public/card-images/cover/8c605529-77db-4a5a-ba62-d03256816233.webp",
+      "reference_only": true
+    },
+    {
+      "card_code": "TOC_010",
+      "name": "Tochi — Worldtree Tochi",
+      "image_url": null,
+      "reference_only": true
+    }
+  ],
+  "mapping": [
+    {
+      "card_code": "COB-003",
+      "production_code": "COB_003",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "10543c14-117e-41c9-9664-1623ef81e4e7",
+          "fields": [],
+          "actual": {
+            "name": "Coby — Circuit Buddy",
+            "rarity": "common",
+            "hp": 108,
+            "attack": 30,
+            "defense": 9
+          },
+          "expected": {
+            "name": "Coby — Circuit Buddy",
+            "rarity": "Common",
+            "hp": 108,
+            "attack": 30,
+            "defense": 9
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "TOC-003",
+      "production_code": "TOC_003",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "fb48a0fb-e360-4a21-9d42-abc3a5dcc971",
+          "fields": [],
+          "actual": {
+            "name": "Tochi — Sprout Keeper",
+            "rarity": "common",
+            "hp": 110,
+            "attack": 29,
+            "defense": 10
+          },
+          "expected": {
+            "name": "Tochi — Sprout Keeper",
+            "rarity": "Common",
+            "hp": 110,
+            "attack": 29,
+            "defense": 10
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "FAL-003",
+      "production_code": "FAL_003",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "4065ac98-e22c-4a24-ac62-42c66ddb4db2",
+          "fields": [
+            "hp",
+            "attack"
+          ],
+          "actual": {
+            "name": "Falcon — Draft Glider",
+            "rarity": "common",
+            "hp": 103,
+            "attack": 33,
+            "defense": 8
+          },
+          "expected": {
+            "name": "Falcon — Draft Glider",
+            "rarity": "Common",
+            "hp": 102,
+            "attack": 31,
+            "defense": 8
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "FOX-003",
+      "production_code": "FOX_003",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "7e9c3da0-b6be-4daf-8610-15310e55dac1",
+          "fields": [
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Byte Fox — Quick Cache",
+            "rarity": "common",
+            "hp": 100,
+            "attack": 33,
+            "defense": 7
+          },
+          "expected": {
+            "name": "Byte Fox — Quick Cache",
+            "rarity": "Common",
+            "hp": 100,
+            "attack": 32,
+            "defense": 8
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "RAB-003",
+      "production_code": "RAB_003",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "a565619d-ff5f-4fd4-a0b7-89e95d03dfe0",
+          "fields": [
+            "hp",
+            "attack"
+          ],
+          "actual": {
+            "name": "Pixel Rabbit — Patch Bunny",
+            "rarity": "common",
+            "hp": 110,
+            "attack": 28,
+            "defense": 10
+          },
+          "expected": {
+            "name": "Pixel Rabbit — Patch Bunny",
+            "rarity": "Common",
+            "hp": 112,
+            "attack": 27,
+            "defense": 10
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "PIC-003",
+      "production_code": "PIC_003",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "50dd8500-24f8-4ae7-824b-6df8958b550a",
+          "fields": [
+            "attack"
+          ],
+          "actual": {
+            "name": "Pico Cat — Soot Sneaker",
+            "rarity": "common",
+            "hp": 102,
+            "attack": 33,
+            "defense": 8
+          },
+          "expected": {
+            "name": "Pico Cat — Soot Sneaker",
+            "rarity": "Common",
+            "hp": 102,
+            "attack": 31,
+            "defense": 8
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "COB-006",
+      "production_code": "COB_006",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "8a287801-7462-4159-b1f6-85505a040a4e",
+          "fields": [
+            "hp"
+          ],
+          "actual": {
+            "name": "Coby — Arc Vanguard",
+            "rarity": "rare",
+            "hp": 118,
+            "attack": 33,
+            "defense": 11
+          },
+          "expected": {
+            "name": "Coby — Arc Vanguard",
+            "rarity": "Rare",
+            "hp": 120,
+            "attack": 33,
+            "defense": 11
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "COB-007",
+      "production_code": "COB_007",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "316f101b-85fb-49a6-93eb-46142a7e60d0",
+          "fields": [
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Coby — Volt Commander",
+            "rarity": "rare",
+            "hp": 130,
+            "attack": 37,
+            "defense": 13
+          },
+          "expected": {
+            "name": "Coby — Volt Commander",
+            "rarity": "Rare",
+            "hp": 124,
+            "attack": 35,
+            "defense": 12
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "COB-008",
+      "production_code": "COB_008",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "1cce6a21-b7b5-40fb-ac18-580f4e431ae3",
+          "fields": [
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Coby — Thunder Standard",
+            "rarity": "epic",
+            "hp": 139,
+            "attack": 40,
+            "defense": 14
+          },
+          "expected": {
+            "name": "Coby — Thunder Standard",
+            "rarity": "Epic",
+            "hp": 128,
+            "attack": 35,
+            "defense": 12
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "TOC-005",
+      "production_code": "TOC_005",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "1a6984d6-391d-45c1-b836-0655a2e7239c",
+          "fields": [
+            "hp",
+            "attack"
+          ],
+          "actual": {
+            "name": "Tochi — Vine Tactician",
+            "rarity": "uncommon",
+            "hp": 119,
+            "attack": 32,
+            "defense": 12
+          },
+          "expected": {
+            "name": "Tochi — Vine Tactician",
+            "rarity": "Uncommon",
+            "hp": 118,
+            "attack": 30,
+            "defense": 12
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "TOC-006",
+      "production_code": "TOC_006",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "fb6aa230-e0b5-4e38-969c-e43add2dc730",
+          "fields": [],
+          "actual": {
+            "name": "Tochi — Forest Scout",
+            "rarity": "rare",
+            "hp": 121,
+            "attack": 32,
+            "defense": 12
+          },
+          "expected": {
+            "name": "Tochi — Forest Scout",
+            "rarity": "Rare",
+            "hp": 121,
+            "attack": 32,
+            "defense": 12
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "TOC-008",
+      "production_code": "TOC_008",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "fcbaf8ad-7e75-4f2b-95aa-3cd33b3ceca8",
+          "fields": [
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Tochi — Emerald Illusion",
+            "rarity": "epic",
+            "hp": 142,
+            "attack": 39,
+            "defense": 15
+          },
+          "expected": {
+            "name": "Tochi — Emerald Illusion",
+            "rarity": "Epic",
+            "hp": 128,
+            "attack": 33,
+            "defense": 13
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "FAL-006",
+      "production_code": "FAL_006",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "034d17ca-af70-442a-8ce6-0b9f3a55ca8a",
+          "fields": [
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Falcon — Gale Diver",
+            "rarity": "rare",
+            "hp": 113,
+            "attack": 36,
+            "defense": 10
+          },
+          "expected": {
+            "name": "Falcon — Gale Diver",
+            "rarity": "Rare",
+            "hp": 111,
+            "attack": 34,
+            "defense": 9
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "FAL-007",
+      "production_code": "FAL_007",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "88167608-1e52-4ff6-9aca-60bd39ec0912",
+          "fields": [
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Falcon — Storm Navigator",
+            "rarity": "rare",
+            "hp": 125,
+            "attack": 40,
+            "defense": 12
+          },
+          "expected": {
+            "name": "Falcon — Storm Navigator",
+            "rarity": "Rare",
+            "hp": 116,
+            "attack": 35,
+            "defense": 10
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "FOX-006",
+      "production_code": "FOX_006",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "82ea07e0-730b-4e08-807a-731033761886",
+          "fields": [
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Byte Fox — Byte Raider",
+            "rarity": "rare",
+            "hp": 110,
+            "attack": 38,
+            "defense": 10
+          },
+          "expected": {
+            "name": "Byte Fox — Byte Raider",
+            "rarity": "Rare",
+            "hp": 108,
+            "attack": 36,
+            "defense": 9
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "FOX-007",
+      "production_code": "FOX_007",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "58968576-80f4-436a-b009-5a254ba7a11f",
+          "fields": [
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Byte Fox — Turbo Fox",
+            "rarity": "rare",
+            "hp": 122,
+            "attack": 40,
+            "defense": 11
+          },
+          "expected": {
+            "name": "Byte Fox — Turbo Fox",
+            "rarity": "Rare",
+            "hp": 112,
+            "attack": 37,
+            "defense": 9
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "RAB-006",
+      "production_code": "RAB_006",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "cc23feff-d64b-48b7-9db4-1869b3d4aa37",
+          "fields": [
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Pixel Rabbit — Pixel Medic",
+            "rarity": "rare",
+            "hp": 126,
+            "attack": 32,
+            "defense": 12
+          },
+          "expected": {
+            "name": "Pixel Rabbit — Pixel Medic",
+            "rarity": "Rare",
+            "hp": 124,
+            "attack": 30,
+            "defense": 13
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "RAB-007",
+      "production_code": "RAB_007",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "bd2a7547-c2fd-4a89-a8b3-84d03d080d08",
+          "fields": [
+            "hp",
+            "attack"
+          ],
+          "actual": {
+            "name": "Pixel Rabbit — Canopy Constructor",
+            "rarity": "rare",
+            "hp": 135,
+            "attack": 35,
+            "defense": 14
+          },
+          "expected": {
+            "name": "Pixel Rabbit — Canopy Constructor",
+            "rarity": "Rare",
+            "hp": 128,
+            "attack": 31,
+            "defense": 14
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "NUL-006",
+      "production_code": "NUL_006",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "d539722a-c081-4398-a58e-646852afa6a3",
+          "fields": [
+            "hp",
+            "attack"
+          ],
+          "actual": {
+            "name": "Null Cat — Void Claw",
+            "rarity": "rare",
+            "hp": 116,
+            "attack": 36,
+            "defense": 10
+          },
+          "expected": {
+            "name": "Null Cat — Void Claw",
+            "rarity": "Rare",
+            "hp": 112,
+            "attack": 34,
+            "defense": 10
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "NUL-007",
+      "production_code": "NUL_007",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "daff98ef-27ec-41d2-aa62-ad988f95b024",
+          "fields": [
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Null Cat — Night Disabler",
+            "rarity": "rare",
+            "hp": 128,
+            "attack": 40,
+            "defense": 12
+          },
+          "expected": {
+            "name": "Null Cat — Night Disabler",
+            "rarity": "Rare",
+            "hp": 118,
+            "attack": 35,
+            "defense": 11
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "PAN-007",
+      "production_code": "PAN_007",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "240b9160-3869-4146-a4d8-be75edf7e6f6",
+          "fields": [
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Spark Panda — Chain Caster",
+            "rarity": "rare",
+            "hp": 126,
+            "attack": 40,
+            "defense": 12
+          },
+          "expected": {
+            "name": "Spark Panda — Chain Caster",
+            "rarity": "Rare",
+            "hp": 116,
+            "attack": 36,
+            "defense": 10
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "OTT-006",
+      "production_code": "OTT_006",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "bed752cb-3789-42b3-a751-9d815fa84748",
+          "fields": [
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Script Otter — Aqua Scripter",
+            "rarity": "rare",
+            "hp": 118,
+            "attack": 32,
+            "defense": 11
+          },
+          "expected": {
+            "name": "Script Otter — Aqua Scripter",
+            "rarity": "Rare",
+            "hp": 122,
+            "attack": 30,
+            "defense": 12
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "OTT-007",
+      "production_code": "OTT_007",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "53069793-1e21-4705-9714-c2c6d9d039ac",
+          "fields": [
+            "hp",
+            "attack"
+          ],
+          "actual": {
+            "name": "Script Otter — Coral Physician",
+            "rarity": "rare",
+            "hp": 130,
+            "attack": 35,
+            "defense": 13
+          },
+          "expected": {
+            "name": "Script Otter — Coral Physician",
+            "rarity": "Rare",
+            "hp": 127,
+            "attack": 31,
+            "defense": 13
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "OTT-008",
+      "production_code": "OTT_008",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "ca612f51-b456-4aac-a12d-688ecab2cbad",
+          "fields": [
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Script Otter — Ocean Compiler",
+            "rarity": "epic",
+            "hp": 139,
+            "attack": 38,
+            "defense": 14
+          },
+          "expected": {
+            "name": "Script Otter — Ocean Compiler",
+            "rarity": "Epic",
+            "hp": 132,
+            "attack": 32,
+            "defense": 13
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "WLF-006",
+      "production_code": "WLF_006",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "edb470f3-b3e1-46c0-ae61-2ee58a841be1",
+          "fields": [
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Vector Wolf — Blaze Tracker",
+            "rarity": "rare",
+            "hp": 115,
+            "attack": 37,
+            "defense": 11
+          },
+          "expected": {
+            "name": "Vector Wolf — Blaze Tracker",
+            "rarity": "Rare",
+            "hp": 112,
+            "attack": 36,
+            "defense": 9
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "WLF-007",
+      "production_code": "WLF_007",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "e84b698e-aa69-41ce-bf5b-75b351c4fe12",
+          "fields": [
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Vector Wolf — Inferno Duelist",
+            "rarity": "rare",
+            "hp": 127,
+            "attack": 40,
+            "defense": 13
+          },
+          "expected": {
+            "name": "Vector Wolf — Inferno Duelist",
+            "rarity": "Rare",
+            "hp": 118,
+            "attack": 38,
+            "defense": 10
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "TUR-006",
+      "production_code": "TUR_006",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "c82ad984-11ff-4193-ba66-564c22bce318",
+          "fields": [
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Cache Turtle — Tidal Defender",
+            "rarity": "rare",
+            "hp": 128,
+            "attack": 32,
+            "defense": 13
+          },
+          "expected": {
+            "name": "Cache Turtle — Tidal Defender",
+            "rarity": "Rare",
+            "hp": 130,
+            "attack": 28,
+            "defense": 14
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "TUR-007",
+      "production_code": "TUR_007",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "20361dc3-0970-4a1b-83bf-ef2b8b83eee0",
+          "fields": [
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Cache Turtle — Reef Fortress",
+            "rarity": "rare",
+            "hp": 135,
+            "attack": 34,
+            "defense": 14
+          },
+          "expected": {
+            "name": "Cache Turtle — Reef Fortress",
+            "rarity": "Rare",
+            "hp": 134,
+            "attack": 30,
+            "defense": 15
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "PIC-006",
+      "production_code": "PIC_006",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "f15e1852-a62e-4110-9ae7-d31024a2cf29",
+          "fields": [
+            "attack"
+          ],
+          "actual": {
+            "name": "Pico Cat — Blaze Decoy",
+            "rarity": "rare",
+            "hp": 112,
+            "attack": 36,
+            "defense": 10
+          },
+          "expected": {
+            "name": "Pico Cat — Blaze Decoy",
+            "rarity": "Rare",
+            "hp": 112,
+            "attack": 34,
+            "defense": 10
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "PIC-007",
+      "production_code": "PIC_007",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "ab118a96-fcc4-4453-ac03-6a5137ed1d60",
+          "fields": [
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Pico Cat — Cinder Scout",
+            "rarity": "rare",
+            "hp": 124,
+            "attack": 40,
+            "defense": 12
+          },
+          "expected": {
+            "name": "Pico Cat — Cinder Scout",
+            "rarity": "Rare",
+            "hp": 118,
+            "attack": 36,
+            "defense": 11
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "F01",
+      "production_code": "F01",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "ca5609c6-e2b5-4859-9d43-030ee0f8190e",
+          "fields": [
+            "rarity",
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Circuit Grove Guardian",
+            "rarity": "rare",
+            "hp": 137,
+            "attack": 37,
+            "defense": 13
+          },
+          "expected": {
+            "name": "Circuit Grove Guardian",
+            "rarity": "Legendary",
+            "hp": 185,
+            "attack": 44,
+            "defense": 24
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "F02",
+      "production_code": "F02",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "e6a37e72-c015-48cf-8d1e-958c70b143fe",
+          "fields": [
+            "rarity",
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Tempest Flag Marshal",
+            "rarity": "rare",
+            "hp": 149,
+            "attack": 45,
+            "defense": 14
+          },
+          "expected": {
+            "name": "Tempest Flag Marshal",
+            "rarity": "Legendary",
+            "hp": 165,
+            "attack": 50,
+            "defense": 20
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "F03",
+      "production_code": "F03",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "6bce608a-1fae-422b-938f-f879496f75b5",
+          "fields": [
+            "rarity",
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Byte Sprout Hacker",
+            "rarity": "rare",
+            "hp": 142,
+            "attack": 42,
+            "defense": 13
+          },
+          "expected": {
+            "name": "Byte Sprout Hacker",
+            "rarity": "Epic",
+            "hp": 160,
+            "attack": 47,
+            "defense": 18
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "F04",
+      "production_code": "F04",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "b08ca2aa-b154-4646-b24a-ec5940a6d85c",
+          "fields": [
+            "rarity",
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Eclipse Signal",
+            "rarity": "epic",
+            "hp": 146,
+            "attack": 46,
+            "defense": 13
+          },
+          "expected": {
+            "name": "Eclipse Signal",
+            "rarity": "Mythic",
+            "hp": 165,
+            "attack": 48,
+            "defense": 20
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "F05",
+      "production_code": "F05",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "6bc951f7-b073-402d-9563-46f63f94da9a",
+          "fields": [
+            "rarity",
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Aqua Vector Sentinel",
+            "rarity": "rare",
+            "hp": 137,
+            "attack": 41,
+            "defense": 13
+          },
+          "expected": {
+            "name": "Aqua Vector Sentinel",
+            "rarity": "Legendary",
+            "hp": 180,
+            "attack": 44,
+            "defense": 23
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "F06",
+      "production_code": "F06",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "543df5d4-df98-4c3e-834c-86e0c5ad4920",
+          "fields": [
+            "rarity",
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Steam Fortress",
+            "rarity": "rare",
+            "hp": 143,
+            "attack": 41,
+            "defense": 13
+          },
+          "expected": {
+            "name": "Steam Fortress",
+            "rarity": "Legendary",
+            "hp": 195,
+            "attack": 45,
+            "defense": 25
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "F07",
+      "production_code": "F07",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "7811a2a2-c3b2-407b-a7fb-1c8ea627029f",
+          "fields": [
+            "rarity",
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Skybyte Runner",
+            "rarity": "rare",
+            "hp": 128,
+            "attack": 43,
+            "defense": 11
+          },
+          "expected": {
+            "name": "Skybyte Runner",
+            "rarity": "Epic",
+            "hp": 150,
+            "attack": 52,
+            "defense": 17
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "F08",
+      "production_code": "F08",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "6f71ea6f-9260-4a2d-9818-0dcfa06f4b46",
+          "fields": [
+            "rarity",
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Phantom Bloom",
+            "rarity": "epic",
+            "hp": 139,
+            "attack": 40,
+            "defense": 13
+          },
+          "expected": {
+            "name": "Phantom Bloom",
+            "rarity": "Mythic",
+            "hp": 175,
+            "attack": 45,
+            "defense": 22
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "F09",
+      "production_code": "F09",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "dcf80949-13ad-4ac0-8de4-0e824f830990",
+          "fields": [
+            "rarity",
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Hydro Cache Engine",
+            "rarity": "rare",
+            "hp": 147,
+            "attack": 38,
+            "defense": 14
+          },
+          "expected": {
+            "name": "Hydro Cache Engine",
+            "rarity": "Legendary",
+            "hp": 190,
+            "attack": 42,
+            "defense": 25
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "F10",
+      "production_code": "F10",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "8853bb43-c1b3-4fbb-9918-818213919a71",
+          "fields": [
+            "rarity",
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Pixel Ember Pack",
+            "rarity": "rare",
+            "hp": 151,
+            "attack": 43,
+            "defense": 15
+          },
+          "expected": {
+            "name": "Pixel Ember Pack",
+            "rarity": "Legendary",
+            "hp": 170,
+            "attack": 50,
+            "defense": 20
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "F11",
+      "production_code": "F11",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "977b49f5-cdac-4d08-997e-7007b3c079e2",
+          "fields": [
+            "rarity",
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Spirit Current",
+            "rarity": "rare",
+            "hp": 143,
+            "attack": 42,
+            "defense": 13
+          },
+          "expected": {
+            "name": "Spirit Current",
+            "rarity": "Legendary",
+            "hp": 175,
+            "attack": 43,
+            "defense": 22
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    },
+    {
+      "card_code": "F12",
+      "production_code": "F12",
+      "matches": 1,
+      "differences": [
+        {
+          "id": "e110477a-a909-45e8-a0b6-05b45d6c874e",
+          "fields": [
+            "rarity",
+            "hp",
+            "attack",
+            "defense"
+          ],
+          "actual": {
+            "name": "Academy Nexus",
+            "rarity": "legendary",
+            "hp": 168,
+            "attack": 47,
+            "defense": 17
+          },
+          "expected": {
+            "name": "Academy Nexus",
+            "rarity": "Mythic",
+            "hp": 195,
+            "attack": 48,
+            "defense": 24
+          }
+        }
+      ],
+      "action": "review_conflicts_do_not_overwrite"
+    }
+  ]
+}

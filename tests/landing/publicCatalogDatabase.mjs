@@ -1,0 +1,23 @@
+import {PGlite} from '@electric-sql/pglite';
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+const db=new PGlite();
+await db.exec(`CREATE ROLE anon;CREATE ROLE authenticated;CREATE SCHEMA auth;
+CREATE FUNCTION auth.role() RETURNS text LANGUAGE sql AS $$ SELECT NULL::text $$;
+CREATE FUNCTION is_admin() RETURNS boolean LANGUAGE sql AS $$ SELECT true $$;
+CREATE TABLE game_cards(id uuid PRIMARY KEY,name text,card_code text,element text,rarity text,hp int,attack int,defense int,image_url text,physical_card_image_url text,lore text,fusion_only bool,uid text,metadata jsonb DEFAULT '{}');
+CREATE TABLE special_skills(id uuid PRIMARY KEY,name text,description text,icon text,metadata jsonb,is_active boolean);
+CREATE TABLE game_card_special_skills(game_card_id uuid,special_skill_id uuid,enabled bool,sort_order int,overrides jsonb);
+CREATE TABLE fusion_recipes(result_game_card_id uuid);`);
+await db.exec(readFileSync('supabase/migrations/031_landing_card_showcase.sql','utf8'));
+await db.exec(readFileSync('supabase/migrations/034_public_card_catalog_projection.sql','utf8'));
+const a='00000000-0000-4000-8000-000000000001',b='00000000-0000-4000-8000-000000000002',c='00000000-0000-4000-8000-000000000003',skill='00000000-0000-4000-8000-000000000004';
+await db.query(`INSERT INTO game_cards(id,name,uid,card_code,featured_on_landing,landing_active,fusion_only,metadata) VALUES
+($1,'Published','private-rfid','F01_STUDIO_INTERNAL',true,true,true,$4),($2,'Hidden','secret','HIDDEN',false,true,false,'{}'),($3,'Inactive','secret','INACTIVE',true,false,false,'{}')`,[a,b,c,{studio_card:{display_code:'F01',source_game_card_id:'private'},owner_id:'private',learning_arc:'Forest',skills:[{name:'Print only',description:'Shield 8'}]}]);
+const get=async()=> (await db.query('SELECT get_landing_cards() cards')).rows[0].cards;
+let cards=await get();assert.equal(cards.length,1);assert.equal(cards[0].card_code,'F01');assert.equal(cards[0].metadata.learning_arc,'Forest');assert.equal(cards[0].skills[0].metadata.catalog_only,true);assert.ok(!JSON.stringify(cards).includes('private'));assert.ok(!JSON.stringify(cards).includes('Hidden'));assert.ok(!JSON.stringify(cards).includes('STUDIO_INTERNAL'));
+await db.query("INSERT INTO special_skills VALUES($1,'Disabled skill','Effect','X','{}',false)",[skill]);await db.query('INSERT INTO game_card_special_skills VALUES($1,$2,true,0,NULL)',[a,skill]);assert.equal((await get())[0].skills[0].metadata.catalog_only,true);
+await db.exec('UPDATE special_skills SET is_active=true');assert.equal((await get())[0].skills[0].metadata.catalog_only,false);
+await db.query('UPDATE game_cards SET featured_on_landing=false WHERE id=$1',[a]);assert.deepEqual(await get(),[]);
+assert.equal((await db.query("SELECT has_function_privilege('anon','get_landing_cards()','EXECUTE') allowed")).rows[0].allowed,true);
+console.log('PASS public projection: opt-in only, inactive exclusion, unpublish, printable code, private fields withheld, printed and disabled skill status');await db.close();

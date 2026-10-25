@@ -1582,10 +1582,9 @@ body .admin-theme .main-content :is(.search-box,.search-wrapper,.filter-bar,.fil
 body .admin-theme .main-content :is(.search-box,.search-wrapper) :is(input,select)::placeholder { color: #829482 !important; }
 body .admin-theme .main-content .collection-page .collection-header :is(h1,p,.eyebrow) { color: #173b22 !important; }
 
-/* Timedoor battle palette: pale green arena surfaces and two readable green
-   player accents. Card art and elemental combat colors stay intact. */
-body .player-battle-ui,
-body .public-battle-page {
+/* The light table palette belongs to the player controls only.
+   PublicBattleArena and PublicActiveField own their spectator arena styles. */
+body .player-battle-ui {
   --timedoor-green: #0caf25;
   --timedoor-green-dark: #087f1d;
   --timedoor-green-soft: #eaf7e9;
@@ -1632,24 +1631,3 @@ body .player-battle-ui .bonus-button.ready:hover {
   border-color: #0caf25 !important;
   box-shadow: 0 12px 24px #0caf2520 !important;
 }
-body .public-battle-page {
-  background: linear-gradient(180deg,#f4fbf2,#e8f5e5 55%,#dff0dd) !important;
-}
-body .public-battle-page .public-sound-control {
-  border-color: #b9dcb9 !important;
-  background: #ffffffed !important;
-  color: #187d2a !important;
-}
-body .public-battle-page .zone-player-label,
-body .public-battle-page .deck-counter,
-body .public-battle-page .public-active-field .player-hud {
-  border-color: #d6e8d4 !important;
-  background-color: #ffffffed !important;
-  color: #29432f !important;
-}
-body .public-battle-page :is(.zone-player-label.blue,.deck-counter.blue,.public-active-field .player-hud.p1) { --player-accent: #0caf25; border-color: #9dd5a2 !important; }
-body .public-battle-page :is(.zone-player-label.red,.deck-counter.red,.public-active-field .player-hud.p2) { --player-accent: #087f1d; border-color: #b4d9b6 !important; }
-body .public-battle-page :is(.deck-counter.blue strong,.zone-player-label.blue span,.public-active-field .player-hud.p1 .hud-label) { color: #0a9820 !important; }
-body .public-battle-page :is(.deck-counter.red strong,.zone-player-label.red span,.public-active-field .player-hud.p2 .hud-label) { color: #087f1d !important; }
-body .public-battle-page .public-active-field :is(.blue-half,.red-half) { background: #0caf25 !important; opacity: .08; }
-body .public-battle-page .public-active-field .red-half { background: #087f1d !important; }

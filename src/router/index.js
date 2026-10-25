@@ -59,8 +59,6 @@ import GameSetup
 import BattleHistory
   from "../views/BattleHistory.vue";
 
-import RegisterGameCard
-  from "../views/RegisterGameCard.vue";
 
 
 // =========================================================
@@ -231,6 +229,15 @@ const router =
         },
 
         children: [
+          {
+            path: 'cards',
+            redirect: { name: 'card-generator' },
+          },
+          {
+            path: 'card-generator',
+            name: 'card-generator',
+            component: () => import('../views/CardGeneratorView.vue'),
+          },
 
           // =================================================
           // DEFAULT
@@ -378,8 +385,7 @@ const router =
             name:
               "register-card",
 
-            component:
-              RegisterGameCard,
+            redirect: to => ({name:'card-generator',query:to.query.source ? {catalog:to.query.source,rfid:'1'} : {}}),
           },
           {
             path:

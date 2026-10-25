@@ -1,4 +1,17 @@
 <script setup>
+import SkillIcon from '../components/battle/SkillIcon.vue';
+import PlayerActionPanel from '../components/battle/PlayerActionPanel.vue';
+import { useActionDialogFocus } from '../composables/battle/useActionDialogFocus.js';
+import QuizBonusChoices from '../components/battle/QuizBonusChoices.vue';
+import {effectSummary,synergyRuleState} from '../lib/battle/battleRuleCatalog.js';
+import { skillCooldown, skillApCost } from '../lib/battle/skillState.js';
+import {defineAsyncComponent} from 'vue';
+import {EMPTY_WORKSPACE} from '../lib/questions/scratchBlocks.js';
+const BlockWorkspace=defineAsyncComponent(()=>import('../components/questions/BlockWorkspace.vue'));
+import QuizTimer from '../components/questions/QuizTimer.vue';
+import QuizBlockList from '../components/questions/QuizBlockList.vue';
+import { codeLines, shuffleItems } from '../lib/questions/questionModel.js';
+import { quizClockState } from '../lib/questions/quizClock.js';
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 
 import { useRoute } from "vue-router";
@@ -8,6 +21,7 @@ import { supabase } from "../lib/supabase";
 import { useBattleSession } from "../composables/battle/useBattleSession";
 
 import { useBattleUiSync } from "../composables/battle/useBattleUiSync";
+import { spotlightTurn } from '../utils/battleSpotlight.js';
 
 import BattleZoneStack from "../components/battle/BattleZoneStack.vue";
 import CardStatusVfx from "../components/battle/CardStatusVfx.vue";
@@ -52,11 +66,13 @@ const ownAvatar = computed(() => {
   return String(battle.value?.[key] ?? "").trim();
 });
 
-const avatarSelectionRequired = computed(() =>
-  Boolean(battle.value) && !playerAvatarOptions.includes(ownAvatar.value),
-);
 const ownAvatarImage = computed(() =>
   /^(https?:\/\/|\/|data:image\/)/i.test(ownAvatar.value) ? ownAvatar.value : "",
+);
+const avatarSelectionRequired = computed(() =>
+  Boolean(battle.value) &&
+  !ownAvatarImage.value &&
+  !playerAvatarOptions.includes(ownAvatar.value),
 );
 
 const openAvatarPicker = () => {
@@ -163,6 +179,9 @@ const runtimeSpecialSkills = ref([]);
 const specialSkillLoading = ref(false);
 const selectedSpecialSkillId = ref(null);
 const selectedSpecialTargetId = ref(null);
+const selectedSpecialOption = ref('');
+const selectedSpecialBenchId = ref('');
+const selectedSpecialTargetIds = ref([]);
 
 // =========================================================
 // PHASE 3D.7 - FUSION UI
@@ -295,13 +314,14 @@ const selectedTargetCardId = ref(null);
 
 const graveyardCards = ref([]);
 
-const activeDropOver = ref(false);
-
 let graveyardChannel = null;
 
 const getCardId = (card) =>
   card?.battleId ?? card?.battle_card_id ?? card?.battleCardId ??
   card?.id ?? card?.battle_id ?? card?.uid ?? null;
+
+const getBenchReturnCount = (card) =>
+  Number(card?.benchReturnCount ?? card?.bench_return_count ?? 0);
 
 const normalizeBattleCard = (card) => ({
   ...card,
@@ -391,47 +411,32 @@ const {
 
   openViewer: syncOpenViewer,
   closeViewer: syncCloseViewer,
-  setViewerIndex: syncViewerIndex,
+  focusCards: syncFocusCards,
+  skillIntent: syncSkillIntent,
 
-  startDrag: syncStartDrag,
-  setDragTarget: syncDragTarget,
-  endDrag: syncEndDrag,
 } = useBattleUiSync();
 
+const sharedViewer = ref(null);
+const viewedPileCard = (zone, index) => (zone === 'bench' ? benchCards.value : graveyardCards.value)[index];
 const handleZoneViewerOpen = ({ zone, index = 0 } = {}) => {
-  if (!zone) {
-    return;
+  if (!['bench', 'graveyard'].includes(zone)) return;
+  sharedViewer.value = { zone, index };
+  if (isMyTurn.value && !questionActive.value) {
+    void syncOpenViewer(zone, index, spotlightTurn(battle.value), getCardId(viewedPileCard(zone, index)));
   }
-
-  void syncOpenViewer(zone, index);
 };
 
 const handleZoneViewerClose = () => {
+  sharedViewer.value = null;
   void syncCloseViewer();
 };
 
-const handleZoneViewerIndex = ({ index } = {}) => {
-  if (index === undefined || index === null) {
-    return;
+const handleZoneViewerIndex = ({ zone, index } = {}) => {
+  if (index == null || !['bench', 'graveyard'].includes(zone)) return;
+  sharedViewer.value = { zone, index };
+  if (isMyTurn.value && !questionActive.value) {
+    void syncOpenViewer(zone, index, spotlightTurn(battle.value), getCardId(viewedPileCard(zone, index)));
   }
-
-  void syncViewerIndex(index);
-};
-
-const handleZoneDragStart = (card, zone) => {
-  if (!card || !zone) {
-    return;
-  }
-
-  void syncStartDrag(card, zone);
-};
-
-const handleZoneDragEnd = () => {
-  void syncEndDrag();
-};
-
-const handleZoneDragHover = ({ zone } = {}) => {
-  void syncDragTarget(zone ?? null);
 };
 
 // =========================================================
@@ -917,237 +922,108 @@ const startNecroRebirthCinematic = ({ source, target } = {}) => {
 };
 
 // =========================================================
-// TCG DRAG & DROP
+// ACTIVE / BENCH BUTTON ACTIONS
 // =========================================================
 
-const writeDragPayload = (event, card, fromZone) => {
-  const payload = {
-    cardId: getCardId(card),
-    uid: card?.uid ?? null,
-    name: card?.name ?? "",
-    fromZone,
-  };
+const canUseBenchMoveAction = () =>
+  isMyTurn.value &&
+  !actionLoading.value &&
+  !battleWaiting.value &&
+  !waitingForRfid.value &&
+  !questionActive.value &&
+  !battleFinished.value &&
+  canSpendActionPoints(configuredActionPointCost("switch", 1));
 
-  event.dataTransfer.effectAllowed = "move";
-
-  event.dataTransfer.setData(
-    "application/x-battle-card",
-    JSON.stringify(payload),
+const canMoveActiveCardToBench = (card) =>
+  Boolean(
+    card &&
+      !card.exhausted &&
+      benchCards.value.length < maxBench.value &&
+      canUseBenchMoveAction(),
   );
 
-  event.dataTransfer.setData(
-    "text/plain",
-    JSON.stringify(payload),
-  );
+const moveActiveCardToBench = async (card) => {
+  if (!canMoveActiveCardToBench(card)) return;
+  await sendBenchAction("move_to_bench", card);
 };
 
-const startActiveCardDrag = (event, card) => {
+const canReturnBenchCard = (card) => {
   if (
-    actionLoading.value ||
-    battleWaiting.value ||
-    waitingForRfid.value ||
-    questionActive.value ||
-    battleFinished.value ||
-    !isMyTurn.value ||
-    card?.exhausted
+    !card ||
+    card.exhausted ||
+    Number(card.currentHp ?? card.current_hp ?? card.hp ?? 0) <= 0 ||
+    getBenchReturnCount(card) >= 1 ||
+    !canUseBenchMoveAction()
   ) {
-    event.preventDefault();
-
-    return;
+    return false;
   }
 
-  writeDragPayload(
-    event,
-    card,
-    "active",
-  );
+  const hasOpenActiveSlot = activeCards.value.length < maxActive.value;
+  if (hasOpenActiveSlot) return true;
 
-  document.body.classList.add("tcg-card-dragging");
-
-  void syncStartDrag(
-    card,
-    "active",
+  return Boolean(
+    selectedCard.value &&
+      !selectedCard.value.exhausted &&
+      Number(selectedCard.value.currentHp ?? selectedCard.value.current_hp ?? selectedCard.value.hp ?? 0) > 0,
   );
 };
 
-const endActiveCardDrag = () => {
-  document.body.classList.remove("tcg-card-dragging");
-  activeDropOver.value = false;
-
-  void syncDragTarget(null);
-
-  void syncEndDrag();
-};
-
-const findCardById = (cards, cardId) =>
-  cards.find(
-    (card) =>
-      String(getCardId(card)) ===
-      String(cardId),
-  ) ?? null;
-
-const handleBenchDrop = async (payload) => {
-  if (
-    !payload ||
-    payload.fromZone !== "active"
-  ) {
-    void syncDragTarget(null);
-
-    void syncEndDrag();
-
-    return;
-  }
-
-  const card = findCardById(
-    activeCards.value,
-    payload.cardId,
-  );
-
-  if (!card) {
-    warningToast(
-      "CARD TIDAK DITEMUKAN",
-      "Active Card sudah berubah.",
-    );
-
-    void syncDragTarget(null);
-
-    void syncEndDrag();
-
-    return;
-  }
-
-  try {
-    await sendBenchAction(
-      "move_to_bench",
-      card,
-    );
-  } finally {
-    void syncDragTarget(null);
-
-    void syncEndDrag();
-  }
-};
-
-const allowActiveDrop = (event) => {
-  if (
-    actionLoading.value ||
-    battleWaiting.value ||
-    waitingForRfid.value ||
-    questionActive.value ||
-    battleFinished.value ||
-    !isMyTurn.value ||
-    !canSpendActionPoints(configuredActionPointCost("switch", 1))
-  ) {
-    return;
-  }
-
-  event.preventDefault();
-
-  event.dataTransfer.dropEffect =
-    "move";
-
-  if (!activeDropOver.value) {
-    activeDropOver.value = true;
-
-    void syncDragTarget(
-      "active",
-    );
-  }
-};
-
-const clearActiveDrop = (event) => {
-  const element =
-    event?.currentTarget;
-
-  const related =
-    event?.relatedTarget;
-
-  if (
-    element &&
-    related &&
-    element.contains(related)
-  ) {
-    return;
-  }
-
-  activeDropOver.value = false;
-
-  void syncDragTarget(null);
-};
-
-const readDropPayload = (event) => {
-  const raw =
-    event.dataTransfer.getData(
-      "application/x-battle-card",
-    ) ||
-    event.dataTransfer.getData(
-      "text/plain",
-    );
-
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-};
-
-const handleActiveDrop = async (event) => {
-  activeDropOver.value = false;
-
-  event.preventDefault();
-
-  const payload =
-    readDropPayload(event);
-
-  if (
-    !payload ||
-    payload.fromZone !== "bench"
-  ) {
-    void syncDragTarget(null);
-
-    void syncEndDrag();
-
-    return;
-  }
-
-  const card = findCardById(
-    benchCards.value,
-    payload.cardId,
-  );
-
-  if (!card) {
-    warningToast(
-      "CARD TIDAK DITEMUKAN",
-      "Bench Card sudah berubah.",
-    );
-
-    void syncDragTarget(null);
-
-    void syncEndDrag();
-
-    return;
-  }
-
-  try {
-    const hasOpenActiveSlot = activeCards.value.length < maxActive.value;
-    const currentActive = selectedCard.value ?? activeCards.value[0];
-    if (actionPointsEnabled.value && !hasOpenActiveSlot && currentActive) {
-      await sendBenchAction("switch_active", card, {
-        active_card_id: getCardId(currentActive),
-      });
-    } else {
-      await sendBenchAction("return_from_bench", card);
+const returnBenchCardToActive = async (card) => {
+  if (!canReturnBenchCard(card)) {
+    if (
+      activeCards.value.length >= maxActive.value &&
+      !selectedCard.value
+    ) {
+      warningToast(
+        "PILIH KARTU ACTIVE",
+        "Pilih kartu Active yang ingin ditukar terlebih dahulu.",
+      );
     }
-  } finally {
-    void syncDragTarget(null);
-
-    void syncEndDrag();
+    return;
   }
+
+  const hasOpenActiveSlot = activeCards.value.length < maxActive.value;
+  if (hasOpenActiveSlot) {
+    await sendBenchAction("return_from_bench", card);
+    return;
+  }
+
+  await sendBenchAction("switch_active", card, {
+    active_card_id: getCardId(selectedCard.value),
+  });
 };
+
+const benchReturnActionLabel = computed(() => {
+  if (activeCards.value.length < maxActive.value) {
+    return "KEMBALI KE ACTIVE";
+  }
+
+  return selectedCard.value
+    ? `TUKAR DENGAN ${selectedCard.value.name}`
+    : "PILIH ACTIVE UNTUK TUKAR";
+});
+
+const benchReturnActionHint = computed(() => {
+  const cost = configuredActionPointCost("switch", 1);
+  if (activeCards.value.length < maxActive.value) {
+    return `Masuk ke slot Active yang kosong • biaya ${cost} poin giliran.`;
+  }
+
+  return selectedCard.value
+    ? `Menukar posisi dengan ${selectedCard.value.name} • biaya ${cost} poin giliran.`
+    : "Pilih kartu Active terlebih dahulu, lalu tekan tombol ini.";
+});
+
+const benchReturnActionEnabled = computed(() => {
+  if (!canUseBenchMoveAction()) return false;
+  if (activeCards.value.length < maxActive.value) return true;
+
+  return Boolean(
+    selectedCard.value &&
+      !selectedCard.value.exhausted &&
+      Number(selectedCard.value.currentHp ?? selectedCard.value.current_hp ?? selectedCard.value.hp ?? 0) > 0,
+  );
+});
 
 // =========================================================
 // QUESTION
@@ -1176,6 +1052,12 @@ const bonusChoiceRoundId =
 
 const bonusChoiceSubmitting =
   ref(false);
+const bonusChoiceSelectedCode=ref(null);
+const quizBonusCatalog=computed(()=>Array.isArray(battle.value?.quiz_bonus_rules_snapshot)?battle.value.quiz_bonus_rules_snapshot:[]);
+const bonusChoiceOptions=computed(()=>questionRewardChoices.value.map(code=>{
+ const rule=quizBonusCatalog.value.find(item=>item.code===code);
+ return {code,name:bonusLabel(code),icon:bonusIcon(code),summary:bonusDescription(code),description:rule?.description||''};
+}));
 
 // =========================================================
 // BONUS SKILL
@@ -1293,6 +1175,18 @@ const STATUS_REFRESH_EVENT_TYPES = new Set([
 ]);
 
 const STATUS_VISUALS = {
+  studio_shield: {icon:'🛡',label:'SHIELD',tone:'water'},
+  studio_defense: {icon:'🛡',label:'DEF UP',tone:'defense'},
+  studio_team_defense: {icon:'🛡',label:'TEAM DEF',tone:'defense'},
+  studio_attack_buff: {icon:'⚔',label:'ATK UP',tone:'power'},
+  studio_attack_debuff: {icon:'↓',label:'ATK DOWN',tone:'debuff'},
+  studio_defense_debuff: {icon:'↓',label:'DEF DOWN',tone:'debuff'},
+  studio_reduction: {icon:'🛡',label:'DAMAGE GUARD',tone:'defense'},
+  studio_mark: {icon:'◎',label:'MARKED',tone:'debuff'},
+  studio_delayed_heal: {icon:'+',label:'REGEN',tone:'water'},
+  studio_silence_slot2: {icon:'⊘',label:'SKILL 2 LOCK',tone:'debuff'},
+  studio_revival_lock: {icon:'⌛',label:'REVIVE WAIT',tone:'debuff'},
+  root: {icon:'🌿',label:'ROOT',tone:'debuff'},
   defense: { icon: "🛡", label: "DEFENSE", tone: "defense" },
   water_shield: { icon: "💧", label: "SHIELD", tone: "water" },
   synergy_shield: { icon: "💧", label: "SHIELD", tone: "water" },
@@ -1528,8 +1422,8 @@ const getCardFxFlags = (card) => {
     : battle.value?.player2_synergy_shield) > 0;
 
   return {
-    defense: keys.has("defense"),
-    shield: keys.has("shield") || keys.has("water_shield") || keys.has("synergy_shield") || ownShield,
+    defense: keys.has("defense") || keys.has('studio_defense') || keys.has('studio_team_defense'),
+    shield: keys.has('studio_shield') || keys.has('studio_reduction') || keys.has("shield") || keys.has("water_shield") || keys.has("synergy_shield") || ownShield,
     necro: keys.has("necro_identity"),
     fusion: keys.has("fusion_identity"),
     burn: keys.has("burn") || keys.has("elemental_burn"),
@@ -3184,7 +3078,9 @@ const skillCostSpec = (skill) => normalizeJsonObject(skill?.cost_spec);
 const skillLimits = (skill) => normalizeJsonObject(skill?.limits);
 const skillEffects = (skill) => normalizeJsonArray(skill?.effects);
 
+let skillLoadVersion = 0;
 const loadSelectedCardSpecialSkills = async () => {
+  const version = ++skillLoadVersion;
   runtimeSpecialSkills.value = [];
   selectedSpecialSkillId.value = null;
   selectedSpecialTargetId.value = null;
@@ -3242,25 +3138,20 @@ const loadSelectedCardSpecialSkills = async () => {
       }
     }
 
+    if (version !== skillLoadVersion) return;
     runtimeSpecialSkills.value = rows.map((skill) => ({
       ...skill,
       usage_count: usageCount.get(skill.id) ?? 0,
     }));
   } catch (err) {
     console.error("Load Special Skills:", err);
-    runtimeSpecialSkills.value = [];
+    if (version === skillLoadVersion) runtimeSpecialSkills.value = [];
   } finally {
-    specialSkillLoading.value = false;
+    if (version === skillLoadVersion) specialSkillLoading.value = false;
   }
 };
 
-const specialSkillActionPointCost = (skill) => {
-  const skillOverride = Number(skill?.limits?.action_points);
-  if (Number.isInteger(skillOverride) && skillOverride >= 0 && skillOverride <= 10) {
-    return skillOverride;
-  }
-  return configuredActionPointCost("special_skill", 1);
-};
+const specialSkillActionPointCost = skill => skillApCost(skill, configuredActionPointCost('special_skill', 1));
 
 const specialSkillReadyState = (skill) => {
   if (!skill) {
@@ -3304,15 +3195,12 @@ const specialSkillReadyState = (skill) => {
     };
   }
 
-  const cooldownUntil = Number(skill.cooldown_until_round ?? 0) || 0;
-
-  if (cooldownUntil > 0 && battleRound.value <= cooldownUntil) {
-    return {
-      ready: false,
-      status: `CD R${cooldownUntil + 1}`,
-      reason: `Cooldown aktif. Skill tersedia kembali pada Round ${cooldownUntil + 1}.`,
-    };
-  }
+  if (skill.disabled || skill.activation_timing !== 'main_phase') return { ready:false, status:'DISABLED', reason:'Skill sedang dinonaktifkan.' };
+  const sourceStatuses = activeStatusEffects.value.filter(status => status.target_card_id === getCardId(selectedCard.value));
+  if (sourceStatuses.some(status => status.status_key === 'studio_revival_lock')) return {ready:false,status:'REVIVED',reason:'Attack/Skill tersedia pada giliran berikutnya.'};
+  if (String(skill.metadata?.master_metadata?.slot) === '2' && sourceStatuses.some(status => status.status_key === 'studio_silence_slot2')) return {ready:false,status:'LOCKED',reason:'Skill 2 sedang dikunci.'};
+  const cooldown = skillCooldown(skill, battle.value, player.value);
+  if (cooldown.remaining) return { ready:false, status:`CD ${cooldown.remaining}`, reason:`Tersedia setelah ${cooldown.remaining} ${cooldown.unit}.` };
 
   const costType = String(cost.type ?? "none").toLowerCase();
   const costValue = Math.max(0, Number(cost.value ?? cost.amount ?? 0) || 0);
@@ -3359,7 +3247,7 @@ const selectedSpecialSkill = computed(() => {
     (skill) => skill.id === selectedSpecialSkillId.value,
   );
 
-  return selected ?? runtimeSpecialSkills.value[0] ?? null;
+  return selected ?? null;
 });
 
 const selectedSpecialTargetType = computed(() =>
@@ -3399,9 +3287,11 @@ const specialTargetCards = computed(() => {
   if (type === "ally_active" || type === "any_active") {
     return activeCards.value;
   }
+  if (type === 'ally_field') return [...activeCards.value, ...benchCards.value];
 
   if (type === "ally_graveyard") {
-    return graveyardCards.value;
+    const recall = skillEffects(selectedSpecialSkill.value).some(effect => effect.program?.operations?.some(item => item.type === 'revive'));
+    return recall ? graveyardCards.value.filter(card => !card.is_fusion_result && !card.fusion_consumed && card.origin_type !== 'fusion' && card.card_kind !== 'fusion') : graveyardCards.value;
   }
 
   if (["self", "self_card", "source_card"].includes(type)) {
@@ -3420,21 +3310,22 @@ const selectedSpecialTarget = computed(() =>
 const formatSpecialTarget = (skill) => {
   const type = String(skillTargetSpec(skill).type ?? "").toLowerCase();
   const labels = {
-    enemy_active: "Enemy Active Card",
-    ally_active: "Ally Active Card",
-    any_active: "Any Active Card",
-    self: "Self",
-    self_card: "Source Card",
-    source_card: "Source Card",
-    self_player: "Self Player",
-    source_player: "Self Player",
-    enemy_player: "Enemy Player",
-    opponent_player: "Enemy Player",
-    ally_graveyard: "Ally Graveyard",
-    enemy_graveyard: "Enemy Graveyard",
+    enemy_active: "Kartu Active lawan",
+    ally_active: "Kartu Activemu",
+    ally_field: "Active / Bench milikmu",
+    any_active: "Kartu Active yang tersedia",
+    self: "Kartu ini",
+    self_card: "Kartu ini",
+    source_card: "Kartu ini",
+    self_player: "Pemainmu",
+    source_player: "Pemainmu",
+    enemy_player: "Pemain lawan",
+    opponent_player: "Pemain lawan",
+    ally_graveyard: "Graveyard milikmu",
+    enemy_graveyard: "Graveyard lawan",
   };
 
-  return labels[type] ?? (type ? type.replaceAll("_", " ").toUpperCase() : "Automatic");
+  return labels[type] ?? (type ? type.replaceAll("_", " ").toUpperCase() : "Otomatis");
 };
 
 const formatSpecialCost = (skill) => {
@@ -3443,7 +3334,7 @@ const formatSpecialCost = (skill) => {
   const value = Math.max(0, Number(cost.value ?? cost.amount ?? 0) || 0);
 
   if (["", "none", "free"].includes(type)) {
-    return "Free";
+    return "Tanpa biaya tambahan";
   }
 
   if (["skill_gauge", "ultimate_gauge"].includes(type)) {
@@ -3464,10 +3355,11 @@ const formatSpecialLimits = (skill) => {
   } else if (maxUses > 0) {
     parts.push(`max ${maxUses}×`);
   } else {
-    parts.push("unlimited uses");
+    parts.push("Pemakaian tidak dibatasi");
   }
 
-  parts.push(cooldown > 0 ? `${cooldown} round cooldown` : "no cooldown");
+  const cd = skillCooldown(skill, battle.value, player.value);
+  parts.push(cd.duration > 0 ? `Cooldown ${cd.duration} ${cd.unit}` : "Tanpa cooldown");
 
   return parts.join(" • ");
 };
@@ -3500,6 +3392,7 @@ const describeSpecialEffects = (skill) => {
 
   return effects.map((effect) => {
     const type = String(effect?.type ?? "effect").toLowerCase();
+    if (type === 'studio_skill') return skill.description || 'Ikuti efek kartu.';
     const amount = describeAmount(effect?.amount);
     const labels = {
       damage_card: "Damage Card",
@@ -3663,6 +3556,7 @@ const selectedSynergyUsed =
 
 const selectedSynergyInfo =
   computed(() => {
+    if(Array.isArray(battle.value?.synergy_rules_snapshot))return synergyRuleState(battle.value.synergy_rules_snapshot,selectedCard.value,activeCards.value,ownSynergyUsed.value);
     if (!selectedCard.value) {
       return {
         icon: "✧",
@@ -4403,6 +4297,11 @@ const closeActionInfoModal = () => {
   activeActionInfo.value = null;
 };
 
+let skillChoiceId = null;
+const publishSkillChoice = () => {
+  if (!specialSkillModalOpen.value || !isMyTurn.value || questionActive.value || !selectedCard.value) { void syncSkillIntent(null); return; }
+  void syncSkillIntent({id:skillChoiceId,cardId:getCardId(selectedCard.value),skillId:selectedSpecialSkillId.value,phase:selectedSpecialSkillId.value?'selected':'choosing',turn:spotlightTurn(battle.value),at:Date.now()});
+};
 const openSpecialSkillModal = (skill = null) => {
   if (!selectedCard.value) {
     warningToast("PILIH CARD", "Pilih Active Card terlebih dahulu.");
@@ -4419,16 +4318,21 @@ const openSpecialSkillModal = (skill = null) => {
     return;
   }
 
-  const preferred =
-    skill ?? readySpecialSkills.value[0] ?? runtimeSpecialSkills.value[0];
+  const preferred = skill;
 
   selectedSpecialSkillId.value = preferred?.id ?? null;
   selectedSpecialTargetId.value = null;
   specialSkillModalOpen.value = true;
+  selectedSpecialOption.value = '';
+  selectedSpecialBenchId.value = '';
+  selectedSpecialTargetIds.value = [];
+  skillChoiceId = crypto.randomUUID();
+  publishSkillChoice();
 };
 
 const closeSpecialSkillModal = (silent = false) => {
   specialSkillModalOpen.value = false;
+  void syncSkillIntent(null);
   selectedSpecialTargetId.value = null;
 
   if (!silent) {
@@ -4439,10 +4343,20 @@ const closeSpecialSkillModal = (silent = false) => {
 const chooseSpecialSkill = (skill) => {
   selectedSpecialSkillId.value = skill?.id ?? null;
   selectedSpecialTargetId.value = null;
+  selectedSpecialOption.value = '';
+  selectedSpecialBenchId.value = '';
+  selectedSpecialTargetIds.value = [];
+  publishSkillChoice();
 };
 
 const chooseSpecialTarget = (card) => {
-  selectedSpecialTargetId.value = getCardId(card);
+  const id = getCardId(card);
+  const limit = Number(skillTargetSpec(selectedSpecialSkill.value).max_targets ?? 1);
+  if (limit > 1) {
+    const current = selectedSpecialTargetIds.value;
+    selectedSpecialTargetIds.value = current.includes(id) ? current.filter(value => value !== id) : current.length < limit ? [...current,id] : [...current.slice(1),id];
+    selectedSpecialTargetId.value = selectedSpecialTargetIds.value[0] ?? null;
+  } else selectedSpecialTargetId.value = id;
 };
 
 const submitSpecialSkill = async () => {
@@ -4459,6 +4373,9 @@ const submitSpecialSkill = async () => {
   }
 
   const readiness = specialSkillReadyState(skill);
+  const spec = skillTargetSpec(skill);
+  if (spec.choices?.length && !spec.choices.some(option => option.id === selectedSpecialOption.value)) { warningToast('PILIH EFEK', 'Pilih satu efek skill terlebih dahulu.'); return; }
+  if (spec.needs_bench && !selectedSpecialBenchId.value) { warningToast('PILIH BENCH', 'Pilih kartu Bench untuk ditukar.'); return; }
 
   if (!readiness.ready) {
     warningToast("SPECIAL SKILL LOCKED", readiness.reason);
@@ -4496,7 +4413,11 @@ const submitSpecialSkill = async () => {
         p_card_id: sourceId,
         p_payload: {
           skill_id: skill.id,
+          action_id: crypto.randomUUID(),
           target_card_id: targetId,
+          target_card_ids: selectedSpecialTargetIds.value,
+          skill_option: selectedSpecialOption.value,
+          bench_card_id: selectedSpecialBenchId.value || null,
         },
       },
     );
@@ -4536,7 +4457,7 @@ const submitSpecialSkill = async () => {
       });
     } else {
       successToast(
-        `${skill.icon || "✨"} ${String(skill.name ?? skill.skill_code ?? "SPECIAL").toUpperCase()}`,
+        `✨ ${String(skill.name ?? skill.skill_code ?? "SPECIAL").toUpperCase()}`,
         data?.message ?? (parts.length ? parts.join(" • ") : "Special Skill berhasil digunakan."),
       );
     }
@@ -4570,6 +4491,7 @@ const submitSpecialSkill = async () => {
 
 const selectCard =
   (card) => {
+    if (actionLoading.value) return;
     if (
       battleWaiting.value
     ) {
@@ -4630,14 +4552,14 @@ const selectCard =
       return;
     }
 
+    // Re-selecting the same card is still an explicit choice on a new turn.
+    if (selectedCardId.value === getCardId(card)) {
+      void syncFocusCards({ selectedCardId: getCardId(card), turn: spotlightTurn(battle.value) });
+    }
     selectedCardId.value =
       getCardId(card);
 
-    successToast(
-      "CARD SELECTED",
-
-      card.name,
-    );
+    // Selection is already acknowledged in the persistent command context.
   };
 
 // =========================================================
@@ -4646,6 +4568,12 @@ const selectCard =
 
 const validateActionTurn =
   () => {
+    if (actionLoading.value) return false;
+    if (turnTimerVisible.value && turnSecondsRemaining.value === 0) {
+      warningToast('WAKTU GILIRAN HABIS', 'Menunggu giliran berikutnya. Aksi belum dikirim.');
+      void syncBattleTurnClock();
+      return false;
+    }
     if (
       battleWaiting.value
     ) {
@@ -4767,9 +4695,7 @@ const beginAttackAction =
     if (
       !isTcgV1.value
     ) {
-      void submitAction(
-        "attack",
-      );
+      requestPanelReview('attack');
 
       return;
     }
@@ -4791,7 +4717,7 @@ const beginAttackAction =
         return;
       }
 
-      void submitDirectAttack();
+      requestPanelReview('attack', true);
 
       return;
     }
@@ -5527,6 +5453,7 @@ const submitAction =
       ) {
         selectedCardId.value =
           null;
+        await loadBattle(code.value);
 
         successToast(
           "SUMMON MODE ACTIVE",
@@ -5633,7 +5560,7 @@ const sendBenchAction =
               actionType,
 
             p_card_id:
-              card.id,
+              getCardId(card),
 
             p_payload: payload,
           },
@@ -5723,7 +5650,7 @@ const questionInteractionLocked =
   );
 
 const questionTimeLimitSeconds = computed(() =>
-  Math.max(0, Number(battle.value?.question_time_limit_seconds ?? 0) || 0),
+  Math.max(0, Number(currentQuestion.value?.duration_seconds ?? battle.value?.question_time_limit_seconds ?? 0) || 0),
 );
 const questionImageUrl = computed(() => {
   const question = currentQuestion.value;
@@ -5735,14 +5662,7 @@ const questionImageUrl = computed(() => {
   }
   return question.image_url ?? "";
 });
-const questionCodeLines = computed(() => {
-  const snippet = String(currentQuestion.value?.code_snippet ?? "")
-    .replace(/\\r\\n/g, "\n")
-    .replace(/\\n/g, "\n")
-    .replace(/\\r/g, "\n")
-    .replace(/\r\n?/g, "\n");
-  return snippet ? snippet.split("\n") : [];
-});
+const questionCodeLines = computed(() => codeLines(currentQuestion.value?.code_snippet));
 const questionLearningEnabled = computed(() =>
   battle.value?.question_learning_enabled !== false,
 );
@@ -5750,9 +5670,11 @@ const questionSecondsRemaining = ref(null);
 const questionHintStep = ref(0);
 const questionCorrectOption = ref("");
 const questionBlockOrder = ref([]);
-const questionDraggingBlock = ref(null);
+const questionWorkspace = ref(structuredClone(EMPTY_WORKSPACE));
+watch(() => currentQuestion.value?.id, () => { questionWorkspace.value=JSON.parse(JSON.stringify(currentQuestion.value?.block_config?.initial ?? EMPTY_WORKSPACE)); });
 const timedOutQuestionRound = ref(null);
 let questionClockInterval = null;
+let questionTimeoutRetryAt = 0;
 
 const updateQuestionClock = () => {
   const limit = questionTimeLimitSeconds.value;
@@ -5761,14 +5683,13 @@ const updateQuestionClock = () => {
     questionSecondsRemaining.value = null;
     return;
   }
-  const deadline = new Date(createdAt).getTime() + limit * 1000;
-  questionSecondsRemaining.value = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+  questionSecondsRemaining.value = quizClockState(currentQuestionRound.value, limit).remaining;
   if (questionSecondsRemaining.value === 0) void expireQuestionRound();
 };
 
 const expireQuestionRound = async () => {
   const roundId = effectiveQuestionRoundId.value;
-  if (!roundId || timedOutQuestionRound.value === roundId || !token.value) return;
+  if (!roundId || timedOutQuestionRound.value === roundId || !token.value || Date.now() < questionTimeoutRetryAt) return;
   timedOutQuestionRound.value = roundId;
   try {
     const { data, error: timeoutError } = await supabase.rpc("finish_battle_question_timeout", {
@@ -5781,9 +5702,14 @@ const expireQuestionRound = async () => {
     if (data?.timed_out) {
       questionResult.value = "timeout";
       void playSound("warning", 0.65);
+      void refreshBattle();
+    } else {
+      timedOutQuestionRound.value = null;
+      questionTimeoutRetryAt = Date.now() + 3000;
     }
   } catch (timeoutError) {
     timedOutQuestionRound.value = null;
+    questionTimeoutRetryAt = Date.now() + 3000;
     console.error("Question timeout:", timeoutError);
   }
 };
@@ -5792,30 +5718,8 @@ const initializeQuestionBlocks = () => {
   const blocks = Array.isArray(currentQuestion.value?.blocks)
     ? currentQuestion.value.blocks
     : [];
-  questionBlockOrder.value = blocks
-    .map((text, originalIndex) => ({ text: String(text), originalIndex }))
-    .sort(() => Math.random() - 0.5);
+  questionBlockOrder.value = shuffleItems(blocks.map((text, originalIndex) => ({ text: String(text), originalIndex })));
   questionHintStep.value = 0;
-  questionDraggingBlock.value = null;
-};
-
-const moveQuestionBlock = (index, offset) => {
-  const nextIndex = index + offset;
-  if (nextIndex < 0 || nextIndex >= questionBlockOrder.value.length) return;
-  const items = [...questionBlockOrder.value];
-  const [item] = items.splice(index, 1);
-  items.splice(nextIndex, 0, item);
-  questionBlockOrder.value = items;
-};
-
-const dropQuestionBlock = (index) => {
-  const from = questionDraggingBlock.value;
-  questionDraggingBlock.value = null;
-  if (from == null || from === index) return;
-  const items = [...questionBlockOrder.value];
-  const [item] = items.splice(from, 1);
-  items.splice(index, 0, item);
-  questionBlockOrder.value = items;
 };
 
 const submitQuestionBlockOrder = () => {
@@ -6005,7 +5909,7 @@ const answerQuestion =
           "🏆 FIRST CORRECT!",
 
           questionRewardChoices.value.length
-            ? "Pilih satu dari tiga bonus skill untuk melanjutkan battle."
+            ? `Pilih satu dari ${questionRewardChoices.value.length} bonus skill untuk melanjutkan battle.`
             : data?.reward
               ? `Bonus skill: ${bonusLabel(data.reward)}`
               : "Jawaban benar!",
@@ -6098,6 +6002,8 @@ const answerQuestion =
 
 const bonusLabel =
   (skill) => {
+    const rule=quizBonusCatalog.value.find(item=>item.code===skill);
+    if(rule)return rule.name;
     const labels = {
       power_strike:
         "Power Strike",
@@ -6121,6 +6027,8 @@ const bonusLabel =
 
 const bonusIcon =
   (skill) => {
+    const rule=quizBonusCatalog.value.find(item=>item.code===skill);
+    if(rule)return rule.icon;
     const icons = {
       power_strike:
         "⚔️",
@@ -6144,6 +6052,8 @@ const bonusIcon =
 
 const bonusDescription =
   (skill) => {
+    const rule=quizBonusCatalog.value.find(item=>item.code===skill);
+    if(rule)return effectSummary(rule);
     const descriptions = {
       power_strike:
         "Serangan basic berikutnya memberi +50% damage dan habis setelah digunakan.",
@@ -6174,6 +6084,7 @@ const bonusDescription =
 const loadPendingBonusChoice =
   async () => {
     if (!battle.value?.id || !token.value) return null;
+    const sessionId=battle.value.id;
 
     const { data, error: choiceError } = await supabase.rpc(
       "get_battle_question_bonus_choice",
@@ -6189,8 +6100,9 @@ const loadPendingBonusChoice =
       return null;
     }
 
+    if(battle.value?.id!==sessionId || (effectiveQuestionRoundId.value && data?.question_round_id && effectiveQuestionRoundId.value!==data.question_round_id))return null;
     const choices = Array.isArray(data?.choices) ? data.choices : [];
-    if (!data?.pending || choices.length !== 3) return null;
+    if (!data?.pending || choices.length < 1 || choices.length > 6) return null;
 
     bonusChoiceRoundId.value = data.question_round_id;
     questionRewardChoices.value = choices;
@@ -6212,6 +6124,7 @@ const chooseQuestionBonus =
     ) return;
 
     bonusChoiceSubmitting.value = true;
+    bonusChoiceSelectedCode.value=skillType;
     try {
       const { data, error: choiceError } = await supabase.rpc(
         "choose_battle_question_bonus",
@@ -6231,13 +6144,14 @@ const chooseQuestionBonus =
       }
 
       const selectedSkill = data?.skill_type ?? skillType;
+      if(bonusChoiceRoundId.value!==roundId){await loadBonusSkills();return;}
       questionReward.value = selectedSkill;
       questionRewardChoices.value = [];
       bonusChoiceRoundId.value = null;
       await loadBonusSkills();
       void playSound("correct", 0.72);
       successToast(
-        `${bonusIcon(selectedSkill)} ${bonusLabel(selectedSkill).toUpperCase()}`,
+        bonusLabel(selectedSkill).toUpperCase(),
         "Skill sudah masuk ke panel Bonus Skills. Gunakan saat giliranmu.",
       );
     } catch (err) {
@@ -6248,6 +6162,7 @@ const chooseQuestionBonus =
       );
     } finally {
       bonusChoiceSubmitting.value = false;
+      bonusChoiceSelectedCode.value=null;
     }
   };
 
@@ -6298,7 +6213,7 @@ const useBonusSkill =
     if (
       !bonus ||
       bonus.used ||
-      bonusUsingId.value
+      bonusUsingId.value || waitingForRfid.value || actionLoading.value || battleFinished.value || turnSecondsRemaining.value===0
     ) {
       return;
     }
@@ -6376,46 +6291,17 @@ const useBonusSkill =
         data?.skill_type ??
         bonus.skill_type;
 
-      let message =
-        data?.message ??
-        "Bonus berhasil digunakan.";
-
-      if (
-        skill ===
-        "power_strike"
-      ) {
-        message =
-          "Basic Attack berikutnya mendapatkan +50% damage.";
-      } else if (
-        skill ===
-        "iron_guard"
-      ) {
-        message =
-          "Defense aktif.";
-      } else if (
-        skill ===
-        "recovery"
-      ) {
-        message =
-          data?.heal
-            ? `HP pulih +${data.heal}.`
-            : "HP berhasil dipulihkan.";
-      } else if (
-        skill ===
-        "overcharge"
-      ) {
-        message =
-          "Ultimate Gauge bertambah +50.";
-      } else if (
-        skill ===
-        "cleanse"
-      ) {
-        message =
-          "Attack debuff berhasil dihapus.";
-      }
+      const rule=quizBonusCatalog.value.find(item=>item.code===skill);
+      const message=rule
+        ? data?.effect_type==='heal_percent'||data?.effect_type==='heal_flat'
+          ? `HP pemain pulih +${data.heal??0}.`
+          : data?.effect_type==='add_gauge'
+            ? `Ultimate Gauge bertambah +${data.gauge_added??0}.`
+            : effectSummary(rule)
+        : data?.message??bonusDescription(skill);
 
       successToast(
-        `${bonusIcon(skill)} ${bonusLabel(skill).toUpperCase()}`,
+        bonusLabel(skill).toUpperCase(),
 
         message,
       );
@@ -6518,7 +6404,7 @@ watch(
 );
 
 watch(
-  () => currentQuestion.value?.id,
+  () => `${effectiveQuestionRoundId.value}:${currentQuestion.value?.id}`,
   () => {
     initializeQuestionBlocks();
     timedOutQuestionRound.value = null;
@@ -6555,8 +6441,8 @@ watch(
   ) => {
     /*
      * Question harus mengambil alih seluruh interaction.
-     * Ini menutup Target Picker, drag state, dan viewer yang
-     * sebelumnya dapat berada di atas / menangkap klik.
+     * Ini menutup Target Picker dan viewer yang sebelumnya
+     * dapat berada di atas / menangkap klik.
      */
     if (
       active &&
@@ -6568,17 +6454,8 @@ watch(
         true,
       );
 
-      activeDropOver.value =
-        false;
-
       selectedTargetCardId.value =
         null;
-
-      void syncDragTarget(
-        null,
-      );
-
-      void syncEndDrag();
 
       void syncCloseViewer();
     }
@@ -6918,6 +6795,30 @@ watch(
 // TARGET MODE SAFETY
 // =========================================================
 
+watch(() => spotlightTurn(battle.value), () => {
+  sharedViewer.value = null;
+  void syncCloseViewer();
+});
+
+watch(selectedCardId, id => {
+  if (id != null && isMyTurn.value) {
+    void syncFocusCards({ selectedCardId: id, turn: spotlightTurn(battle.value) });
+  }
+});
+watch(selectedTargetCardId, id => {
+  if (id != null && isMyTurn.value) {
+    void syncFocusCards({ targetCardId: id, turn: spotlightTurn(battle.value) });
+  }
+});
+watch([comboPrimaryCardId, comboTargetCardId], ([source, target], [previousSource, previousTarget]) => {
+  if (!isMyTurn.value) return;
+  void syncFocusCards({
+    selectedCardId: source !== previousSource ? source : null,
+    targetCardId: target !== previousTarget ? target : null,
+    turn: spotlightTurn(battle.value),
+  });
+});
+
 watch(
   [
     () =>
@@ -7062,6 +6963,153 @@ watch(
 // MOUNT
 // =========================================================
 
+// Display existing engine readiness; previews never submit a battle action.
+const pendingPanelAction = ref(null);
+const cancelSummon = async () => {
+  const requestId=battle.value?.pending_summon_request_id;
+  if (actionLoading.value || !waitingForRfid.value || !isMyTurn.value || !requestId) return;
+  actionLoading.value=true;
+  try {
+    const {data,error:cancelError}=await supabase.rpc('cancel_battle_summon',{
+      p_code:code.value,p_player:player.value,p_token:token.value,p_request_id:requestId,
+    });
+    if(cancelError)throw cancelError;
+    if(data?.ok){
+      const refunded=Math.max(0,Number(data.action_points_refunded)||0);
+      successToast('SUMMON DIBATALKAN',refunded ? `${refunded} AP dikembalikan. Kamu bisa memilih aksi lain.` : 'Kamu bisa memilih aksi lain.');
+    } else warningToast('SUMMON TIDAK DIBATALKAN',data?.message || 'Kondisi kartu berubah. Periksa lapanganmu.');
+  } catch(cancelError){
+    errorToast('PEMBATALAN GAGAL',cancelError?.code==='PGRST202'
+      ? 'Pembatalan belum tersedia pada server battle ini.'
+      : playerErrorMessage(cancelError,'Status pembatalan belum terkonfirmasi. Periksa battle sebelum mencoba lagi.'));
+  } finally {
+    // Refresh on rejection/timeout too: a scan may have won the race.
+    try { await Promise.all([loadBattle(code.value),loadGraveyardCards()]); }
+    finally { actionLoading.value=false; }
+  }
+};
+const panelBlockReason = computed(() => {
+  if (questionActive.value) return 'Selesaikan kuis terlebih dahulu.';
+  if (battleFinished.value) return 'Pertandingan sudah selesai.';
+  if (waitingForRfid.value) return 'Tempelkan kartu ke pembaca RFID untuk menyelesaikan Summon.';
+  if (actionLoading.value) return 'Aksi sebelumnya sedang diproses.';
+  if (!isMyTurn.value) return `Tunggu giliranmu. Sekarang giliran ${enemyName.value}.`;
+  if (turnSecondsRemaining.value === 0) return 'Waktu giliran habis. Menunggu pergantian giliran.';
+  return '';
+});
+const actionPanelContext = computed(() => ({
+  card: selectedCard.value, myTurn: isMyTurn.value,
+  apEnabled: actionPointsEnabled.value, ap: ownActionPoints.value, maxAp: actionPointsPerTurn.value,
+  seconds: turnTimerVisible.value ? turnSecondsRemaining.value : null,
+  scanning: waitingForRfid.value,
+  canCancelSummon:Boolean(battle.value?.pending_summon_request_id && isMyTurn.value && turnSecondsRemaining.value!==0),
+  cancelSummonHint:!Object.hasOwn(battle.value??{},'pending_summon_request_id') ? 'Pembatalan belum tersedia pada server battle ini.'
+    : turnSecondsRemaining.value===0 ? 'Waktu giliran habis. Menunggu pembaruan battle.' : 'Menyinkronkan status scan…',
+  scope: `${spotlightTurn(battle.value)}:${selectedCardId.value ?? ''}`,
+  interrupted: questionActive.value || waitingForRfid.value || battleFinished.value || !isMyTurn.value,
+  hint: (waitingForRfid.value ? 'Belum ada kartu baru yang masuk.' : panelBlockReason.value) || (selectedCard.value
+    ? `ATK ${selectedCard.value.attack ?? 0} · DEF ${selectedCard.value.defense ?? 0} — pilih aksi untuk kartu ini.`
+    : 'Pilih kartu di lapangan atau panggil kartu baru.'),
+}));
+const panelActions = computed(() => {
+  const needCard = selectedCard.value ? '' : 'Pilih kartu Active terlebih dahulu.';
+  const noAp = (key, fallback) => canSpendActionPoints(configuredActionPointCost(key, fallback))
+    ? '' : `Butuh ${configuredActionPointCost(key, fallback)} AP; kamu memiliki ${ownActionPoints.value} AP.`;
+  const make = (key, label, icon, fallback, enabled, reason, description, primary = false) => {
+    const blocked = panelBlockReason.value || reason;
+    const cost = configuredActionPointCost(key === 'combo' ? 'combo_attack' : key, fallback);
+    return {key, label, icon, primary, description, cost,
+      ready: Boolean(enabled && !blocked), reason: blocked,
+      shortReason: blocked === needCard && needCard ? 'Pilih kartu dulu' : blocked?.startsWith('Butuh ') ? 'AP belum cukup' : blocked?.startsWith('Tunggu giliran') ? 'Giliran lawan' : blocked ? 'Lihat syarat' : '',
+      costLabel: actionPointsEnabled.value ? `${cost} AP` : 'Satu aksi',
+    };
+  };
+  const attackReason = needCard || (selectedCardAlreadyAttacked.value ? 'Kesempatan serang kartu ini sudah habis pada giliran ini.' : '')
+    || (isTcgV1.value && !enemyActiveCards.value.length && !directAttackAvailable.value ? 'Lawan tidak memiliki kartu Active dan serangan langsung tidak diaktifkan.' : '') || noAp('attack', 1);
+  const summonReason = activeCards.value.length >= maxActive.value ? 'Active penuh. Pindahkan satu kartu ke Bench terlebih dahulu.'
+    : isTcgV1.value && ownDeckRemaining.value <= 0 ? 'Deck-mu sudah habis.' : noAp('summon', 1);
+  const skillsReason = needCard || (!specialSkillFeatureEnabled.value ? 'Skill kartu tidak diaktifkan pada pertandingan ini.' : '')
+    || (specialSkillLoading.value ? 'Sedang memuat skill kartu.' : '') || (!runtimeSpecialSkills.value.length ? 'Kartu ini tidak memiliki skill yang tersedia pada battle ini.' : '');
+  const actions = [
+    make('summon', 'Panggil kartu', '◉', 1, canSummonUi.value, summonReason, 'Mulai Summon, lalu scan UID kartu fisik terdaftar ke slot Active yang kosong.', true),
+    make('attack', 'Serang', '⚔', 1, canAttackUi.value, attackReason, 'Pilih target lawan dan periksa serangan sebelum mengonfirmasi.', true),
+    make('special', 'Skill kartu', readySpecialSkills.value[0]?.icon || runtimeSpecialSkills.value[0]?.icon, 1, Boolean(selectedCard.value && runtimeSpecialSkills.value.length), skillsReason, 'Lihat kedua skill, biaya, target, cooldown dan alasan terkuncinya. Memilih skill belum menjalankan aksi.', true),
+  ];
+  // Skill inspection remains available even when both skills are cooling down.
+  actions[2].costLabel = `${runtimeSpecialSkills.value.length} skill · ${readySpecialSkills.value.length} siap`;
+  if (isTcgV1.value && comboEnabled.value) actions.push(make('combo', 'Combo', '⚒', 2, canComboAttackUi.value,
+    comboEligibleActiveCards.value.length < 2 ? 'Perlu sedikitnya dua kartu Active yang masih boleh menyerang.' : !actionPointsEnabled.value ? 'Combo memerlukan aturan AP yang aktif.' : noAp('combo_attack', 2),
+    'Serangan bersama dari kartu Active. Pilih peserta, kartu utama, lalu target lawan.'));
+  if (fusionFeatureEnabled.value) actions.push(make('fusion', 'Fusion', '◇', 2,
+    !fusionLoading.value && canSpendActionPoints(configuredActionPointCost('fusion', 2)),
+    fusionLoading.value ? 'Sedang memeriksa resep Fusion.' : noAp('fusion', 2),
+    'Lihat resep, material, dan kartu hasil. Material baru dikonsumsi setelah kamu mengonfirmasi.'));
+  actions.push(make('ultimate', 'Ultimate', 'ϟ', 2, canUltimateUi.value,
+    needCard || (!enemyActiveCards.value.length ? 'Tidak ada kartu Active lawan untuk terkena Ultimate.' : '') || (ownSkill.value < 100 ? `Gauge Ultimate ${ownSkill.value}%; perlu 100%.` : '') || noAp('ultimate', 2),
+    'Serangan Ultimate ke kartu-kartu Active lawan. Periksa sasaran dan biaya; gauge terpakai setelah berhasil.'));
+  actions.push(make('heal', 'Pulihkan HP', '✚', 1, canHealUi.value,
+    needCard || (ownHealUsed.value ? 'Jatah Heal pada pertandingan ini sudah dipakai.' : '') || (ownHp.value > ownMaxHp.value * .5 ? 'HP pemain harus 50% atau lebih rendah untuk memakai Heal.' : '') || noAp('heal', 1),
+    'Memulihkan HP pemain sesuai aturan battle. Pemulihan HP kartu menggunakan skill kartu.'));
+  actions.push(make('synergy', 'Synergy', '✧', 1, canSynergyUi.value,
+    needCard || (!selectedSynergyInfo.value?.ready ? selectedSynergyInfo.value?.effect || 'Kombinasi kartu belum memenuhi syarat Synergy.' : '') || noAp('synergy', 1),
+    selectedSynergyInfo.value?.effect || 'Aktifkan efek dari kombinasi tipe kartu yang memenuhi syarat.'));
+  if (!actionPointsEnabled.value) actions.push(make('defense', 'Bertahan', '🛡', 1, canDefenseUi.value, needCard,
+    'Memakai aksi bertahan sesuai aturan Classic. Periksa efek sebelum mengonfirmasi.'));
+  if (actionPointsEnabled.value) actions.push(make('end_turn', 'Akhiri giliran', '→|', 0, isMyTurn.value, '', 'Menyerahkan giliran kepada lawan. Sisa AP tidak dibawa ke giliran berikutnya.'));
+  return actions;
+});
+
+function requestPanelReview(key, direct = false) {
+  if (panelBlockReason.value) return;
+  pendingPanelAction.value = {key, direct, sourceId:selectedCardId.value, scope:spotlightTurn(battle.value)};
+}
+const panelReview = computed(() => {
+  const pending = pendingPanelAction.value;
+  if (!pending) return null;
+  const action = panelActions.value.find(item => item.key === pending.key);
+  if (!action) return null;
+  const isEnd = pending.key === 'end_turn';
+  const directChanged = pending.key === 'attack' && pending.direct && !directAttackAvailable.value;
+  const facts = isEnd ? [{label:'Giliran berikutnya',value:enemyName.value}]
+    : [{label:'Kartu sumber',value:selectedCard.value?.name ?? '—'}, {label:'Sasaran',value:pending.key === 'attack' ? enemyName.value : pending.key === 'ultimate' ? `${enemyActiveCards.value.length} kartu Active lawan` : pending.key === 'heal' ? playerName.value : 'Sesuai efek aksi'}];
+  if (actionPointsEnabled.value) facts.push({label:'Biaya',value:`${action.cost} AP`},{label:'AP setelah aksi',value:isEnd ? '0 AP — giliran berakhir' : `${Math.max(0,ownActionPoints.value-action.cost)} AP`});
+  return { title:isEnd ? 'Akhiri giliranmu?' : `${pending.direct ? 'Serangan langsung' : action.label}?`,
+    description:pending.direct ? 'Kartu ini akan menyerang HP pemain lawan. Periksa biaya sebelum melanjutkan.' : action.description, facts,
+    warning:isEnd && ownActionPoints.value > 0 ? `Masih ada ${ownActionPoints.value} AP. AP ini tidak akan disimpan.` : pending.direct ? 'Serangan langsung mengenai HP pemain karena tidak ada kartu Active lawan.' : '',
+    ready:action.ready && !directChanged,
+    reason:directChanged ? 'Kondisi target berubah. Batalkan dan pilih serangan kembali.' : action.ready ? '' : action.reason,
+    confirmLabel:isEnd ? 'Ya, akhiri giliran' : 'Konfirmasi aksi',
+  };
+});
+function choosePanelAction(key) {
+  const action = panelActions.value.find(item => item.key === key);
+  if (!action?.ready || panelBlockReason.value) return;
+  if (key === 'attack') beginAttackAction();
+  else if (key === 'special') openSpecialSkillModal();
+  else if (key === 'combo') void openComboAttackModal();
+  else if (key === 'fusion') void openFusionModal();
+  else if (key === 'summon') void submitAction('summon');
+  else requestPanelReview(key);
+}
+async function confirmPanelAction() {
+  if (actionLoading.value || !panelReview.value?.ready) return;
+  const pending = pendingPanelAction.value;
+  if (!pending || pending.scope !== spotlightTurn(battle.value) || (pending.key !== 'end_turn' && pending.sourceId !== selectedCardId.value)) return;
+  if (pending.direct) await submitDirectAttack();
+  else await submitAction(pending.key);
+  pendingPanelAction.value = null;
+}
+watch([() => spotlightTurn(battle.value), selectedCardId, () => selectedCard.value ? getCardId(selectedCard.value) : null, isMyTurn, questionActive, waitingForRfid, battleFinished], () => {
+  pendingPanelAction.value = null;
+  if (panelBlockReason.value && !actionLoading.value) closeComboAttackModal();
+});
+useActionDialogFocus([
+  {open:attackTargetMode,selector:'.target-picker-panel',close:() => cancelTargetAttack(true)},
+  {open:specialSkillModalOpen,selector:'.special-skill-modal',close:() => closeSpecialSkillModal(true)},
+  {open:comboAttackModalOpen,selector:'.combo-attack-modal',close:closeComboAttackModal},
+  {open:fusionModalOpen,selector:'.fusion-modal',close:() => closeFusionModal(true)},
+], actionLoading);
+
 onMounted(
   async () => {
     preloadBattleSounds();
@@ -7123,6 +7171,17 @@ onMounted(
           player:
             player.value,
         });
+        if (isMyTurn.value) {
+          await syncFocusCards({
+            selectedCardId: selectedCardId.value,
+            targetCardId: selectedTargetCardId.value,
+            turn: spotlightTurn(battle.value),
+          });
+          if (sharedViewer.value && !questionActive.value) {
+            const { zone, index } = sharedViewer.value;
+            await syncOpenViewer(zone, index, spotlightTurn(battle.value), getCardId(viewedPileCard(zone, index)));
+          }
+        }
       } catch (
         uiSyncError
       ) {
@@ -7251,7 +7310,14 @@ onUnmounted(
         <section class="avatar-picker-panel" role="dialog" aria-modal="true" aria-labelledby="avatar-picker-title">
           <span class="avatar-picker-eyebrow">TIMEDOOR BATTLE</span>
           <h2 id="avatar-picker-title">Pilih avatar pemain</h2>
-          <p>Avatar ini akan terlihat di halaman battle dan layar pertandingan.</p>
+          <p v-if="ownAvatarImage">Foto dari Game Setup sedang digunakan. Memilih avatar di bawah akan mengganti foto di halaman battle dan layar pertandingan.</p>
+          <p v-else>Avatar ini akan terlihat di halaman battle dan layar pertandingan.</p>
+          <img
+            v-if="ownAvatarImage"
+            class="avatar-current-photo"
+            :src="ownAvatarImage"
+            :alt="`Foto ${playerName} yang sedang digunakan`"
+          />
           <div class="avatar-picker-grid" role="radiogroup" aria-label="Pilihan avatar">
             <button
               v-for="avatar in playerAvatarOptions"
@@ -7273,7 +7339,7 @@ onUnmounted(
               class="avatar-cancel"
               :disabled="avatarSaving"
               @click="avatarPickerOpen = false"
-            >Nanti</button>
+            >{{ ownAvatarImage ? "Tetap pakai foto" : "Nanti" }}</button>
             <button
               type="button"
               class="avatar-confirm"
@@ -7878,24 +7944,11 @@ onUnmounted(
               ? 'blue'
               : 'red'
           "
-          :allow-drop="
-            isMyTurn &&
-            canSpendActionPoints(configuredActionPointCost('switch', 1)) &&
-            !actionLoading &&
-            !waitingForRfid &&
-            !battleWaiting &&
-            !questionActive &&
-            !battleFinished
-          "
-          :draggable-cards="
-            isMyTurn &&
-            canSpendActionPoints(configuredActionPointCost('switch', 1)) &&
-            !actionLoading &&
-            !waitingForRfid &&
-            !battleWaiting &&
-            !questionActive &&
-            !battleFinished
-          "
+          :draggable-cards="false"
+          :show-bench-action="true"
+          :bench-action-enabled="benchReturnActionEnabled"
+          :bench-action-label="benchReturnActionLabel"
+          :bench-action-hint="benchReturnActionHint"
           @viewer-open="
             handleZoneViewerOpen
           "
@@ -7905,21 +7958,8 @@ onUnmounted(
           @viewer-index-change="
             handleZoneViewerIndex
           "
-          @drag-start="
-            (card) =>
-              handleZoneDragStart(
-                card,
-                'bench',
-              )
-          "
-          @drag-end="
-            handleZoneDragEnd
-          "
-          @drag-hover="
-            handleZoneDragHover
-          "
-          @drop-card="
-            handleBenchDrop
+          @bench-action="
+            returnBenchCardToActive
           "
         />
 
@@ -7929,20 +7969,6 @@ onUnmounted(
           class="
             cyber-panel
             active-panel
-            active-drop-zone
-          "
-          :class="{
-            'drag-over-active':
-              activeDropOver,
-          }"
-          @dragover="
-            allowActiveDrop
-          "
-          @dragleave="
-            clearActiveDrop
-          "
-          @drop="
-            handleActiveDrop
           "
         >
           <header class="cyber-panel-header">
@@ -7978,13 +8004,6 @@ onUnmounted(
           </header>
 
           <div
-            v-if="activeDropOver"
-            class="active-drop-hint"
-          >
-            ↓ DROP BENCH CARD TO RETURN ACTIVE
-          </div>
-
-          <div
             class="deck-slots"
             :style="{ '--active-slot-count': maxActive }"
           >
@@ -7996,7 +8015,6 @@ onUnmounted(
               "
               class="
                 cyber-card
-                active-draggable-card
               "
               :class="[
                 {
@@ -8025,32 +8043,10 @@ onUnmounted(
                   'fx-curse-active': getCardFxFlags(card).curse,
                 },
               ]"
-              :draggable="
-                isMyTurn &&
-                !actionLoading &&
-                !waitingForRfid &&
-                !battleWaiting &&
-                !questionActive &&
-                !battleFinished &&
-                !card.exhausted
-              "
               @click="
                 selectCard(card)
               "
-              @dragstart="
-                startActiveCardDrag(
-                  $event,
-                  card,
-                )
-              "
-              @dragend="
-                endActiveCardDrag
-              "
             >
-              <div class="drag-handle">
-                ⋮⋮
-              </div>
-
               <div class="card-fx-stack" aria-hidden="true">
                 <i v-if="getCardFxFlags(card).fusion" class="card-fx-layer fx-fusion-layer"></i>
                 <i v-if="getCardFxFlags(card).necro" class="card-fx-layer fx-necro-layer"></i>
@@ -8176,10 +8172,21 @@ onUnmounted(
                     </strong>
                   </div>
                 </footer>
-              </div>
 
-              <div class="drag-instruction">
-                DRAG → BENCH
+                <button
+                  type="button"
+                  class="card-zone-action"
+                  :disabled="!canMoveActiveCardToBench(card)"
+                  @click.stop="moveActiveCardToBench(card)"
+                >
+                  <span aria-hidden="true">↓</span>
+                  <span class="card-zone-action-copy">
+                    Pindahkan ke Bench
+                    <small>
+                      {{ configuredActionPointCost("switch", 1) }} poin giliran
+                    </small>
+                  </span>
+                </button>
               </div>
             </article>
 
@@ -8266,15 +8273,15 @@ onUnmounted(
             "
           />
 
-          <section class="target-picker-panel">
+          <section class="target-picker-panel" role="dialog" aria-modal="true" aria-labelledby="attack-picker-title" tabindex="-1">
             <header class="target-picker-header">
               <div>
                 <span class="eyebrow">
-                  PHASE 2 • TARGETED COMBAT
+                  SERANG • PILIH TARGET → PERIKSA → KONFIRMASI
                 </span>
 
-                <h2>
-                  SELECT ENEMY TARGET
+                <h2 id="attack-picker-title">
+                  Pilih kartu lawan
                 </h2>
 
                 <p>
@@ -8577,6 +8584,10 @@ onUnmounted(
               </small>
             </div>
 
+            <div class="battle-action-receipt" aria-live="polite">
+              <span><b>{{ selectedCard?.name }}</b> → {{ selectedTargetCard?.name || 'Pilih target lawan' }}</span>
+              <span v-if="actionPointsEnabled">Biaya <b>{{ configuredActionPointCost('attack', 1) }} AP</b> · sisa {{ Math.max(0, ownActionPoints - configuredActionPointCost('attack', 1)) }} AP</span>
+            </div>
             <footer class="target-picker-actions">
               <button
                 type="button"
@@ -8590,7 +8601,7 @@ onUnmounted(
                   cancelTargetAttack()
                 "
               >
-                CANCEL
+                Batal
               </button>
 
               <button
@@ -8600,6 +8611,7 @@ onUnmounted(
                 "
                 :disabled="
                   !selectedTargetCard ||
+                  !!panelBlockReason ||
                   actionLoading
                 "
                 @click="
@@ -8609,7 +8621,7 @@ onUnmounted(
                 {{
                   actionLoading
                     ? "ATTACKING..."
-                    : "CONFIRM ATTACK"
+                    : "Konfirmasi serangan"
                 }}
               </button>
             </footer>
@@ -8663,8 +8675,7 @@ onUnmounted(
             }"
             :disabled="
               bonus.used ||
-              bonusUsingId ===
-                bonus.id
+              bonusUsingId || Boolean(panelBlockReason)
             "
             @click="
               useBonusSkill(
@@ -8672,13 +8683,7 @@ onUnmounted(
               )
             "
           >
-            <span class="bonus-item-icon">
-              {{
-                bonusIcon(
-                  bonus.skill_type,
-                )
-              }}
-            </span>
+            <span class="bonus-item-icon"><SkillIcon :icon="bonusIcon(bonus.skill_type)" :name="bonusLabel(bonus.skill_type)"/></span>
 
             <div>
               <strong>
@@ -8696,7 +8701,7 @@ onUnmounted(
                     ? "ACTIVATING..."
                     : bonus.used
                       ? "USED"
-                      : "READY - CLICK TO USE"
+                      : panelBlockReason || "Siap · gunakan tanpa AP"
                 }}
               </small>
 
@@ -8712,212 +8717,6 @@ onUnmounted(
         </div>
       </section>
 
-      <!-- SKILL READY BALLOONS -->
-
-      <Transition name="target-picker">
-        <div
-          v-if="
-            battle.status === 'battle' &&
-            (canUltimateUi || canSynergyUi || canSpecialUi || canFusionUi)
-          "
-          class="skill-ready-balloons"
-          :class="{ expanded: actionInfoExpanded }"
-        >
-          <button
-            v-if="canUltimateUi"
-            type="button"
-            class="ready-balloon ultimate"
-            @click="openActionInfoByKey('ultimate')"
-          >
-            <span>⚡</span>
-            <div>
-              <strong>ULTIMATE READY</strong>
-              <small>Klik untuk detail</small>
-            </div>
-          </button>
-
-          <button
-            v-if="canSynergyUi"
-            type="button"
-            class="ready-balloon synergy"
-            @click="openActionInfoByKey('synergy')"
-          >
-            <span>{{ selectedSynergyInfo.icon }}</span>
-            <div>
-              <strong>{{ selectedSynergyInfo.name }}</strong>
-              <small>Synergy siap • klik detail</small>
-            </div>
-          </button>
-
-          <button
-            v-if="canSpecialUi"
-            type="button"
-            class="ready-balloon special"
-            @click="openSpecialSkillModal()"
-          >
-            <span>{{ readySpecialSkills[0]?.icon || '✨' }}</span>
-            <div>
-              <strong>{{ readySpecialSkills[0]?.name || 'SPECIAL READY' }}</strong>
-              <small>Special Skill siap • klik detail</small>
-            </div>
-          </button>
-
-
-          <button
-            v-if="canFusionUi"
-            type="button"
-            class="ready-balloon fusion"
-            @click="openFusionModal(readyFusions[0])"
-          >
-            <span>{{ readyFusions[0]?.icon || "🧬" }}</span>
-            <div>
-              <strong>{{ readyFusions[0]?.recipe_name || "FUSION READY" }}</strong>
-              <small>Fusion siap • klik detail</small>
-            </div>
-          </button>
-        </div>
-      </Transition>
-
-      <!-- ACTION INFORMATION -->
-
-      <section
-        v-if="battle.status === 'battle'"
-        class="skill-info-panel glass-panel"
-        :class="{ 'is-collapsed': !actionInfoExpanded }"
-      >
-        <!-- COLLAPSED: hanya handle kecil di tengah -->
-        <button
-          v-if="!actionInfoExpanded"
-          type="button"
-          class="action-info-collapsed-toggle"
-          aria-label="Expand action information"
-          title="Buka Action Information"
-          @click="actionInfoExpanded = true"
-        >
-          <span class="action-info-handle-line"></span>
-          <span class="action-info-handle-arrow">⌃</span>
-        </button>
-
-        <!-- EXPANDED: tampilkan header + tombol-tombol info -->
-        <template v-else>
-          <header class="skill-info-header">
-            <div>
-              <span class="eyebrow">ACTION INFORMATION</span>
-
-              <strong>
-                {{ selectedCard ? selectedCard.name : "Select an Active Card" }}
-              </strong>
-            </div>
-
-            <div class="action-info-header-actions">
-              <div class="player-status-summary">
-                <span v-if="ownPowerStrikeReady" class="status-pill power">
-                  ⚡ POWER STRIKE +50%
-                </span>
-
-                <span v-if="ownDefending" class="status-pill defense">
-                  🛡 DEFENSE -50%
-                </span>
-
-                <span v-if="ownShield > 0" class="status-pill water">
-                  💧 SHIELD -{{ formatPercent(ownShield) }}%
-                </span>
-
-                <span v-if="ownDebuff > 0" class="status-pill debuff">
-                  ❄ ATK -{{ formatPercent(ownDebuff) }}%
-                </span>
-              </div>
-
-              <button
-                type="button"
-                class="action-info-toggle"
-                @click="actionInfoExpanded = false"
-              >
-                <span>COLLAPSE</span>
-                <b>⌄</b>
-              </button>
-            </div>
-          </header>
-
-          <Transition name="action-info-expand">
-            <div class="action-info-button-grid">
-              <button
-                v-for="info in actionInfoItems"
-                :key="info.key"
-                type="button"
-                class="action-info-button"
-                :class="[
-                  info.key,
-                  {
-                    ready: info.ready,
-                    locked: !info.ready,
-                    used: info.status === 'USED',
-                    active: info.status === 'ACTIVE',
-                  },
-                ]"
-                @click="openActionInfo(info)"
-              >
-                <span class="action-info-button-icon">{{ info.icon }}</span>
-
-                <span class="action-info-button-copy">
-                  <strong>{{ info.title }}</strong>
-                  <small>{{ info.status }}</small>
-                </span>
-
-                <span class="action-info-button-open">INFO ↗</span>
-              </button>
-            </div>
-          </Transition>
-        </template>
-      </section>
-
-      <!-- ACTION INFO MODAL -->
-
-      <Transition name="target-picker">
-        <div
-          v-if="actionInfoModalOpen && activeActionInfo"
-          class="action-detail-overlay"
-        >
-          <div class="action-detail-backdrop" @click="closeActionInfoModal" />
-
-          <section class="action-detail-modal" @click.stop>
-            <header>
-              <div class="action-detail-title">
-                <span>{{ activeActionInfo.icon }}</span>
-                <div>
-                  <small>ACTION GUIDE</small>
-                  <h2>{{ activeActionInfo.title }}</h2>
-                </div>
-              </div>
-
-              <button type="button" class="modal-close" @click="closeActionInfoModal">
-                ✕
-              </button>
-            </header>
-
-            <div
-              class="action-detail-status"
-              :class="{ ready: activeActionInfo.ready }"
-            >
-              {{ activeActionInfo.status }}
-            </div>
-
-            <div class="action-detail-block">
-              <span>EFFECT</span>
-              <p>{{ activeActionInfo.effect }}</p>
-            </div>
-
-            <div class="action-detail-block">
-              <span>MECHANIC</span>
-              <p>{{ activeActionInfo.detail }}</p>
-            </div>
-
-            <button type="button" class="modal-primary secondary" @click="closeActionInfoModal">
-              TUTUP
-            </button>
-          </section>
-        </div>
-      </Transition>
 
       <!-- SPECIAL SKILL MODAL -->
 
@@ -8925,11 +8724,11 @@ onUnmounted(
         <div v-if="specialSkillModalOpen" class="action-detail-overlay special-overlay">
           <div class="action-detail-backdrop" @click="closeSpecialSkillModal" />
 
-          <section class="special-skill-modal" @click.stop>
+          <section class="special-skill-modal" role="dialog" aria-modal="true" aria-labelledby="special-picker-title" tabindex="-1" @click.stop>
             <header class="special-modal-header">
               <div>
-                <span class="eyebrow">PHASE 3C • CARD SPECIAL SKILL</span>
-                <h2>{{ selectedCard?.name || "Selected Card" }}</h2>
+                <span class="eyebrow">SKILL KARTU • PILIH SKILL → TARGET → KONFIRMASI</span>
+                <h2 id="special-picker-title">{{ selectedCard?.name || "Pilih kartu" }}</h2>
                 <p>Pilih skill, baca mekaniknya, tentukan target jika diperlukan, lalu aktifkan.</p>
               </div>
 
@@ -8949,29 +8748,34 @@ onUnmounted(
             <template v-else>
               <div class="special-skill-tabs">
                 <button
-                  v-for="skill in runtimeSpecialSkills"
+                  v-for="(skill, skillIndex) in runtimeSpecialSkills"
                   :key="skill.id"
                   type="button"
                   class="special-skill-tab"
+                  :aria-pressed="selectedSpecialSkill?.id === skill.id"
                   :class="{
                     selected: selectedSpecialSkill?.id === skill.id,
                     ready: specialSkillReadyState(skill).ready,
                   }"
                   @click="chooseSpecialSkill(skill)"
                 >
-                  <span>{{ skill.icon || "✨" }}</span>
+                  <span class="special-tab-icon"><SkillIcon :icon="skill.icon" :name="skill.name" /></span>
                   <div>
+                    <span class="skill-slot-label">Skill {{ skillIndex + 1 }} · {{ specialSkillActionPointCost(skill) }} AP</span>
                     <strong>{{ skill.name }}</strong>
-                    <small>{{ specialSkillReadyState(skill).status }}</small>
+                    <small class="skill-ready-reason">{{ specialSkillReadyState(skill).ready ? 'Siap digunakan' : specialSkillReadyState(skill).reason }}</small>
+                    <small>{{ skill.description }}</small>
+                    <small>Target: {{ formatSpecialTarget(skill) }} · {{ formatSpecialLimits(skill) }}</small>
                   </div>
                 </button>
               </div>
 
+              <p v-if="!selectedSpecialSkill" class="special-empty-state">Pilih skill yang ingin digunakan.</p>
               <div v-if="selectedSpecialSkill" class="special-detail-layout">
                 <div class="special-detail-main">
                   <div class="special-skill-hero">
                     <div class="special-skill-hero-icon">
-                      {{ selectedSpecialSkill.icon || "✨" }}
+                      <SkillIcon :icon="selectedSpecialSkill.icon" :name="selectedSpecialSkill.name" />
                     </div>
 
                     <div>
@@ -9004,9 +8808,9 @@ onUnmounted(
                       <strong>{{ formatSpecialLimits(selectedSpecialSkill) }}</strong>
                     </div>
                     <div>
-                      <span>TURN</span>
+                      <span>SETELAH DIGUNAKAN</span>
                       <strong>
-                        {{ selectedSpecialSkill.consumes_turn ? "Consumes Turn" : "Free Action" }}
+                        {{ selectedSpecialSkill.consumes_turn || (actionPointsEnabled && ownActionPoints - specialSkillActionPointCost(selectedSpecialSkill) <= 0) ? "Giliran berakhir" : "Giliran berlanjut" }}
                       </strong>
                     </div>
                   </div>
@@ -9034,6 +8838,13 @@ onUnmounted(
 
                 <aside class="special-target-panel">
                   <span>TARGET SELECTION</span>
+                  <label v-if="skillTargetSpec(selectedSpecialSkill).choices?.length" class="studio-skill-choice">Pilih efek
+                    <select v-model="selectedSpecialOption" aria-label="Pilih efek skill"><option disabled value="">Pilih satu efek…</option><option v-for="option in skillTargetSpec(selectedSpecialSkill).choices" :key="option.id" :value="option.id">{{ option.label }}</option></select>
+                  </label>
+                  <label v-if="skillTargetSpec(selectedSpecialSkill).needs_bench" class="studio-skill-choice">Kartu Bench untuk Switch
+                    <select v-model="selectedSpecialBenchId" aria-label="Kartu Bench untuk Switch"><option disabled value="">Pilih kartu Bench…</option><option v-for="card in benchCards" :key="getCardId(card)" :value="getCardId(card)">{{ card.name }}</option></select>
+                  </label>
+                  <p v-if="skillTargetSpec(selectedSpecialSkill).max_targets > 1">Pilih 1–{{ skillTargetSpec(selectedSpecialSkill).max_targets }} target yang berbeda.</p>
 
                   <template v-if="selectedSpecialTargetRequired">
                     <p>Pilih target sebelum menggunakan skill.</p>
@@ -9044,7 +8855,7 @@ onUnmounted(
                         :key="getCardId(card)"
                         type="button"
                         class="special-target-card"
-                        :class="{ selected: selectedSpecialTargetId === getCardId(card) }"
+                        :class="{ selected: selectedSpecialTargetId === getCardId(card) || selectedSpecialTargetIds.includes(getCardId(card)) }"
                         @click="chooseSpecialTarget(card)"
                       >
                         <img v-if="card.image_url" :src="card.image_url" :alt="card.name" />
@@ -9071,6 +8882,10 @@ onUnmounted(
                 </aside>
               </div>
 
+              <div v-if="selectedSpecialSkill" class="battle-action-receipt" aria-live="polite">
+                <span><b>{{ selectedCard?.name }}</b> → {{ selectedSpecialTargetIds.length > 1 ? selectedSpecialTargetIds.map(id => specialTargetCards.find(card => getCardId(card) === id)?.name).filter(Boolean).join(', ') : selectedSpecialTarget?.name || formatSpecialTarget(selectedSpecialSkill) }}</span>
+                <span v-if="actionPointsEnabled">Biaya <b>{{ specialSkillActionPointCost(selectedSpecialSkill) }} AP</b> · sisa {{ Math.max(0, ownActionPoints - specialSkillActionPointCost(selectedSpecialSkill)) }} AP</span>
+              </div>
               <footer class="special-modal-actions">
                 <button type="button" class="modal-primary secondary" @click="closeSpecialSkillModal">
                   BATAL
@@ -9081,13 +8896,16 @@ onUnmounted(
                   class="modal-primary special-use-button"
                   :disabled="
                     actionLoading ||
+                    !!panelBlockReason ||
                     !selectedSpecialSkill ||
                     !specialSkillReadyState(selectedSpecialSkill).ready ||
+                    (skillTargetSpec(selectedSpecialSkill).choices?.length && !selectedSpecialOption) ||
+                    (skillTargetSpec(selectedSpecialSkill).needs_bench && !selectedSpecialBenchId) ||
                     (selectedSpecialTargetRequired && !selectedSpecialTarget)
                   "
                   @click="submitSpecialSkill"
                 >
-                  {{ actionLoading ? "ACTIVATING..." : `USE SPECIAL SKILL • ${specialSkillActionPointCost(selectedSpecialSkill)} poin` }}
+                  {{ actionLoading ? "Memproses…" : `Gunakan ${selectedSpecialSkill?.name || 'skill'}` }}
                 </button>
               </footer>
             </template>
@@ -9104,11 +8922,11 @@ onUnmounted(
           @click.self="closeComboAttackModal"
         >
           <div class="action-detail-backdrop" @click="closeComboAttackModal" />
-          <section class="combo-attack-modal" @click.stop>
+          <section class="combo-attack-modal" role="dialog" aria-modal="true" aria-labelledby="combo-picker-title" tabindex="-1" @click.stop>
             <header class="combo-attack-header">
               <div>
                 <span class="eyebrow">COMBO ATTACK • {{ comboActionPointCost }} POIN GILIRAN</span>
-                <h2>Pilih kartu Active</h2>
+                <h2 id="combo-picker-title">Pilih kartu Active untuk Combo</h2>
                 <p>Pilih minimal dua kartu Active yang belum menyerang. Kartu Bench tidak dapat ikut combo; kartu utama menyumbang ATK penuh dan kartu bantuan mengikuti multiplier aturan combo.</p>
               </div>
               <button type="button" class="modal-close" aria-label="Tutup" @click="closeComboAttackModal">✕</button>
@@ -9170,10 +8988,11 @@ onUnmounted(
             </div>
             <p v-else class="combo-direct-note">Tidak ada Active Card lawan. Combo akan mengenai HP player lawan jika Direct Attack diizinkan.</p>
 
+            <div class="battle-action-receipt" aria-live="polite"><span><b>{{ selectedComboParticipants.map(card => card.name).join(' + ') }}</b> → {{ enemyActiveCards.find(card => getCardId(card) === comboTargetCardId)?.name || enemyName }}</span><span>Biaya <b>{{ comboActionPointCost }} AP</b> · sisa {{ Math.max(0, ownActionPoints - comboActionPointCost) }} AP</span></div>
             <footer class="combo-attack-actions">
-              <span>{{ ownActionPoints }} poin giliran tersisa</span>
+              <span>{{ ownActionPoints }} AP tersedia</span>
               <button type="button" class="modal-primary secondary" @click="closeComboAttackModal">BATAL</button>
-              <button type="button" class="modal-primary combo-submit" :disabled="actionLoading || selectedComboParticipants.length < 2 || (enemyActiveCards.length > 0 && !comboTargetCardId) || !canSpendActionPoints(comboActionPointCost)" @click="submitComboAttack">
+              <button type="button" class="modal-primary combo-submit" :disabled="actionLoading || !!panelBlockReason || selectedComboParticipants.length < 2 || (enemyActiveCards.length > 0 && !comboTargetCardId) || !canSpendActionPoints(comboActionPointCost)" @click="submitComboAttack">
                 {{ actionLoading ? "MENYERANG..." : `COMBO ATTACK • ${comboActionPointCost} POIN` }}
               </button>
             </footer>
@@ -9190,14 +9009,14 @@ onUnmounted(
         >
           <div class="action-detail-backdrop" @click="closeFusionModal" />
 
-          <section class="fusion-modal" @click.stop>
+          <section class="fusion-modal" role="dialog" aria-modal="true" aria-labelledby="fusion-picker-title" tabindex="-1" @click.stop>
             <header class="fusion-modal-header">
               <div>
-                <span class="eyebrow">PHASE 3D • FUSION LAB</span>
-                <h2>Fusion Engine</h2>
+                <span class="eyebrow">FUSION • PILIH RESEP → PERIKSA MATERIAL → KONFIRMASI</span>
+                <h2 id="fusion-picker-title">Gabungkan kartu</h2>
                 <p>
-                  Pilih recipe. Material yang tampil hanya preview; server tetap menentukan
-                  kombinasi final saat tombol FUSE ditekan.
+                  Pilih resep, periksa kartu material dan hasilnya. Kartu material
+                  baru dipakai setelah kamu mengonfirmasi Fusion.
                 </p>
               </div>
 
@@ -9393,6 +9212,7 @@ onUnmounted(
                 </aside>
               </div>
 
+              <div class="battle-action-receipt" aria-live="polite"><span><b>{{ selectedFusion?.materials?.map(card => card.name).join(' + ') || 'Pilih material sesuai resep' }}</b> → {{ selectedFusion?.result_name || 'Pilih resep' }}</span><span v-if="actionPointsEnabled">Biaya <b>{{ configuredActionPointCost('fusion', 2) }} AP</b> · sisa {{ Math.max(0, ownActionPoints - configuredActionPointCost('fusion', 2)) }} AP</span></div>
               <footer class="fusion-modal-actions">
                 <button
                   type="button"
@@ -9408,6 +9228,8 @@ onUnmounted(
                   :disabled="
                     actionLoading ||
                     !selectedFusion ||
+                    !!panelBlockReason ||
+                    !canSpendActionPoints(configuredActionPointCost('fusion', 2)) ||
                     !selectedFusion.available
                   "
                   @click="submitFusion"
@@ -9652,454 +9474,17 @@ onUnmounted(
 
       <!-- CONTROL CONSOLE -->
 
-      <footer
-        v-if="
-          battle.status ===
-          'battle'
-        "
-        class="control-console"
-        :class="{ 'action-points-console': actionPointsEnabled }"
-      >
-        <div
-          class="
-            console-decoration
-            left
-          "
-        >
-          //
-        </div>
-
-        <!-- ATTACK -->
-
-        <button
-          type="button"
-          class="
-            console-skill
-            attack-skill
-          "
-          :class="{
-            dimmed:
-              waitingForRfid ||
-              questionActive ||
-              battleFinished,
-
-            targeting:
-              attackTargetMode,
-          }"
-          :disabled="
-            actionLoading ||
-            waitingForRfid ||
-            questionActive ||
-            battleFinished ||
-            !canAttackUi
-          "
-          @click="
-            beginAttackAction
-          "
-        >
-          <span class="console-icon">
-            ⚔
-          </span>
-
-          <strong>
-            {{
-              attackTargetMode
-                ? "SELECT TARGET"
-                : directAttackAvailable
-                  ? "DIRECT ATTACK"
-                  : "ATTACK"
-            }}
-          </strong>
-
-          <small>
-            {{
-              isTcgV1
-                ? directAttackAvailable
-                  ? `${actionPointsEnabled ? `${configuredActionPointCost("attack", 1)} POIN • ` : ""}50% ATK → HP`
-                  : `${actionPointsEnabled ? `${configuredActionPointCost("attack", 1)} POIN • ` : ""}TARGETED`
-                : "BASIC"
-            }}
-          </small>
-        </button>
-
-        <button
-          v-if="isTcgV1"
-          type="button"
-          class="console-skill combo-attack-skill"
-          :class="{ unavailable: !canComboAttackUi }"
-          :disabled="actionLoading || waitingForRfid || questionActive || battleFinished || !canComboAttackUi"
-          @click="openComboAttackModal"
-        >
-          <span class="console-icon">⚔️</span>
-          <strong>COMBO</strong>
-          <small>{{ canComboAttackUi ? `${formationEnabled ? "2–4 ACTIVE" : tripleComboEnabled ? "2–3 ACTIVE" : "2 ACTIVE"} • biaya sesuai jumlah peserta` : skillLockText("combo") }}</small>
-        </button>
-
-        <!-- DEFENSE -->
-
-        <button
-          v-if="!actionPointsEnabled"
-          type="button"
-          class="
-            console-skill
-            defense-skill
-          "
-          :class="{
-            dimmed:
-              waitingForRfid ||
-              questionActive ||
-              battleFinished,
-
-            unavailable:
-              !canDefenseUi,
-          }"
-          :disabled="
-            actionLoading ||
-            waitingForRfid ||
-            questionActive ||
-            battleFinished ||
-            !canDefenseUi
-          "
-          @click="
-            submitAction(
-              'defense',
-            )
-          "
-        >
-          <span class="console-icon">
-            🛡
-          </span>
-
-          <strong>
-            DEFENSE
-          </strong>
-
-          <small>
-            {{
-              ownDefending
-                ? "ACTIVE • -50%"
-                : canDefenseUi
-                  ? `${actionPointsEnabled ? "1 POIN • " : ""}-50% NEXT HIT • +10 GAUGE`
-                  : skillLockText(
-                      "defense",
-                    )
-            }}
-          </small>
-        </button>
-
-        <!-- SUMMON -->
-
-        <button
-          type="button"
-          class="summon-core"
-          :class="{
-            active:
-              waitingForRfid,
-
-            unavailable:
-              !canSummonUi,
-          }"
-          :disabled="
-            actionLoading ||
-            waitingForRfid ||
-            questionActive ||
-            battleFinished ||
-            !canSummonUi
-          "
-          @click="
-            submitAction(
-              'summon',
-            )
-          "
-        >
-          <div class="summon-core-inner">
-            <span>
-              {{
-                waitingForRfid
-                  ? "📡"
-                  : "◉"
-              }}
-            </span>
-
-            <strong>
-              {{
-                waitingForRfid
-                  ? "SCAN RFID"
-                  : "SUMMON"
-              }}
-            </strong>
-
-            <small
-              v-if="
-                !canSummonUi
-              "
-            >
-              {{
-                skillLockText(
-                  "summon",
-                )
-              }}
-            </small>
-
-            <small v-else>
-              {{ actionPointsEnabled ? `${configuredActionPointCost("summon", 1)} POIN • scan kartu ke Active` : "+" }}
-            </small>
-          </div>
-        </button>
-
-        <!-- ULTIMATE -->
-
-        <button
-          type="button"
-          class="
-            console-skill
-            ultimate-skill
-          "
-          :class="{
-            unavailable:
-              !canUltimateUi,
-          }"
-          :disabled="
-            actionLoading ||
-            waitingForRfid ||
-            questionActive ||
-            battleFinished ||
-            !canUltimateUi
-          "
-          @click="
-            submitAction(
-              'ultimate',
-            )
-          "
-        >
-          <span class="console-icon">
-            ⚡
-          </span>
-
-          <strong>
-            ULTIMATE
-          </strong>
-
-          <small>
-            {{
-              canUltimateUi
-                ? `${actionPointsEnabled ? `${configuredActionPointCost("ultimate", 2)} POIN • ` : ""}AOE ×2 • READY`
-                : skillLockText(
-                    "ultimate",
-                  )
-            }}
-          </small>
-        </button>
-
-        <!-- HEAL -->
-
-        <button
-          type="button"
-          class="
-            console-skill
-            heal-skill
-          "
-          :class="{
-            unavailable:
-              !canHealUi,
-          }"
-          :disabled="
-            actionLoading ||
-            waitingForRfid ||
-            questionActive ||
-            battleFinished ||
-            !canHealUi
-          "
-          @click="
-            submitAction(
-              'heal',
-            )
-          "
-        >
-          <span class="console-icon">
-            ✦
-          </span>
-
-          <strong>
-            HEAL
-          </strong>
-
-          <small>
-            {{
-              ownHealUsed
-                ? "USED"
-                : canHealUi
-                  ? `${actionPointsEnabled ? `${configuredActionPointCost("heal", 1)} POIN • ` : ""}35% MAX HP • READY`
-                  : skillLockText(
-                      "heal",
-                    )
-            }}
-          </small>
-        </button>
-
-        <!-- SYNERGY -->
-
-        <button
-          type="button"
-          class="
-            console-skill
-            synergy-skill
-          "
-          :class="{
-            unavailable:
-              !canSynergyUi,
-          }"
-          :disabled="
-            actionLoading ||
-            waitingForRfid ||
-            questionActive ||
-            battleFinished ||
-            !canSynergyUi
-          "
-          @click="
-            submitAction(
-              'synergy',
-            )
-          "
-        >
-          <span class="console-icon">
-            ✧
-          </span>
-
-          <strong>
-            SYNERGY
-          </strong>
-
-          <small>
-            {{
-              canSynergyUi
-                ? `${
-                    selectedSynergyInfo
-                      .element
-                      .toUpperCase()
-                  } • ${
-                    selectedElementCount
-                  } CARDS${actionPointsEnabled ? ` • ${configuredActionPointCost("synergy", 1)} POIN` : ""}`
-                : skillLockText(
-                    "synergy",
-                  )
-            }}
-          </small>
-        </button>
-
-        <!-- SPECIAL SKILL -->
-
-        <button
-          type="button"
-          class="console-skill special-skill"
-          :class="{
-            unavailable: !canSpecialUi,
-          }"
-          :disabled="
-            actionLoading ||
-            waitingForRfid ||
-            questionActive ||
-            battleFinished ||
-            !selectedCard ||
-            !runtimeSpecialSkills.length ||
-            !canSpecialUi
-          "
-          @click="openSpecialSkillModal()"
-        >
-          <span class="console-icon">
-            {{ readySpecialSkills[0]?.icon || runtimeSpecialSkills[0]?.icon || "✨" }}
-          </span>
-
-          <strong>SPECIAL</strong>
-
-          <small>
-            {{
-              canSpecialUi
-                ? `${readySpecialSkills[0]?.name || "READY"} • READY${actionPointsEnabled ? ` • ${specialSkillActionPointCost(readySpecialSkills[0])} POIN` : ""}`
-                : skillLockText("special")
-            }}
-          </small>
-        </button>
-
-        <!-- FUSION -->
-
-        <button
-          type="button"
-          class="console-skill fusion-skill"
-          :class="{
-            unavailable: !canFusionUi,
-          }"
-          :disabled="
-            actionLoading ||
-            waitingForRfid ||
-            questionActive ||
-            battleFinished ||
-            !fusionFeatureEnabled ||
-            (actionPointsEnabled && !canSpendActionPoints(configuredActionPointCost('fusion', 2)))
-          "
-          @click="openFusionModal()"
-        >
-          <span class="console-icon">
-            {{ readyFusions[0]?.icon || "🧬" }}
-          </span>
-
-          <strong>FUSION</strong>
-
-          <small>
-            {{
-              fusionLoading
-                ? "CHECKING..."
-                : canFusionUi
-                  ? `${readyFusions.length} READY`
-                  : fusionLoadError
-                    ? "LOAD ERROR"
-                    : fusionFeatureEnabled
-                      ? "NO MATCH"
-                      : "DISABLED"
-            }}
-          </small>
-        </button>
-
-        <button
-          v-if="actionPointsEnabled"
-          type="button"
-          class="console-skill end-turn-skill"
-          :disabled="actionLoading || waitingForRfid || questionActive || battleFinished || !isMyTurn"
-          @click="submitAction('end_turn')"
-        >
-          <span class="console-icon">⏭</span>
-          <strong>END TURN</strong>
-          <small>{{ ownActionPoints }} poin giliran • akhiri giliran</small>
-        </button>
-
-        <div
-          class="
-            console-decoration
-            right
-          "
-        >
-          //
-        </div>
-      </footer>
-
-      <!-- SELECTED CARD -->
-
-      <div
-        v-if="
-          selectedCard
-        "
-        class="
-          selected-card-chip
-        "
-      >
-        SELECTED
-
-        <strong>
-          {{
-            selectedCard.name
-          }}
-        </strong>
-      </div>
+      <PlayerActionPanel
+        v-if="battle.status === 'battle'"
+        :context="actionPanelContext"
+        :actions="panelActions"
+        :review="panelReview"
+        :busy="actionLoading"
+        @choose="choosePanelAction"
+        @confirm="confirmPanelAction"
+        @cancel="pendingPanelAction = null"
+        @cancel-summon="cancelSummon"
+      />
 
       <!-- QUESTION -->
 
@@ -10128,9 +9513,7 @@ onUnmounted(
           >
             <div class="question-modal-topline">
               <span class="question-round-label">🧠 QUIZ ROUND {{ currentQuestionRound?.round_number ?? battle.round }}</span>
-              <span v-if="questionSecondsRemaining !== null" class="question-countdown" :class="{ urgent: questionSecondsRemaining <= 8 }">
-                ⏱ {{ questionSecondsRemaining }} detik
-              </span>
+              <QuizTimer :round="currentQuestionRound" :seconds="questionTimeLimitSeconds" />
             </div>
             <span class="hud-label">
               {{ questionLearningEnabled ? "CHALLENGE & BELAJAR" : "CODING CHALLENGE" }}
@@ -10212,31 +9595,19 @@ onUnmounted(
                 </div>
               </div>
 
+              <div v-if="currentQuestion.question_type==='scratch_blocks'" class="question-block-order">
+                <BlockWorkspace :key="effectiveQuestionRoundId" v-model="questionWorkspace" :config="currentQuestion.block_config" :disabled="questionInteractionLocked" label="Susun jawabanmu"/>
+                <button type="button" class="question-submit-button" :disabled="questionInteractionLocked" @click="answerQuestion(0,{workspace:questionWorkspace})">KIRIM PROGRAM</button>
+              </div>
               <div
-                v-if="currentQuestion.question_type === 'block_order'"
+                v-else-if="currentQuestion.question_type === 'block_order'"
                 class="question-block-order"
               >
                 <div class="question-interaction-heading">
                   <strong>Susun blok sesuai urutan program</strong>
                   <small>Seret blok atau gunakan tombol panah.</small>
                 </div>
-                <div
-                  v-for="(block, index) in questionBlockOrder"
-                  :key="block.originalIndex"
-                  class="question-block-item"
-                  draggable="true"
-                  @dragstart="questionDraggingBlock = index"
-                  @dragover.prevent
-                  @drop.prevent="dropQuestionBlock(index)"
-                  @dragend="questionDraggingBlock = null"
-                >
-                  <span class="block-grip">⠿</span>
-                  <code>{{ block.text }}</code>
-                  <div class="block-move-controls">
-                    <button type="button" aria-label="Pindahkan ke atas" :disabled="index === 0 || questionInteractionLocked" @click="moveQuestionBlock(index, -1)">↑</button>
-                    <button type="button" aria-label="Pindahkan ke bawah" :disabled="index === questionBlockOrder.length - 1 || questionInteractionLocked" @click="moveQuestionBlock(index, 1)">↓</button>
-                  </div>
-                </div>
+                <QuizBlockList v-model="questionBlockOrder" :disabled="questionInteractionLocked" />
                 <button class="question-submit-button" type="button" :disabled="questionInteractionLocked || questionBlockOrder.length < 2" @click="submitQuestionBlockOrder">KIRIM URUTAN</button>
               </div>
 
@@ -10320,29 +9691,7 @@ onUnmounted(
                 <small v-if="questionResult === 'wrong' && questionActive" class="question-waiting-opponent">
                   Jawaban tersimpan. Menunggu pemain lain menyelesaikan kuis.
                 </small>
-                <div v-if="questionResult === 'correct' && questionRewardChoices.length" class="question-bonus-choice">
-                  <div>
-                    <strong>Pilih 1 bonus skill</strong>
-                    <span>Battle akan dilanjutkan setelah pilihanmu disimpan.</span>
-                  </div>
-                  <div class="question-bonus-options">
-                    <button
-                      v-for="skill in questionRewardChoices"
-                      :key="skill"
-                      type="button"
-                      :disabled="bonusChoiceSubmitting"
-                      @click="chooseQuestionBonus(skill)"
-                    >
-                      <span class="question-bonus-icon">{{ bonusIcon(skill) }}</span>
-                      <span class="question-bonus-copy">
-                        <b>{{ bonusLabel(skill) }}</b>
-                        <small>{{ bonusDescription(skill) }}</small>
-                      </span>
-                      <span class="question-bonus-action">{{ bonusChoiceSubmitting ? "MENYIMPAN…" : "PILIH" }}</span>
-                    </button>
-                  </div>
-                </div>
-                <small v-else-if="questionResult === 'correct' && questionReward">Bonus skill dari server: {{ bonusLabel(questionReward) }}. Pilihan tiga skill belum tersedia.</small>
+                <small v-if="questionResult === 'correct' && questionReward">Bonus skill: {{ bonusLabel(questionReward) }}. Gunakan saat giliranmu.</small>
                 <small v-else-if="questionResult === 'correct' && battle?.question_bonus_enabled === false">Bonus skill tidak diaktifkan untuk battle ini.</small>
               </section>
             </template>
@@ -10351,6 +9700,9 @@ onUnmounted(
       </Transition>
 
       <!-- WINNER -->
+      <QuizBonusChoices v-if="questionResult === 'correct' && questionRewardChoices.length && bonusChoiceRoundId && !battleFinished"
+        :options="bonusChoiceOptions" :busy="bonusChoiceSubmitting" :selected-code="bonusChoiceSelectedCode" :player-name="playerName"
+        :explanation="questionLearningEnabled ? currentQuestion?.explanation : ''" @choose="chooseQuestionBonus"/>
 
       <Transition name="question">
         <div
@@ -10406,6 +9758,9 @@ onUnmounted(
 </template>
 
 <style scoped>
+.studio-skill-choice{display:grid;gap:8px;margin:14px 0;font-weight:700}
+.studio-skill-choice select{width:100%;min-width:0;padding:12px;border:1px solid #b9d3c2;border-radius:10px;background:#fff;color:#153e2a;font:inherit}
+.special-tab-icon { display:block; width:46px; height:46px; flex-shrink:0; }
 * {
   box-sizing: border-box;
 }
@@ -11273,6 +10628,17 @@ button {
   font-size: 14px;
 }
 
+.avatar-current-photo {
+  display: block;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 20px;
+  border: 2px solid #d8eadb;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: center top;
+}
+
 .avatar-picker-grid {
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
@@ -12065,143 +11431,6 @@ button {
   font-weight: 950;
 }
 
-.active-drop-zone {
-  transition:
-    border-color
-      0.18s ease,
-    box-shadow
-      0.18s ease,
-    transform
-      0.18s ease;
-}
-
-.active-drop-zone.drag-over-active {
-  border-color:
-    var(
-      --player-accent
-    );
-
-  box-shadow:
-    0 0 0 4px
-      rgba(
-        45,
-        158,
-        225,
-        0.1
-      ),
-    0 20px 45px
-      rgba(
-        55,
-        94,
-        119,
-        0.14
-      );
-
-  transform:
-    translateY(-2px);
-}
-
-.active-drop-hint {
-  position: relative;
-
-  z-index: 4;
-
-  margin:
-    -5px
-    0
-    14px;
-
-  padding:
-    9px
-    12px;
-
-  border:
-    1px dashed
-    var(
-      --player-accent
-    );
-
-  border-radius: 11px;
-
-  color:
-    var(
-      --player-accent
-    );
-
-  background:
-    rgba(
-      255,
-      255,
-      255,
-      0.65
-    );
-
-  font-size: 8px;
-
-  font-weight: 950;
-
-  text-align: center;
-
-  letter-spacing:
-    0.07em;
-}
-
-.active-draggable-card[
-  draggable="true"
-] {
-  cursor: grab;
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-user-drag: element;
-}
-
-.active-draggable-card[
-  draggable="true"
-] * {
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-user-drag: none;
-}
-
-.active-draggable-card[
-  draggable="true"
-]:active {
-  cursor: grabbing;
-}
-
-.drag-handle {
-  position: absolute;
-
-  right: 13px;
-  bottom: 10px;
-
-  z-index: 5;
-
-  color: #7d9bb0;
-
-  font-size: 12px;
-
-  font-weight: 950;
-}
-
-.drag-instruction {
-  position: absolute;
-
-  left: 12px;
-  bottom: 11px;
-
-  z-index: 4;
-
-  color: #7c95a8;
-
-  font-size: 6px;
-
-  font-weight: 900;
-
-  letter-spacing:
-    0.07em;
-}
-
 /* PANEL */
 
 .cyber-panel {
@@ -12655,7 +11884,7 @@ button {
 
   z-index: 1;
 
-  padding-bottom: 25px;
+  padding-bottom: 2px;
 }
 
 .cyber-card-inner header {
@@ -12904,6 +12133,55 @@ button {
   font-size: 7px;
 
   font-weight: 800;
+}
+
+.card-zone-action {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 7px 10px;
+  border: 1px solid rgba(18, 159, 71, 0.2);
+  border-radius: 10px;
+  color: #087c35;
+  background: #eefaf1;
+  font-size: 9px;
+  font-weight: 950;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: transform 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.card-zone-action > span:first-child {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.card-zone-action-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.card-zone-action-copy small {
+  color: #648573;
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.card-zone-action:not(:disabled):hover {
+  transform: translateY(-1px);
+  background: #dff5e5;
+  box-shadow: 0 5px 14px rgba(10, 151, 62, 0.12);
+}
+
+.card-zone-action:disabled {
+  color: #82938a;
+  border-color: #e0e8e2;
+  background: #f0f3f1;
+  cursor: not-allowed;
 }
 
 /* SECONDARY */
@@ -16545,7 +15823,7 @@ small {
     );
 }
 
-.question-modal-topline { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.question-modal-topline { position:sticky; top:-1px; z-index:3; background:#fff; padding:10px 0; display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
 .question-round-label { color:#18803a; font-size:10px; font-weight:900; letter-spacing:.12em; }
 .question-countdown { padding:7px 11px; border-radius:999px; color:#13732f; background:#eaf7ec; font-size:12px; font-weight:900; font-variant-numeric:tabular-nums; }
 .question-countdown.urgent { color:#b23a2f; background:#fff0ec; animation:questionTimerPulse .8s ease-in-out infinite alternate; }
@@ -18785,4 +18063,23 @@ h2 {
 }
 
 
+/* Command bar height follows its actual content, including mobile and RFID mode. */
+.player-battle-ui{padding-bottom:calc(var(--action-panel-height,220px) + 52px)}
+.deck-slots{justify-content:start}
+.fusion-history-fab{bottom:calc(var(--action-panel-height,220px) + 24px)}
+.battle-action-receipt{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px 20px;padding:14px 16px;margin-top:18px;background:#eff6e8;border:1px solid #d7e6cc;border-radius:11px;color:#385b3f;font:500 12px/1.7 Inter,Arial,sans-serif;overflow-wrap:anywhere}
+.special-skill-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible;gap:12px}
+.special-skill-tab{min-width:0;align-items:start;padding:16px;gap:14px;background:#f7faf3;border-color:#d6e4d4;border-radius:12px}
+.special-skill-tab>div{min-width:0;overflow-wrap:anywhere}.special-skill-tab .special-tab-icon{flex:none;width:48px;height:48px}
+.special-skill-tab strong{font-size:16px;line-height:1.4;margin:6px 0}.special-skill-tab small{font-size:12px;line-height:1.7;font-weight:500;color:#667e6a;margin-top:8px}
+.special-skill-tab .skill-slot-label{font-size:10px;letter-spacing:.08em;font-weight:800;color:#497649}
+.special-skill-tab .skill-ready-reason{font-weight:700;color:#8c642f}.special-skill-tab.ready .skill-ready-reason{color:#257543}
+.special-skill-tab.selected{border-color:#2b824d;box-shadow:0 0 0 2px #cce6bd}.special-skill-tab.ready{background:#f2f8ea}
+.special-modal-header p,.special-skill-hero p,.special-target-panel p{font-size:13px;line-height:1.8}.special-skill-hero h3{font-size:22px}
+.special-metric-grid>div>span,.special-effects-panel>span,.special-target-panel>span{font-size:10px}.special-metric-grid>div>strong{font-size:12px;line-height:1.6}.special-effects-panel li,.special-readiness span{font-size:12px;line-height:1.8}
+.special-target-card strong{font-size:12px}.special-target-card small{font-size:11px}.special-modal-actions button,.fusion-modal-actions button{min-height:44px;font-size:12px}
+.target-picker-panel:focus,.special-skill-modal:focus,.combo-attack-modal:focus,.fusion-modal:focus{outline:none}
+.special-skill-tab:focus-visible,.special-target-card:focus-visible{outline:3px solid #27889a;outline-offset:3px}
+@media(max-width:760px){.deck-slots{grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible}.battle-stage{grid-template-columns:repeat(2,minmax(0,1fr))}.special-skill-tabs{grid-template-columns:1fr}.special-skill-tab{padding:14px}.special-skill-tab strong{font-size:15px}.special-modal-actions{grid-template-columns:minmax(65px,.4fr) minmax(0,1fr)}.battle-action-receipt{font-size:11px;padding:12px}.fusion-history-fab{right:12px}}
+@media(prefers-reduced-motion:reduce){.target-picker-enter-active,.target-picker-leave-active{transition:none}}
 </style>

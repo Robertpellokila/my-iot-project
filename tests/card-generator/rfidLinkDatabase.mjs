@@ -1,0 +1,36 @@
+import {PGlite} from '@electric-sql/pglite';
+import {readFile} from 'node:fs/promises';
+import assert from 'node:assert/strict';
+const db=new PGlite();
+try{
+ await db.exec(`CREATE ROLE anon;CREATE ROLE authenticated;CREATE SCHEMA auth;
+ CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$ SELECT nullif(current_setting('test.uid',true),'')::uuid $$;
+ CREATE FUNCTION is_admin() RETURNS boolean LANGUAGE sql AS $$ SELECT current_setting('test.admin',true)='true' $$;
+ CREATE TABLE game_cards(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),uid text UNIQUE,card_code text,name text,element text,hp int,attack int,defense int,rarity text,level int,lore text,image_url text,physical_card_image_url text,avatar_url text,card_kind text,fusion_only boolean DEFAULT false,physical_scan_enabled boolean DEFAULT false,metadata jsonb DEFAULT '{}',tags text[],featured_on_landing boolean DEFAULT false);
+ CREATE TABLE game_card_special_skills(game_card_id uuid,special_skill_id uuid,sort_order int,enabled boolean,overrides jsonb);`);
+ const migration=await readFile('supabase/migrations/038_link_studio_card_rfid.sql','utf8');await db.exec(migration);await db.exec(migration);
+ const source='10000000-0000-4000-8000-000000000001';
+ await db.query("INSERT INTO game_cards(id,card_code,name,element,hp,attack,defense,rarity,level,lore,image_url,physical_card_image_url,avatar_url,metadata,tags,featured_on_landing) VALUES($1,'COB_003','Coby','Knight',120,30,14,'common',2,'Lore','cover','print','avatar','{\"timedoor_seed_key\":\"original\"}',ARRAY['GUARD'],true)",[source]);
+ await db.query("INSERT INTO game_card_special_skills VALUES($1,gen_random_uuid(),1,true,'{\"action_points\":2}'),($1,gen_random_uuid(),2,false,'{}')",[source]);
+ const link=(id,uid)=>db.query('SELECT link_studio_card_rfid($1,$2) result',[id,uid]);
+ await assert.rejects(link(source,'QA-001'),/Admin/);
+ await db.exec("SELECT set_config('test.uid','00000000-0000-4000-8000-000000000001',false),set_config('test.admin','true',false)");
+ for(const uid of ['',null,'abc','x'.repeat(129),'AB\nCD'])await assert.rejects(link(source,uid),/UID RFID/);
+ const original=(await db.query('SELECT * FROM game_cards WHERE id=$1',[source])).rows[0];
+ const first=(await link(source,'  QA-001  ')).rows[0].result;assert.equal(first.already_linked,false);
+ const row=(await db.query('SELECT * FROM game_cards WHERE id=$1',[first.id])).rows[0];
+ for(const key of ['name','card_code','element','hp','attack','defense','rarity','level','lore','image_url','physical_card_image_url','avatar_url','tags'])assert.deepEqual(row[key],original[key],key);
+ assert.equal(row.uid,'QA-001');assert.equal(row.metadata.catalog_source_id,source);assert.equal(row.metadata.timedoor_seed_key,undefined);assert.equal(row.metadata.catalog_source_seed_key,'original');assert.equal(row.featured_on_landing,false);assert.equal(row.physical_scan_enabled,true);
+ assert.deepEqual((await db.query('SELECT * FROM game_cards WHERE id=$1',[source])).rows[0],original);
+ assert.equal((await db.query('SELECT count(*)::int n FROM game_card_special_skills WHERE game_card_id=$1',[first.id])).rows[0].n,2);
+ assert.equal((await link(source,'QA-001')).rows[0].result.id,first.id);assert.equal((await link(source,'QA-001')).rows[0].result.already_linked,true);
+ await link(source,'QA-002');assert.equal((await db.query('SELECT count(*)::int n FROM game_cards')).rows[0].n,3);
+ const other='10000000-0000-4000-8000-000000000002';await db.query("INSERT INTO game_cards(id,name,fusion_only) VALUES($1,'Other',false)",[other]);
+ await assert.rejects(link(other,'QA-001'),/sudah terhubung/);await assert.rejects(link(crypto.randomUUID(),'QA-999'),/sumber/);
+ await db.query('UPDATE game_cards SET fusion_only=true WHERE id=$1',[other]);await assert.rejects(link(other,'QA-FUSION'),/Fusion/);
+ assert.equal((await db.query("SELECT has_function_privilege('anon','link_studio_card_rfid(uuid,text)','execute') allowed")).rows[0].allowed,false);
+ await db.exec('GRANT USAGE ON SCHEMA auth TO authenticated;SET ROLE authenticated');
+ assert.ok((await link(source,'QA-AUTH')).rows[0].result.id);
+ await db.exec("SELECT set_config('test.admin','false',false)");await assert.rejects(link(source,'QA-NOADMIN'),/Admin/);
+ console.log('PASS RFID: admin authorization, UID validation, source preservation, image/stats/all legacy bindings, private publication default, idempotent retry, multiple instances, collision refusal, Fusion refusal and grant isolation.');
+}finally{await db.close();}

@@ -46,6 +46,26 @@ const props = defineProps({
     default: true,
   },
 
+  showBenchAction: {
+    type: Boolean,
+    default: false,
+  },
+
+  benchActionEnabled: {
+    type: Boolean,
+    default: false,
+  },
+
+  benchActionLabel: {
+    type: String,
+    default: "KEMBALI KE ACTIVE",
+  },
+
+  benchActionHint: {
+    type: String,
+    default: "",
+  },
+
   accent: {
     type: String,
     default: "blue",
@@ -58,6 +78,7 @@ const emit = defineEmits([
   "update:activeIndex",
   "drag-start",
   "drag-end",
+  "bench-action",
 ]);
 
 const cardCount = computed(
@@ -898,19 +919,39 @@ onUnmounted(() => {
                     <div
                       v-if="
                         zone ===
-                        'bench'
+                          'bench' &&
+                        showBenchAction &&
+                        interactive &&
+                        !readonly
                       "
+                      class="bench-action-block"
+                    >
+                      <span class="bench-return-count">
+                        RETURN {{ getBenchReturnCount(card) }} / 1
+                      </span>
+                      <p v-if="benchActionHint">
+                        {{ benchActionHint }}
+                      </p>
+                      <button
+                        type="button"
+                        class="bench-action-button"
+                        :disabled="
+                          !benchActionEnabled ||
+                          getBenchReturnCount(card) >= 1 ||
+                          getCardHp(card) <= 0 ||
+                          card.exhausted
+                        "
+                        @click.stop="emit('bench-action', card)"
+                      >
+                        {{ benchActionLabel }}
+                      </button>
+                    </div>
+
+                    <div
+                      v-else-if="zone === 'bench'"
                       class="bench-return"
                     >
-                      RETURN
-
-                      {{
-                        getBenchReturnCount(
-                          card,
-                        )
-                      }}
-
-                      / 1
+                      RETURN {{ getBenchReturnCount(card) }} / 1
                     </div>
 
                     <div
@@ -1859,6 +1900,58 @@ header span {
 
   text-transform:
     uppercase;
+}
+
+.bench-action-block {
+  display: grid;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.bench-return-count {
+  color: #70889a;
+  font-size: 7px;
+  font-weight: 900;
+  text-align: center;
+  letter-spacing: 0.06em;
+}
+
+.bench-action-block p {
+  margin: 0;
+  color: #647f91;
+  font-size: 8px;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.bench-action-button {
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, white);
+  border-radius: 10px;
+  color: white;
+  background: var(--accent);
+  box-shadow: 0 5px 12px color-mix(in srgb, var(--accent) 18%, transparent);
+  font-size: 8px;
+  font-weight: 950;
+  line-height: 1.25;
+  text-align: center;
+  cursor: pointer;
+  transition: transform 0.16s ease, filter 0.16s ease, opacity 0.16s ease;
+}
+
+.bench-action-button:not(:disabled):hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.bench-action-button:disabled {
+  color: #718497;
+  background: #e8eff2;
+  border-color: #d8e3e8;
+  box-shadow: none;
+  cursor: not-allowed;
 }
 
 .wheel-nav {

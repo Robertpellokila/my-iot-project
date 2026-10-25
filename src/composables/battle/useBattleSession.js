@@ -402,6 +402,8 @@ export const useBattleSession =
             row.question_type ??
             "choice",
 
+          block_config: row.block_config ?? null,
+          duration_seconds: row.duration_seconds ?? null,
           blocks:
             Array.isArray(row.blocks) ? row.blocks : [],
 
@@ -445,6 +447,7 @@ export const useBattleSession =
           level:
             row.level ??
             "medium",
+          difficulty: row.difficulty ?? row.level ?? 'medium',
 
 
           /*
@@ -898,8 +901,17 @@ export const useBattleSession =
     // FETCH QUESTION BY ID
     // =======================================================
 
+    let questionFetchVersion = 0;
+    let questionRoundVersion = 0;
     const fetchQuestionById =
       async questionId => {
+        const fetchVersion = ++questionFetchVersion;
+        const sessionId = battle.value?.id;
+        if (questionId && currentQuestion.value?.id === questionId) {
+          questionLoading.value = false;
+          questionError.value = null;
+          return currentQuestion.value;
+        }
 
         if (
           !questionId
@@ -907,8 +919,7 @@ export const useBattleSession =
 
           currentQuestion.value =
             null;
-
-
+          questionLoading.value = false;
           return null;
 
         }
@@ -933,7 +944,7 @@ export const useBattleSession =
               .from(
                 "coding_questions"
               )
-              .select("id,question,image_url,option_a,option_b,option_c,option_d,explanation,category,difficulty,level,is_active,question_type,blocks,code_snippet,hint_1,hint_2,learning_topic,learning_url")
+              .select("id,question,image_url,option_a,option_b,option_c,option_d,explanation,category,difficulty,level,is_active,question_type,block_config,duration_seconds,blocks,code_snippet,hint_1,hint_2,learning_topic,learning_url")
               .eq(
                 "id",
                 questionId
@@ -950,6 +961,8 @@ export const useBattleSession =
           }
 
 
+          if (fetchVersion !== questionFetchVersion || battle.value?.id !== sessionId || !questionActive.value ||
+              String(questionId) !== String(currentQuestionRound.value?.question_id ?? battle.value?.current_question_id)) return null;
           currentQuestion.value =
             normalizeQuestion(
               data
@@ -964,6 +977,7 @@ export const useBattleSession =
           err
         ) {
 
+          if (fetchVersion !== questionFetchVersion || battle.value?.id !== sessionId || !questionActive.value) return null;
           console.error(
             "Gagal mengambil coding question:",
             err
@@ -986,8 +1000,7 @@ export const useBattleSession =
 
         finally {
 
-          questionLoading.value =
-            false;
+          if (fetchVersion === questionFetchVersion) questionLoading.value = false;
 
         }
 
@@ -1000,6 +1013,8 @@ export const useBattleSession =
 
     const loadQuestionRound =
       async () => {
+        const version = ++questionRoundVersion;
+        const sessionId = battle.value?.id;
 
         if (
           !battle.value?.id
@@ -1141,6 +1156,7 @@ export const useBattleSession =
           }
 
 
+          if (version !== questionRoundVersion || battle.value?.id !== sessionId || !questionActive.value) return null;
           currentQuestionRound.value =
             questionRound;
 
@@ -1181,6 +1197,7 @@ export const useBattleSession =
           err
         ) {
 
+          if (version !== questionRoundVersion || battle.value?.id !== sessionId || !questionActive.value) return null;
           console.error(
             "Gagal load question round:",
             err

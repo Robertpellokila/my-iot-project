@@ -96,6 +96,38 @@ default: false,
 
 },
 
+showBenchAction: {
+
+type: Boolean,
+
+default: false,
+
+},
+
+benchActionEnabled: {
+
+type: Boolean,
+
+default: false,
+
+},
+
+benchActionLabel: {
+
+type: String,
+
+default: "KEMBALI KE ACTIVE",
+
+},
+
+benchActionHint: {
+
+type: String,
+
+default: "",
+
+},
+
 accent: {
 
 type: String,
@@ -195,6 +227,8 @@ const emit = defineEmits([
 "viewer-close",
 
 "viewer-index-change",
+
+"bench-action",
 
 ]);
 
@@ -1118,6 +1152,11 @@ zone: null,
 
 };
 
+const handleBenchAction = (card) => {
+  if (props.mirrorOnly || props.readonly || !card) return;
+  emit("bench-action", card);
+};
+
 </script>
 
 <template>
@@ -1643,6 +1682,14 @@ draggableCards
 
   "
 
+  :show-bench-action="showBenchAction"
+
+  :bench-action-enabled="benchActionEnabled"
+
+  :bench-action-label="benchActionLabel"
+
+  :bench-action-hint="benchActionHint"
+
   :interactive="
 
 !mirrorOnly
@@ -1684,6 +1731,8 @@ handleDragStart
 handleDragEnd
 
   "
+
+  @bench-action="handleBenchAction"
 
   />
 

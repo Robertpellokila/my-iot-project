@@ -7,10 +7,19 @@ import {
   onUpdated,
   ref,
 } from "vue";
-import BattleCard from "./BattleCard.vue";
+import PublicDisplayCard from "./PublicDisplayCard.vue";
+import PublicRosterZone from './PublicRosterZone.vue';
+import PublicLiveViewer from './PublicLiveViewer.vue';
+import { publicBattleActivity, battleCardId } from '../../utils/publicBattleActivity.js';
+import TbcEmblem from "./TbcEmblem.vue";
 import CardStatusVfx from "./CardStatusVfx.vue";
 import { normalizeBattleStatusKey } from "../../composables/battle/elementalStatus.js";
+import { normalizePublicBattleLayout } from "../../utils/publicBattleLayouts.js";
 const props = defineProps({
+  actionToast: { type: Object, default: null },
+  spotlight: { type: Object, default: () => ({ p1: null, p2: null }) },
+  liveUi: { type: Object, default: () => ({}) },
+  layout: { type: String, default: 'center_duel' },
   battle: {
     type: Object,
     required: true,
@@ -31,6 +40,15 @@ const props = defineProps({
     type: Number,
     default: 0,
   },
+  player1Bench: { type: Array, default: () => [] },
+  player2Bench: { type: Array, default: () => [] },
+  player1Graveyard: { type: Array, default: () => [] },
+  player2Graveyard: { type: Array, default: () => [] },
+  player1GraveyardCount: { type: Number, default: 0 },
+  player2GraveyardCount: { type: Number, default: 0 },
+  player1DeckRemaining: { type: Number, default: 0 },
+  player2DeckRemaining: { type: Number, default: 0 },
+  announcement: { type: Object, default: null },
   statusEffects: {
 
     type: Array,
@@ -92,173 +110,39 @@ const p1FieldRef = ref(null);
 const p2FieldRef = ref(null);
 const p1StageRef = ref(null);
 const p2StageRef = ref(null);
-const stageMetrics = ref({ width: 0, height: 0 });
-let stageObserver = null;
-const measureStage = () => {
-  const stages = [p1StageRef.value, p2StageRef.value]
-    .filter(Boolean).map((el) => el.getBoundingClientRect());
-  if (!stages.length) return;
-  const width = Math.floor(Math.min(...stages.map((rect) => rect.width)));
-  const height = Math.floor(Math.min(...stages.map((rect) => rect.height)));
-  if (width > 0 && height > 0 &&
-      (width !== stageMetrics.value.width || height !== stageMetrics.value.height)) {
-    stageMetrics.value = { width, height };
-  }
-};
-const cardElements =
-  new Map();
-const cardRectCache =
-  new Map();
-const rectToPlainObject = (
-  rect,
-) => {
-  if (!rect) {
-    return null;
-  }
-  return {
-    left: rect.left,
-    top: rect.top,
-    right: rect.right,
-    bottom: rect.bottom,
-    width: rect.width,
-    height: rect.height,
-    x: rect.x,
-    y: rect.y,
-    centerX:
-      rect.left +
-      rect.width / 2,
-    centerY:
-      rect.top +
-      rect.height / 2,
-  };
-};
-const cardElementKey = (
-  player,
-  cardId,
-) =>
-  `${player}:${String(
-    cardId,
-  )}`;
-const registerCardElement = (
-  player,
-  card,
-  element,
-) => {
-  const cardId =
-    getCardId(card);
-  if (!cardId) {
-    return;
-  }
-  const key =
-    cardElementKey(
-      player,
-      cardId,
-    );
-  if (!element) {
-    cardElements.delete(
-      key,
-    );
-    return;
-  }
-  cardElements.set(
-    key,
-    element,
-  );
-  const rect =
-    element.getBoundingClientRect();
-  if (
-    rect.width > 0 &&
-    rect.height > 0
-  ) {
-    cardRectCache.set(
-      key,
-      rectToPlainObject(
-        rect,
-      ),
-    );
-  }
-};
-const captureCardRects =
-  () => {
-    for (
-      const [
-        key,
-        element,
-      ]
-      of cardElements.entries()
-    ) {
-      if (
-        !element ||
-        typeof element
-          .getBoundingClientRect !==
-          "function"
-      ) {
-        continue;
-      }
-      const rect =
-        element.getBoundingClientRect();
-      if (
-        rect.width <= 0 ||
-        rect.height <= 0
-      ) {
-        continue;
-      }
-      cardRectCache.set(
-        key,
-        rectToPlainObject(
-          rect,
-        ),
-      );
+// Query the current DOM so switching the spotlight cannot leave stale card refs.
+const stageRootRef = ref(null);
+const cardRectCache = new Map();
+const rectToPlainObject = (rect) => rect ? {
+  left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
+  width: rect.width, height: rect.height, x: rect.x, y: rect.y,
+  centerX: rect.left + rect.width / 2, centerY: rect.top + rect.height / 2,
+} : null;
+const cardElementKey = (player, cardId) => `${player}:${String(cardId)}`;
+const captureCardRects = () => {
+  for (const element of stageRootRef.value?.querySelectorAll('[data-card-id]') ?? []) {
+    const rect = element.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      cardRectCache.set(cardElementKey(element.dataset.player, element.dataset.cardId), rectToPlainObject(rect));
     }
-  };
-const getCardRect = (
-  player,
-  cardId,
-) => {
-  if (
-    !player ||
-    !cardId
-  ) {
-    return null;
   }
-  const key =
-    cardElementKey(
-      player,
-      cardId,
-    );
-  const element =
-    cardElements.get(
-      key,
-    );
-  if (
-    element &&
-    typeof element
-      .getBoundingClientRect ===
-      "function"
-  ) {
-    const rect =
-      element.getBoundingClientRect();
-    if (
-      rect.width > 0 &&
-      rect.height > 0
-    ) {
-      const plain =
-        rectToPlainObject(
-          rect,
-        );
-      cardRectCache.set(
-        key,
-        plain,
-      );
+};
+const getCardRect = (player, cardId) => {
+  if (!player || cardId == null) return null;
+  const matches = [...(stageRootRef.value?.querySelectorAll('[data-card-id]') ?? [])]
+    .filter(el => el.dataset.player === player && el.dataset.cardId === String(cardId));
+  const element = matches.find(el => el.dataset.featured === 'true') ?? matches[0];
+  const key = cardElementKey(player, cardId);
+  if (element) {
+    const rect = element.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      const plain = rectToPlainObject(rect);
+      cardRectCache.set(key, plain);
       return plain;
     }
   }
-  return (
-    cardRectCache.get(
-      key,
-    ) ??
-    null
-  );
+  // Keep the last visible target for the destruction animation after a card leaves play.
+  return cardRectCache.get(key) ?? null;
 };
 const getPlayerTargetRect =
   (player) => {
@@ -322,88 +206,6 @@ const maxBench =
       ) || 4,
     ),
   );
-/* =========================================================
-   ACTIVE SLOTS
-========================================================= */
-const player1Slots =
-  computed(() =>
-    Array.from(
-      {
-        length:
-          maxActive.value,
-      },
-      (_, index) =>
-        props.player1Active[
-          index
-        ] ?? null,
-    ),
-  );
-const player2Slots =
-  computed(() =>
-    Array.from(
-      {
-        length:
-          maxActive.value,
-      },
-      (_, index) =>
-        props.player2Active[
-          index
-        ] ?? null,
-    ),
-  );
-/* =========================================================
-   FORMATION
-========================================================= */
-const formationColumns =
-  computed(() => {
-    const count =
-      maxActive.value;
-    if (count <= 2) {
-      return 1;
-    }
-    if (count <= 4) {
-      return 2;
-    }
-    if (count <= 6) {
-      return 3;
-    }
-    if (count <= 8) {
-      return 4;
-    }
-    return Math.ceil(
-      Math.sqrt(count),
-    );
-  });
-const formationRows =
-  computed(() =>
-    Math.ceil(
-      maxActive.value /
-        formationColumns.value,
-    ),
-  );
-const formationClass =
-  computed(
-    () =>
-      `formation-${Math.min(
-        maxActive.value,
-        8,
-      )}`,
-  );
-const spectatorCardWidth = computed(() => {
-  const columns = formationColumns.value;
-  const rows = formationRows.value;
-  const width = stageMetrics.value.width || 400;
-  const height = stageMetrics.value.height || 520;
-  const widthCapacity = (width - 26 - (columns - 1) * 10) / columns;
-  const heightCapacity = (height - 18 - (rows - 1) * 12) / rows / 1.68;
-  return Math.max(68, Math.floor(Math.min(240, widthCapacity, heightCapacity)));
-});
-const formationStyle = computed(() => ({
-  "--formation-columns": formationColumns.value,
-  "--formation-rows": formationRows.value,
-  "--tv-card-w": `${spectatorCardWidth.value}px`,
-  "--tv-card-h": `${Math.floor(spectatorCardWidth.value * 1.68)}px`,
-}));
 /* =========================================================
    PLAYER INFO
 ========================================================= */
@@ -768,6 +570,18 @@ const getCombatSlotClasses = (
 ========================================================= */
 
 const STATUS_VISUALS = {
+  studio_shield: {icon:'🛡',label:'SHIELD',tone:'water'},
+  studio_defense: {icon:'🛡',label:'DEF UP',tone:'defense'},
+  studio_team_defense: {icon:'🛡',label:'TEAM DEF',tone:'defense'},
+  studio_attack_buff: {icon:'⚔',label:'ATK UP',tone:'power'},
+  studio_attack_debuff: {icon:'↓',label:'ATK DOWN',tone:'debuff'},
+  studio_defense_debuff: {icon:'↓',label:'DEF DOWN',tone:'debuff'},
+  studio_reduction: {icon:'🛡',label:'DAMAGE GUARD',tone:'defense'},
+  studio_mark: {icon:'◎',label:'MARKED',tone:'debuff'},
+  studio_delayed_heal: {icon:'+',label:'REGEN',tone:'regen'},
+  studio_silence_slot2: {icon:'🔒',label:'SKILL 2 LOCK',tone:'silence'},
+  studio_revival_lock: {icon:'⌛',label:'REVIVE WAIT',tone:'cooldown'},
+  root: {icon:'🌿',label:'ROOT',tone:'debuff'},
   defense: { icon: "🛡", label: "DEFENSE", tone: "defense" },
   water_shield: { icon: "💧", label: "SHIELD", tone: "water" },
   synergy_shield: { icon: "💧", label: "SHIELD", tone: "water" },
@@ -958,8 +772,8 @@ const cardFxFlags = (card) => {
   const belongsToP1 = props.player1Active.some((item) => String(getCardId(item) ?? "") === id);
   const belongsToP2 = props.player2Active.some((item) => String(getCardId(item) ?? "") === id);
   return {
-    defense: keys.has("defense"),
-    shield: keys.has("shield") || keys.has("water_shield") || keys.has("synergy_shield") ||
+    defense: keys.has('studio_defense') || keys.has('studio_team_defense') || keys.has("defense") || (belongsToP1 && p1Defending.value) || (belongsToP2 && p2Defending.value),
+    shield: keys.has('studio_shield') || keys.has('studio_reduction') || keys.has("shield") || keys.has("water_shield") || keys.has("synergy_shield") ||
       (belongsToP1 && p1WaterShieldPercent.value > 0) || (belongsToP2 && p2WaterShieldPercent.value > 0),
     necro: keys.has("necro_identity"),
     fusion: keys.has("fusion_identity"),
@@ -1049,16 +863,20 @@ const waterBreaking = (
 /* =========================================================
    TURN
 ========================================================= */
-const currentTurn =
-  computed(
-    () =>
-      props.battle
-        ?.current_turn ??
-      "p1",
-  );
+const resolvedLayout = computed(() => normalizePublicBattleLayout(props.layout));
+const currentTurn = computed(() => {
+  const value = String(props.battle?.current_turn ?? '').trim().toLowerCase();
+  if (['p1', 'player1', 'player_1'].includes(value)) return 'p1';
+  if (['p2', 'player2', 'player_2'].includes(value)) return 'p2';
+  return null;
+});
+const liveTurn = computed(() => props.battle?.status === 'battle' && !props.battle?.winner ? currentTurn.value : null);
 const actionPointsEnabled = computed(() =>
   String(props.battle?.ruleset ?? "").toLowerCase() === "tcg_v1" &&
   Boolean(props.battle?.action_points_enabled),
+);
+const actionPointsPerTurn = computed(() =>
+  Math.max(1, Math.min(10, Number(props.battle?.action_points_per_turn ?? 3) || 3)),
 );
 const player1ActionPoints = computed(() =>
   Math.max(0, Number(props.battle?.player1_action_points ?? 0) || 0),
@@ -1093,6 +911,8 @@ const turnText =
     ) {
       return "CODING CHALLENGE";
     }
+    if (props.battle?.status === 'finished') return 'BATTLE FINISHED';
+    if (!liveTurn.value) return 'WAITING FOR PLAYERS';
     return (
       currentTurn.value ===
       "p2"
@@ -1119,2059 +939,498 @@ const p2Avatar =
   );
 const isAvatarImage = (value) =>
   /^(https?:\/\/|\/|data:image\/)/i.test(String(value ?? "").trim());
+const failedAvatarImages = ref({ p1: "", p2: "" });
 /* =========================================================
    POSITION CAPTURE
 ========================================================= */
-const scheduleCapture =
-  async () => {
-    await nextTick();
-    requestAnimationFrame(
-      () => {
-        captureCardRects();
-      },
-    );
-  };
+let captureFrame = 0;
+const scheduleCapture = async () => {
+  await nextTick();
+  cancelAnimationFrame(captureFrame);
+  captureFrame = requestAnimationFrame(captureCardRects);
+};
 onMounted(() => {
   void scheduleCapture();
-  stageObserver = new ResizeObserver(() => measureStage());
-  if (p1StageRef.value) stageObserver.observe(p1StageRef.value);
-  if (p2StageRef.value) stageObserver.observe(p2StageRef.value);
-  measureStage();
-  window.addEventListener('resize', measureStage, { passive: true });
+  window.addEventListener('resize', scheduleCapture, { passive: true });
 });
+onUpdated(scheduleCapture);
 onUnmounted(() => {
-  stageObserver?.disconnect();
-  stageObserver = null;
-  window.removeEventListener('resize', measureStage);
+  cancelAnimationFrame(captureFrame);
+  window.removeEventListener('resize', scheduleCapture);
 });
-onUpdated(() => {
-  void scheduleCapture();
+
+const liveActivity = computed(() => publicBattleActivity(props.battle, props.liveUi, {
+  p1: { active: props.player1Active, bench: props.player1Bench, graveyard: props.player1Graveyard },
+  p2: { active: props.player2Active, bench: props.player2Bench, graveyard: props.player2Graveyard },
+}));
+const featuredCard = (id, cards) => {
+  const fx = props.combatFx;
+  const focusId = fx?.active
+    ? (fx.sourcePlayer === id ? fx.attackerCardId : fx.targetPlayer === id ? fx.targetCardId : null)
+    : null;
+  return cards.find(card => String(getCardId(card)) === String(focusId))
+    ?? cards.find(card => String(getCardId(card)) === String(props.spotlight[id]?.cardId))
+    ?? cards[0] ?? null;
+};
+const players = computed(() => ['p1', 'p2'].map((id, index) => {
+  const first = index === 0;
+  const cards = first ? props.player1Active : props.player2Active;
+  const bench = first ? props.player1Bench : props.player2Bench;
+  const featured = featuredCard(id, cards);
+  const statuses = [...cardStatusEffects(featured), ...playerStatusEffects(id)];
+  const flags = featured ? cardFxFlags(featured) : {};
+  return {
+    id, index, cards, bench, featured, statuses, flags,
+    isTurn: liveTurn.value === id,
+    name: first ? p1Name.value : p2Name.value,
+    avatar: first ? p1Avatar.value : p2Avatar.value,
+    hp: first ? p1Hp.value : p2Hp.value,
+    maxHp: first ? p1MaxHp.value : p2MaxHp.value,
+    hpPercent: first ? p1HpPercent.value : p2HpPercent.value,
+    ap: first ? player1ActionPoints.value : player2ActionPoints.value,
+    skill: first ? p1Skill.value : p2Skill.value,
+    graveyard: first ? props.player1GraveyardCount : props.player2GraveyardCount,
+    deck: first ? props.player1DeckRemaining : props.player2DeckRemaining,
+    callout: flags.burn ? { icon: '🔥', label: 'Burn!', tone: 'burn' }
+      : flags.shield || flags.defense ? { icon: '♢', label: 'Shield!', tone: 'shield' }
+      : flags.freeze ? { icon: '❄', label: 'Freeze!', tone: 'freeze' }
+      : flags.poison ? { icon: '☠', label: 'Poison!', tone: 'poison' }
+      : flags.stun ? { icon: 'ϟ', label: 'Stun!', tone: 'stun' }
+      : null,
+  };
+}));
+const setPlayerRef = (kind, player, element) => {
+  const refs = {
+    hud: [p1HudRef, p2HudRef], avatar: [p1AvatarRef, p2AvatarRef],
+    field: [p1FieldRef, p2FieldRef], stage: [p1StageRef, p2StageRef],
+  };
+  refs[kind][player === 'p1' ? 0 : 1].value = element;
+};
+const summaryRows = computed(() => {
+  const rows = players.value.flatMap(player => {
+    if (player.callout) return [{
+      icon: player.callout.tone === 'shield' ? '🛡' : player.callout.icon,
+      text: `${player.featured?.name ?? player.name} ${player.callout.tone === 'shield' ? 'gains' : 'is affected by'}`,
+      highlight: player.callout.label,
+      tone: player.callout.tone,
+    }];
+    return player.statuses.slice(0, 1).map(status => ({
+      icon: status.icon,
+      text: `${player.featured?.name ?? player.name} ·`,
+      highlight: status.label,
+      tone: status.tone,
+    }));
+  });
+  if (props.announcement) rows.unshift({
+    icon: props.announcement.icon,
+    text: props.announcement.title,
+    highlight: props.announcement.message,
+    tone: props.announcement.tone,
+  });
+  if (liveActivity.value) rows.unshift({ icon: '●', text: `${liveActivity.value.playerName} · ${liveActivity.value.message}`, highlight: liveActivity.value.card?.name ?? '', tone: 'live' });
+  if (!rows.length) rows.push({ icon: '✦', text: turnText.value, highlight: '', tone: 'turn' });
+  if (rows.length === 1) rows.push({
+    icon: '⚔', text: players.value.map(player => player.featured?.name ?? player.name).join('  vs  '),
+    highlight: '', tone: 'match',
+  });
+  return rows.slice(0, 2);
 });
 </script>
+
 <template>
-  <section class="public-active-field">
-    <!-- ===================================================
-         HEADER
-    ==================================================== -->
-    <header class="battle-header">
-      <!-- PLAYER 1 -->
-      <section
-        ref="p1HudRef"
-        class="player-hud p1"
-        :class="{
-          current:
-            currentTurn ===
-            'p1',
-          'defense-active':
-            p1Defending,
-          'water-active':
-            p1WaterShieldPercent >
-            0,
-          'debuff-active':
-            p1AttackDebuffPercent >
-            0,
-          'power-active':
-            p1PowerStrikeReady,
-        }"
-      >
-        <div
-          ref="p1AvatarRef"
-          class="avatar blue"
-        >
-          <img v-if="isAvatarImage(p1Avatar)" :src="p1Avatar" :alt="p1Name" />
-          <span v-else>{{ p1Avatar || "👦🏻" }}</span>
-        </div>
-        <div class="player-info">
-          <div class="player-name-row">
-            <div>
-              <span>
-                PLAYER 1
-              </span>
-              <strong>
-                {{ p1Name }}
-              </strong>
-            </div>
-            <small>
-              Active
-              {{ player1Active.length }}
-              /
-              {{ maxActive }}
-              • Bench
-              {{ player1BenchCount }}
-              /
-              {{ maxBench }}
-            </small>
-          </div>
-          <div class="health-line">
-            <div class="health-track">
-              <div
-                class="health-fill blue"
-                :style="{
-                  width:
-                    `${p1HpPercent}%`,
-                }"
-/>
-            </div>
-            <strong>
-              HP {{ p1Hp }}
-              /
-              {{ p1MaxHp }}
-            </strong>
-          </div>
-          <div class="skill-heading">
-            <span>
-              ULTIMATE
-            </span>
-            <strong>
-              {{ p1Skill }}%
-            </strong>
-          </div>
-          <div class="skill-track">
-            <div
-              class="skill-fill blue"
-              :style="{
-                width:
-                  `${p1Skill}%`,
-              }"
-/>
-          </div>
-          <div v-if="playerStatusEffects('p1').length" class="public-status-ribbon left">
-            <span
-              v-for="status in playerStatusEffects('p1').slice(0, 4)"
-              :key="`p1-${status.key}`"
-              class="public-status-chip"
-              :class="status.tone"
-              :title="statusTooltip(status)"
-            >
-              <b>{{ status.icon }}</b>
-              <em>{{ status.label }}</em>
-              <small v-if="status.valueText">{{ status.valueText }}</small>
-              <small v-if="status.durationText">{{ status.durationText }}</small>
-            </span>
-            <span
-              v-if="playerStatusEffects('p1').length > 4"
-              class="public-status-more"
-            >
-              +{{ playerStatusEffects('p1').length - 4 }}
-            </span>
-          </div>
-        </div>
-      </section>
-      <!-- CENTER -->
-      <section class="center-brand">
-        <span class="brand-top">
-          CARD BATTLE
-        </span>
-        <strong>
-          NEXUS
-        </strong>
-        <span class="brand-bottom">
-          BATTLE ARENA
-        </span>
-        <div
-          class="turn-chip"
-          :class="currentTurn"
-        >
-          <span>●</span>
-          {{ turnText }}
-        </div>
-        <div class="battle-meta">
-          <span>
-            ROUND
-            {{ battle.round ?? 1 }}
-            /
-            {{
-              battle.total_rounds ??
-              "-"
-            }}
-          </span>
-          <span>
-            MAX ACTIVE
-            {{ maxActive }}
-          </span>
-          <span v-if="actionPointsEnabled" class="public-ap-meta">
-            POIN GILIRAN · P1 {{ player1ActionPoints }} / P2 {{ player2ActionPoints }}
-          </span>
-          <span>
-            {{
-              String(
-                battle.ruleset ??
-                  "classic",
-              ).toUpperCase()
-            }}
-          </span>
-        </div>
-      </section>
-      <!-- PLAYER 2 -->
-      <section
-        ref="p2HudRef"
-        class="player-hud p2"
-        :class="{
-          current:
-            currentTurn ===
-            'p2',
-          'defense-active':
-            p2Defending,
-          'water-active':
-            p2WaterShieldPercent >
-            0,
-          'debuff-active':
-            p2AttackDebuffPercent >
-            0,
-          'power-active':
-            p2PowerStrikeReady,
-        }"
-      >
-        <div class="player-info">
-          <div
-            class="
-              player-name-row
-              right
-            "
-          >
-            <small>
-              Active
-              {{ player2Active.length }}
-              /
-              {{ maxActive }}
-              • Bench
-              {{ player2BenchCount }}
-              /
-              {{ maxBench }}
-            </small>
-            <div>
-              <span>
-                PLAYER 2
-              </span>
-              <strong>
-                {{ p2Name }}
-              </strong>
-            </div>
-          </div>
-          <div class="health-line">
-            <strong>
-              HP {{ p2Hp }}
-              /
-              {{ p2MaxHp }}
-            </strong>
-            <div class="health-track">
-              <div
-                class="health-fill red"
-                :style="{
-                  width:
-                    `${p2HpPercent}%`,
-                }"
-/>
-            </div>
-          </div>
-          <div class="skill-heading">
-            <span>
-              ULTIMATE
-            </span>
-            <strong>
-              {{ p2Skill }}%
-            </strong>
-          </div>
-          <div class="skill-track">
-            <div
-              class="skill-fill red"
-              :style="{
-                width:
-                  `${p2Skill}%`,
-              }"
-/>
-          </div>
-          <div v-if="playerStatusEffects('p2').length" class="public-status-ribbon right">
-            <span
-              v-for="status in playerStatusEffects('p2').slice(0, 4)"
-              :key="`p2-${status.key}`"
-              class="public-status-chip"
-              :class="status.tone"
-              :title="statusTooltip(status)"
-            >
-              <b>{{ status.icon }}</b>
-              <em>{{ status.label }}</em>
-              <small v-if="status.valueText">{{ status.valueText }}</small>
-              <small v-if="status.durationText">{{ status.durationText }}</small>
-            </span>
-            <span
-              v-if="playerStatusEffects('p2').length > 4"
-              class="public-status-more"
-            >
-              +{{ playerStatusEffects('p2').length - 4 }}
-            </span>
-          </div>
-        </div>
-        <div
-          ref="p2AvatarRef"
-          class="avatar red"
-        >
-          <img v-if="isAvatarImage(p2Avatar)" :src="p2Avatar" :alt="p2Name" />
-          <span v-else>{{ p2Avatar || "🧑🏽‍🦱" }}</span>
-        </div>
-      </section>
+  <section ref="stageRootRef" class="tbc-stage" :class="[`tbc-layout-${resolvedLayout}`, { 'tbc-live': liveTurn }]" aria-label="Live battle arena">
+    <div class="tbc-top-ribbon" aria-hidden="true"></div>
+    <div class="tbc-arena-floor" aria-hidden="true"><i></i><i></i></div>
+    <div class="tbc-stage-frame" aria-hidden="true"></div>
+    <header v-if="resolvedLayout !== 'center_duel'" class="tbc-broadcast-header">
+      <TbcEmblem /><span>PUBLIC SPECTATOR <strong>BATTLE VIEW</strong></span>
+      <small><i></i> LIVE</small>
     </header>
-    <!-- ===================================================
-         BATTLEFIELD
-    ==================================================== -->
-    <section class="battlefield">
-      <!-- PLAYER 1 -->
-      <section
-        ref="p1FieldRef"
-        class="field-side p1-field"
-      >
-        <div class="field-background">
-          <div class="giant-symbol">
-            ◉
-          </div>
-        </div>
-        <!-- PERSISTENT BARRIERS -->
-        <div
-          v-if="
-            showDefenseBarrier(
-              'p1',
-            )
-          "
-          class="
-            field-barrier
-            defense-barrier
-          "
-          :class="{
-            breaking:
-              defenseBreaking(
-                'p1',
-              ),
-          }"
-        >
-          <span>🛡</span>
-        </div>
-        <div
-          v-if="
-            showWaterBarrier(
-              'p1',
-            )
-          "
-          class="
-            field-barrier
-            water-barrier
-          "
-          :class="{
-            breaking:
-              waterBreaking(
-                'p1',
-              ),
-          }"
-        >
-          <span>💧</span>
-        </div>
-        <div class="field-top">
-          <header class="field-title">
-            <div>
-              <span>
-                PLAYER 1
-              </span>
-              <strong>
-                ACTIVE DECK
-              </strong>
-            </div>
-            <em>
-              ATTACK ›››
-            </em>
-          </header>
-          <!-- CLEAR STATUS INFO -->
-          <div
-            v-if="
-              p1StatusItems.length
-            "
-            class="
-              status-strip
-              left
-            "
-          >
-            <div
-              v-for="
-                item in
-                  p1StatusItems
-              "
-              :key="
-                item.type
-              "
-              class="battle-status-chip"
-              :class="
-                item.type
-              "
-            >
-              <span class="status-icon">
-                {{ item.icon }}
-              </span>
-              <div>
-                <strong>
-                  {{ item.title }}
-                </strong>
-                <small>
-                  {{ item.detail }}
-                </small>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div ref="p1StageRef" class="formation-stage">
-          <div
-            class="
-              formation-grid
-              p1-formation
-            "
-            :class="
-              formationClass
-            "
-            :style="
-              formationStyle
-            "
-          >
-            <div
-              v-for="(
-                card,
-                index
-              ) in
-                player1Slots"
-              :key="
-                card?.battleId ??
-                card?.battle_id ??
-                card?.id ??
-                `p1-empty-${index}`
-              "
-              :ref="
-                (element) =>
-                  registerCardElement(
-                    'p1',
-                    card,
-                    element,
-                  )
-              "
-              class="formation-slot"
-              :class="[
-                `slot-${index + 1}`,
-                getCombatSlotClasses(
-                  'p1',
-                  card,
-                ),
-                card ? {
-                  'fx-defense-active': cardFxFlags(card).defense,
-                  'fx-shield-active': cardFxFlags(card).shield,
-                  'fx-necro-active': cardFxFlags(card).necro,
-                  'fx-fusion-active': cardFxFlags(card).fusion,
-                  'fx-burn-active': cardFxFlags(card).burn,
-                  'fx-freeze-active': cardFxFlags(card).freeze,
-                  'fx-poison-active': cardFxFlags(card).poison,
-                  'fx-stun-active': cardFxFlags(card).stun,
-                  'fx-curse-active': cardFxFlags(card).curse,
-                } : {},
-              ]"
-            >
-              <BattleCard
-                :card="card"
-                player="p1"
-                facing="right"
-                :empty-label="
-                  `POKÉMON ${
-                    index + 1
-                  }`
-                "
-              />
-              <div v-if="card" class="public-card-fx-stack" aria-hidden="true">
-                <i v-if="cardFxFlags(card).fusion" class="public-card-fx-layer fx-fusion-layer"></i>
-                <i v-if="cardFxFlags(card).necro" class="public-card-fx-layer fx-necro-layer"></i>
-              </div>
-              <CardStatusVfx
-                v-if="card"
-                :shield="cardFxFlags(card).shield"
-                :defense="cardFxFlags(card).defense"
-                :burn="cardFxFlags(card).burn"
-                :freeze="cardFxFlags(card).freeze"
-                :stun="cardFxFlags(card).stun"
-                :poison="cardFxFlags(card).poison"
-                :curse="cardFxFlags(card).curse"
-              />
-              <div
-                v-if="card && visibleCardStatuses(card).length"
-                class="public-card-statuses p1"
-              >
-                <span
-                  v-for="status in visibleCardStatuses(card).slice(0, 3)"
-                  :key="`p1-${getCardId(card)}-${status.key}`"
-                  class="public-card-status-chip"
-                  :class="status.tone"
-                  :title="statusTooltip(status)"
-                >
-                  <b>{{ status.icon }}</b>
-                  <em>{{ status.label }}</em>
-                  <small v-if="status.valueText">{{ status.valueText }}</small>
-                  <small v-if="status.durationText">{{ status.durationText }}</small>
-                </span>
-                <span
-                  v-if="visibleCardStatuses(card).length > 3"
-                  class="public-card-status-chip more"
-                >
-                  +{{ visibleCardStatuses(card).length - 3 }}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="attack-lane p1">
-          <div class="lane-line" />
-          <span>›</span>
-          <span>›</span>
-          <span>›</span>
-        </div>
-      </section>
-      <!-- PLAYER 2 -->
-      <section
-        ref="p2FieldRef"
-        class="field-side p2-field"
-      >
-        <div class="field-background">
-          <div class="giant-symbol">
-            ◉
-          </div>
-        </div>
-        <div
-          v-if="
-            showDefenseBarrier(
-              'p2',
-            )
-          "
-          class="
-            field-barrier
-            defense-barrier
-          "
-          :class="{
-            breaking:
-              defenseBreaking(
-                'p2',
-              ),
-          }"
-        >
-          <span>🛡</span>
-        </div>
-        <div
-          v-if="
-            showWaterBarrier(
-              'p2',
-            )
-          "
-          class="
-            field-barrier
-            water-barrier
-          "
-          :class="{
-            breaking:
-              waterBreaking(
-                'p2',
-              ),
-          }"
-        >
-          <span>💧</span>
-        </div>
-        <div class="field-top">
-          <header
-            class="
-              field-title
-              right
-            "
-          >
-            <em>
-              ‹‹‹ ATTACK
-            </em>
-            <div>
-              <span>
-                PLAYER 2
-              </span>
-              <strong>
-                ACTIVE DECK
-              </strong>
-            </div>
-          </header>
-          <div
-            v-if="
-              p2StatusItems.length
-            "
-            class="
-              status-strip
-              right
-            "
-          >
-            <div
-              v-for="
-                item in
-                  p2StatusItems
-              "
-              :key="
-                item.type
-              "
-              class="battle-status-chip"
-              :class="
-                item.type
-              "
-            >
-              <span class="status-icon">
-                {{ item.icon }}
-              </span>
-              <div>
-                <strong>
-                  {{ item.title }}
-                </strong>
-                <small>
-                  {{ item.detail }}
-                </small>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div ref="p2StageRef" class="formation-stage">
-          <div
-            class="
-              formation-grid
-              p2-formation
-            "
-            :class="
-              formationClass
-            "
-            :style="
-              formationStyle
-            "
-          >
-            <div
-              v-for="(
-                card,
-                index
-              ) in
-                player2Slots"
-              :key="
-                card?.battleId ??
-                card?.battle_id ??
-                card?.id ??
-                `p2-empty-${index}`
-              "
-              :ref="
-                (element) =>
-                  registerCardElement(
-                    'p2',
-                    card,
-                    element,
-                  )
-              "
-              class="formation-slot"
-              :class="[
-                `slot-${index + 1}`,
-                getCombatSlotClasses(
-                  'p2',
-                  card,
-                ),
-                card ? {
-                  'fx-defense-active': cardFxFlags(card).defense,
-                  'fx-shield-active': cardFxFlags(card).shield,
-                  'fx-necro-active': cardFxFlags(card).necro,
-                  'fx-fusion-active': cardFxFlags(card).fusion,
-                  'fx-burn-active': cardFxFlags(card).burn,
-                  'fx-freeze-active': cardFxFlags(card).freeze,
-                  'fx-poison-active': cardFxFlags(card).poison,
-                  'fx-stun-active': cardFxFlags(card).stun,
-                  'fx-curse-active': cardFxFlags(card).curse,
-                } : {},
-              ]"
-            >
-              <BattleCard
-                :card="card"
-                player="p2"
-                facing="left"
-                :empty-label="
-                  `POKÉMON ${
-                    index + 1
-                  }`
-                "
-              />
-              <div v-if="card" class="public-card-fx-stack" aria-hidden="true">
-                <i v-if="cardFxFlags(card).fusion" class="public-card-fx-layer fx-fusion-layer"></i>
-                <i v-if="cardFxFlags(card).necro" class="public-card-fx-layer fx-necro-layer"></i>
-              </div>
-              <CardStatusVfx
-                v-if="card"
-                :shield="cardFxFlags(card).shield"
-                :defense="cardFxFlags(card).defense"
-                :burn="cardFxFlags(card).burn"
-                :freeze="cardFxFlags(card).freeze"
-                :stun="cardFxFlags(card).stun"
-                :poison="cardFxFlags(card).poison"
-                :curse="cardFxFlags(card).curse"
-              />
-              <div
-                v-if="card && visibleCardStatuses(card).length"
-                class="public-card-statuses p2"
-              >
-                <span
-                  v-for="status in visibleCardStatuses(card).slice(0, 3)"
-                  :key="`p2-${getCardId(card)}-${status.key}`"
-                  class="public-card-status-chip"
-                  :class="status.tone"
-                  :title="statusTooltip(status)"
-                >
-                  <b>{{ status.icon }}</b>
-                  <em>{{ status.label }}</em>
-                  <small v-if="status.valueText">{{ status.valueText }}</small>
-                  <small v-if="status.durationText">{{ status.durationText }}</small>
-                </span>
-                <span
-                  v-if="visibleCardStatuses(card).length > 3"
-                  class="public-card-status-chip more"
-                >
-                  +{{ visibleCardStatuses(card).length - 3 }}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="attack-lane p2">
-          <span>‹</span>
-          <span>‹</span>
-          <span>‹</span>
-          <div class="lane-line" />
-        </div>
-      </section>
-      <div class="center-line" />
-      <div class="center-orb">
-        <span class="blue-half" />
-        <span class="red-half" />
-        <i />
-      </div>
+    <div v-if="resolvedLayout === 'stadium'" class="tbc-scoreboard-rig" aria-hidden="true"></div>
+    <div v-if="resolvedLayout === 'stadium'" class="tbc-stadium-pennants" aria-hidden="true">
+      <div v-for="side in ['left', 'right']" :key="side" :class="side"><TbcEmblem /><strong>TBC</strong><span>TIMEDOOR<br>ACADEMY</span></div>
+    </div>
+
+    <section class="tbc-brand" aria-label="Timedoor Battle Cards">
+      <div class="tbc-brand-plaque"><TbcEmblem class="tbc-compass" /><strong>TBC</strong><span>TIMEDOOR BATTLE CARDS</span></div>
+      <div class="tbc-round">Round {{ battle.round ?? 1 }}</div>
+      <span class="tbc-turn" :class="liveTurn" aria-live="polite">{{ turnText }}</span>
     </section>
+
+    <template v-for="player in players" :key="player.id">
+      <section :ref="el => setPlayerRef('hud', player.id, el)" class="tbc-hud" :class="[player.id, { 'is-turn': player.isTurn }]" :aria-label="`${player.name}, HP ${player.hp} / ${player.maxHp}${player.isTurn ? ', giliran aktif' : ''}`">
+        <div class="tbc-hud-shape" aria-hidden="true"></div>
+        <svg class="tbc-hud-trim" viewBox="0 0 500 230" preserveAspectRatio="none" aria-hidden="true">
+          <path d="M13 17 354 48 367 62 391 63 410 82M17 27 335 54 351 72 347 91 363 106 353 127 367 141 350 163 358 179 341 216M47 22 59 40 41 52 56 64M195 44 207 60 190 78 202 91 187 112M396 83 456 132 449 144 475 174 469 206 353 209" />
+          <path d="m21 18 11 2-6 8-8-2ZM391 62l9 2 8 12-9-1Z" />
+        </svg>
+        <div :ref="el => setPlayerRef('avatar', player.id, el)" class="tbc-portrait">
+          <img v-if="isAvatarImage(player.avatar) && failedAvatarImages[player.id] !== player.avatar" class="tbc-custom-portrait" :src="player.avatar" :alt="player.name" @error="failedAvatarImages[player.id] = player.avatar" />
+          <div v-else class="tbc-trainer-sprite" :class="player.id" aria-hidden="true"></div>
+          <span v-if="player.avatar && !isAvatarImage(player.avatar)" class="tbc-avatar-badge" :title="player.name">{{ player.avatar }}</span>
+        </div>
+        <div class="tbc-hud-info">
+          <h2>{{ player.name }}</h2>
+          <div class="tbc-hp-label"><span>HP</span><strong>{{ player.hp }}<small>/{{ player.maxHp }}</small></strong></div>
+          <div class="tbc-hp-track" role="meter" :aria-label="`${player.name} HP`" :aria-valuenow="player.hp" :aria-valuemin="0" :aria-valuemax="player.maxHp"><i :style="{ width: `${player.hpPercent}%` }"></i></div>
+          <div v-if="actionPointsEnabled" class="tbc-ap" :aria-label="`AP ${player.ap} / ${actionPointsPerTurn}`"><b>AP</b><span class="tbc-ap-orbs"><i v-for="point in actionPointsPerTurn" :key="point" :class="{ filled: point <= player.ap }"></i></span><strong>{{ player.ap }}/{{ actionPointsPerTurn }}</strong></div>
+          <div v-else class="tbc-ultimate"><b>ULT</b><span><i :style="{ width: `${player.skill}%` }"></i></span><strong>{{ player.skill }}%</strong></div>
+        </div>
+        <span v-if="player.isTurn" class="tbc-active-turn"><i></i> CURRENT TURN</span>
+      </section>
+
+      <aside class="tbc-roster" :class="[player.id, { 'is-live-roster': liveActivity?.side === player.id, 'empty-bench': !player.bench.length, 'empty-active': !player.cards.length }]" :aria-label="`${player.name} cards`">
+        <div class="tbc-roster-heading"><strong>{{ player.name }}</strong><span>FIELD</span></div>
+        <div class="tbc-roster-zones">
+          <PublicRosterZone :cards="player.cards" zone="active" :player="player.id" :capacity="Number(battle.max_active ?? 4)" :featured-id="getCardId(player.featured)" :inspected-id="liveActivity?.cardSide === player.id && liveActivity?.kind !== 'viewer' ? battleCardId(liveActivity.card) : null" :live="liveActivity?.cardSide === player.id && liveActivity?.kind !== 'viewer'" />
+          <PublicRosterZone :cards="player.bench" zone="bench" :player="player.id" :capacity="Number(battle.max_bench ?? 4)" :inspected-id="liveActivity?.side === player.id && liveActivity?.zone === 'bench' ? battleCardId(liveActivity.card) : null" :live="liveActivity?.side === player.id && liveActivity?.zone === 'bench'" />
+        </div>
+        <div class="tbc-roster-counts"><span>DECK <b>{{ player.deck }}</b></span><span :class="{ 'live-graveyard': liveActivity?.side === player.id && liveActivity?.zone === 'graveyard' }">GRAVEYARD <b>{{ player.graveyard }}</b></span></div>
+      </aside>
+
+      <section :ref="el => setPlayerRef('field', player.id, el)" class="tbc-hero" :class="[player.id, { 'tbc-burning': player.flags.burn, 'tbc-protected': player.flags.shield || player.flags.defense }]" :aria-label="`${player.name} active card`">
+        <div :ref="el => setPlayerRef('stage', player.id, el)" class="tbc-hero-stage">
+          <div class="tbc-card-aura" aria-hidden="true"></div>
+          <i v-if="player.featured" class="tbc-energy-ring ring-back" aria-hidden="true"></i>
+          <div :key="getCardId(player.featured) ?? 'empty'" :data-card-id="getCardId(player.featured)" :data-player="player.id" data-featured="true" class="tbc-featured-card" :class="getCombatSlotClasses(player.id, player.featured)">
+            <PublicDisplayCard :card="player.featured" :statuses="player.statuses" />
+            <CardStatusVfx v-if="player.featured"
+              :shield="player.flags.shield" :defense="player.flags.defense"
+              :burn="player.flags.burn" :freeze="player.flags.freeze"
+              :stun="player.flags.stun" :poison="player.flags.poison" :curse="player.flags.curse" />
+          </div>
+          <i v-if="player.featured" class="tbc-energy-ring ring-front" aria-hidden="true"></i>
+          <svg v-if="player.flags.shield || player.flags.burn || player.flags.defense" class="tbc-status-swirl" viewBox="0 0 400 500" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M56 172C-35 98 255 60 348 142C413 198 102 238 32 292C-28 338 165 437 354 335" />
+            <path d="M66 194C-8 130 241 105 336 159M43 306C93 353 260 382 338 339M20 365C102 431 299 408 366 367" />
+            <path d="m31 232 4 11 12 2-11 5-2 12-5-11-12-2 11-5Zm327-117 4 10 11 3-10 4-3 11-4-10-11-3 10-4ZM70 402l3 8 9 2-8 4-2 8-4-8-8-2 8-3Z" />
+          </svg>
+          <div v-if="player.callout" class="tbc-status-callout" :class="player.callout.tone">
+            <svg v-if="player.callout.tone === 'shield'" class="tbc-status-emblem" viewBox="0 0 80 100" aria-hidden="true"><path d="M40 5C30 17 15 20 7 20V48C7 70 23 87 40 96C57 87 73 70 73 48V20C57 20 47 13 40 5Z" fill="#27bdff" stroke="#e4ffff" stroke-width="5"/><path d="M40 24C31 31 24 33 21 33V48C21 61 28 73 40 82V24Z" fill="#e4ffff"/></svg>
+            <svg v-else-if="player.callout.tone === 'burn'" class="tbc-status-emblem" viewBox="0 0 80 100" aria-hidden="true"><path d="M47 4C53 30 20 31 26 52C30 48 35 42 37 35C40 51 66 52 67 72C68 91 49 97 37 96C9 93 1 70 20 46C18 57 21 62 25 64C15 38 39 30 47 4Z" fill="#e82810" stroke="#fff9ce" stroke-width="4"/><path d="M42 48C46 65 28 66 30 78C32 91 53 92 56 78C60 64 46 65 42 48Z" fill="#ffe74d"/></svg>
+            <span v-else>{{ player.callout.icon }}</span><strong>{{ player.callout.label }}</strong>
+          </div>
+        </div>
+      </section>
+    </template>
+
+    <PublicLiveViewer v-if="liveActivity?.kind === 'viewer'" :activity="liveActivity" />
+
+    <section class="tbc-battle-log" aria-label="Battle events" aria-live="polite">
+      <Transition name="tbc-toast" mode="out-in">
+        <div v-if="actionToast" :key="actionToast.key" class="tbc-action-toast" :class="actionToast.player" role="status">
+          <span class="tbc-toast-icon" aria-hidden="true">{{ actionToast.icon }}</span>
+          <div class="tbc-toast-copy"><small>{{ actionToast.playerName }} <span>· {{ actionToast.title }}</span></small><strong>{{ actionToast.message }}</strong></div>
+          <i class="tbc-toast-progress" :style="{ animationDuration: `${actionToast.duration}ms` }" aria-hidden="true"></i>
+        </div>
+      </Transition>
+      <h3 v-if="resolvedLayout === 'side_panel' || resolvedLayout === 'stadium'">BATTLE LOG <span>ROUND {{ battle.round ?? 1 }}</span></h3>
+      <div v-for="(row, index) in summaryRows" :key="index" class="tbc-log-row" :class="row.tone"><span class="tbc-log-icon">{{ row.icon }}</span><span>{{ row.text }} <strong>{{ row.highlight }}</strong></span></div>
+    </section>
+    <div class="tbc-corner-brand" aria-hidden="true"><TbcEmblem class="tbc-corner-compass" /><strong>TBC</strong><small>TIMEDOOR BATTLE CARDS</small></div>
   </section>
 </template>
+
 <style scoped>
-* {
-  box-sizing: border-box;
-}
-.public-active-field {
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-  display: grid;
-  grid-template-rows:
-    126px
-    minmax(0, 1fr);
-  overflow: hidden;
-  border:
-    1px solid
-    rgba(75, 129, 160, 0.16);
-  border-radius: 18px;
-  background: #ffffff;
-  box-shadow:
-    0 18px 46px
-    rgba(55, 94, 119, 0.14);
-  font-family:
-    Inter,
-    ui-sans-serif,
-    system-ui,
-    sans-serif;
-}
-/* =========================================================
-   HEADER
-========================================================= */
-.battle-header {
-  min-width: 0;
-  display: grid;
-  grid-template-columns:
-    minmax(0, 1fr)
-    235px
-    minmax(0, 1fr);
-  overflow: hidden;
-  background:
-    linear-gradient(
-      180deg,
-      #ffffff,
-      #eef8fc
-    );
-  box-shadow:
-    0 7px 22px
-    rgba(53, 94, 119, 0.08);
-  z-index: 20;
-}
-.player-hud {
-  min-width: 0;
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding:
-    12px
-    18px;
-  background:
-    rgba(255, 255, 255, 0.7);
-  transition:
-    box-shadow 0.2s ease;
-}
-.player-hud.p1 {
-  border-bottom:
-    3px solid
-    #28b3ec;
-  background:
-    linear-gradient(
-      90deg,
-      rgba(36, 172, 235, 0.12),
-      rgba(255, 255, 255, 0.72)
-    );
-}
-.player-hud.p2 {
-  border-bottom:
-    3px solid
-    #ed567c;
-  background:
-    linear-gradient(
-      270deg,
-      rgba(237, 86, 124, 0.11),
-      rgba(255, 255, 255, 0.72)
-    );
-}
-.player-hud.power-active {
-  box-shadow:
-    inset 0 0 26px
-    rgba(245, 181, 42, 0.14);
-}
-.player-hud.defense-active {
-  box-shadow:
-    inset 0 0 26px
-    rgba(60, 139, 218, 0.14);
-}
-.player-hud.water-active {
-  box-shadow:
-    inset 0 0 28px
-    rgba(27, 188, 221, 0.16);
-}
-.player-hud.debuff-active {
-  filter:
-    saturate(0.9);
-}
-/* =========================================================
-   AVATAR
-========================================================= */
-.avatar {
-  width: 62px;
-  height: 62px;
-  flex:
-    0 0 62px;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  border:
-    4px solid;
-  border-radius: 50%;
-  background:
-    linear-gradient(
-      145deg,
-      #ffffff,
-      #e9f5fa
-    );
-  box-shadow:
-    0 8px 21px
-    rgba(50, 91, 116, 0.13);
-  font-size: 28px;
-}
-.avatar.blue {
-  border-color: #25ace8;
-}
-.avatar.red {
-  border-color: #ed4e72;
-}
-.avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-/* =========================================================
-   INFO
-========================================================= */
-.player-info {
-  min-width: 0;
-  flex: 1;
-}
-.player-name-row {
-  display: flex;
-  align-items:
-    flex-start;
-  justify-content:
-    space-between;
-  gap: 9px;
-  margin-bottom: 7px;
-}
-.player-name-row.right {
-  text-align: right;
-}
-.player-name-row span {
-  display: block;
-  color: #278ebf;
-  font-size: 6px;
-  font-weight: 950;
-  letter-spacing: 0.1em;
-}
-.player-hud.p2
-.player-name-row span {
-  color: #d54d6b;
-}
-.player-name-row strong {
-  display: block;
-  margin-top: 2px;
-  color: #17324a;
-  font-size: 17px;
-  font-weight: 950;
-}
-.player-name-row small {
-  color: #6e899c;
-  font-size: 6.5px;
-  font-weight: 850;
-}
-/* =========================================================
-   HEALTH
-========================================================= */
-.health-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.health-line strong {
-  flex-shrink: 0;
-  color: #264861;
-  font-size: 8px;
-  font-weight: 950;
-}
-.health-track {
-  height: 12px;
-  flex: 1;
-  overflow: hidden;
-  border:
-    1px solid
-    rgba(68, 118, 148, 0.15);
-  border-radius: 999px;
-  background: #dfeaf0;
-}
-.health-fill {
-  height: 100%;
-  border-radius: inherit;
-}
-.health-fill.blue {
-  background:
-    linear-gradient(
-      90deg,
-      #18a8ef,
-      #40d5e3
-    );
-}
-.health-fill.red {
-  margin-left: auto;
-  background:
-    linear-gradient(
-      90deg,
-      #ff718b,
-      #ef476f
-    );
-}
-/* =========================================================
-   SKILL
-========================================================= */
-.skill-heading {
-  display: flex;
-  justify-content:
-    space-between;
-  margin-top: 5px;
-  color: #70899b;
-  font-size: 5.5px;
-  font-weight: 900;
-}
-.skill-track {
-  height: 5px;
-  margin-top: 3px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #dce8ef;
-}
-.skill-fill {
-  height: 100%;
-}
-.skill-fill.blue {
-  background:
-    linear-gradient(
-      90deg,
-      #715eff,
-      #2eb7ff
-    );
-}
-.skill-fill.red {
-  margin-left: auto;
-  background:
-    linear-gradient(
-      90deg,
-      #ff8d5c,
-      #ff4e77
-    );
-}
-/* =========================================================
-   CENTER
-========================================================= */
-.center-brand {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-}
-.brand-top {
-  color: #c3941d;
-  font-size: 6px;
-  font-weight: 1000;
-  letter-spacing: 0.28em;
-}
-.center-brand > strong {
-  color: #28516c;
-  font-size: 29px;
-  font-weight: 1000;
-  letter-spacing: 0.16em;
-}
-.brand-bottom {
-  color: #63869c;
-  font-size: 6px;
-  font-weight: 950;
-  letter-spacing: 0.25em;
-}
-.turn-chip {
-  min-width: 155px;
-  margin-top: 7px;
-  padding:
-    5px
-    10px;
-  border:
-    1px solid
-    rgba(45, 149, 203, 0.28);
-  border-radius: 999px;
-  color: #20739f;
-  background: #e8f7fd;
-  font-size: 7px;
-  font-weight: 950;
-}
-.battle-meta {
-  display: flex;
-  gap: 4px;
-  margin-top: 4px;
-}
-.battle-meta span {
-  padding:
-    2px
-    4px;
-  border-radius: 4px;
-  color: #71899b;
-  background: #eef5f8;
-  font-size: 4.6px;
-  font-weight: 900;
-}
-.battle-meta .public-ap-meta {
-  padding-inline: 7px;
-  color: #187a32;
-  background: #e9f7e9;
-  font-size: 5.8px;
-}
-/* =========================================================
-   FIELD
-========================================================= */
-.battlefield {
-  position: relative;
-  display: grid;
-  grid-template-columns:
-    1fr
-    1fr;
-  min-height: 0;
-  overflow: hidden;
-}
-.field-side {
-  position: relative;
-  min-width: 0;
-  min-height: 0;
-  display: grid;
-  grid-template-rows:
-    auto
-    minmax(0, 1fr)
-    42px;
-  padding:
-    18px
-    12px
-    14px;
-  overflow: hidden;
-}
-.p1-field {
-  background:
-    linear-gradient(
-      145deg,
-      #d8f3ff,
-      #bde9fb
-    );
-}
-.p2-field {
-  background:
-    linear-gradient(
-      215deg,
-      #ffe4eb,
-      #ffcfdc
-    );
-}
-.field-background {
-  position: absolute;
-  inset: 0;
-}
-.giant-symbol {
-  position: absolute;
-  left: 50%;
-  top: 55%;
-  transform:
-    translate(
-      -50%,
-      -50%
-    );
-  color:
-    rgba(35, 113, 151, 0.08);
-  font-size:
-    min(31vw, 390px);
-}
-.p2-field
-.giant-symbol {
-  color:
-    rgba(184, 57, 86, 0.07);
-}
-/* =========================================================
-   FIELD TOP
-========================================================= */
-.field-top {
-  position: relative;
-  z-index: 8;
-}
-.field-title {
-  display: flex;
-  align-items: center;
-  justify-content:
-    space-between;
-}
-.field-title.right {
-  text-align: right;
-}
-.field-title span {
-  display: block;
-  color: #6d8c9e;
-  font-size: 5.5px;
-  font-weight: 900;
-}
-.field-title strong {
-  color: #247aa4;
-  font-size: 10px;
-  font-weight: 1000;
-}
-.p2-field
-.field-title strong {
-  color: #bd4b67;
-}
-.field-title em {
-  color:
-    rgba(36, 122, 164, 0.58);
-  font-size: 7px;
-  font-style: normal;
-  font-weight: 950;
-}
-/* =========================================================
-   STATUS STRIP
-========================================================= */
-.status-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 7px;
-}
-.status-strip.right {
-  justify-content: flex-end;
-}
-.battle-status-chip {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  max-width: 220px;
-  padding:
-    5px
-    7px;
-  border-radius: 8px;
-  background:
-    rgba(255, 255, 255, 0.88);
-  box-shadow:
-    0 5px 13px
-    rgba(50, 84, 104, 0.08);
-}
-.status-icon {
-  font-size: 13px;
-}
-.battle-status-chip div {
-  display: flex;
-  flex-direction: column;
-}
-.battle-status-chip strong {
-  font-size: 5.7px;
-  font-weight: 1000;
-}
-.battle-status-chip small {
-  margin-top: 1px;
-  font-size: 5px;
-  font-weight: 850;
-}
-.battle-status-chip.power {
-  color: #976600;
-  border:
-    1px solid
-    rgba(239, 179, 33, 0.4);
-  background: #fff8df;
-}
-.battle-status-chip.defense {
-  color: #266fa6;
-  border:
-    1px solid
-    rgba(55, 145, 216, 0.35);
-  background: #eaf6ff;
-}
-.battle-status-chip.water {
-  color: #087c9e;
-  border:
-    1px solid
-    rgba(20, 184, 220, 0.35);
-  background: #e8fbff;
-}
-.battle-status-chip.debuff {
-  color: #4f70a6;
-  border:
-    1px solid
-    rgba(117, 154, 218, 0.38);
-  background: #eff5ff;
-}
-/* =========================================================
-   BARRIERS
-========================================================= */
-.field-barrier {
-  position: absolute;
-  left: 8%;
-  right: 8%;
-  top: 19%;
-  bottom: 13%;
-  z-index: 3;
-  display: grid;
-  place-items: center;
-  border-radius: 44%;
-  pointer-events: none;
-}
-.field-barrier span {
-  font-size:
-    clamp(
-      70px,
-      9vw,
-      140px
-    );
-  opacity: 0.12;
-}
-.defense-barrier {
-  border:
-    4px solid
-    rgba(64, 145, 220, 0.2);
-  box-shadow:
-    inset 0 0 45px
-    rgba(65, 151, 225, 0.09),
-    0 0 34px
-    rgba(65, 151, 225, 0.1);
-}
-.water-barrier {
-  border:
-    4px solid
-    rgba(21, 190, 220, 0.24);
-  box-shadow:
-    inset 0 0 55px
-    rgba(21, 190, 220, 0.12),
-    0 0 42px
-    rgba(21, 190, 220, 0.13);
-}
-.field-barrier.breaking {
-  animation:
-    barrierBreak
-    0.48s ease-out;
-}
-@keyframes barrierBreak {
-  0% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  30% {
-    opacity: 1;
-    transform:
-      scale(1.05);
-    filter:
-      brightness(1.65);
-  }
-  100% {
-    opacity: 0;
-    transform:
-      scale(1.17);
-  }
-}
-/* =========================================================
-   FORMATION
-========================================================= */
-.formation-stage {
-  position: relative;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  min-height: 0;
-}
-.formation-grid {
-  width: fit-content;
-  max-width: 100%;
-  display: grid;
-  align-items: center;
-  justify-items: center;
-  row-gap:
-    clamp(
-      12px,
-      1.6vh,
-      18px
-    );
-  column-gap:
-    clamp(
-      10px,
-      0.8vw,
-      14px
-    );
-}
-.p1-formation {
-  margin-left: auto;
-  margin-right:
-    clamp(
-      6px,
-      0.8vw,
-      12px
-    );
-}
-.p2-formation {
-  margin-left:
-    clamp(
-      6px,
-      0.8vw,
-      12px
-    );
-  margin-right: auto;
-}
-.formation-slot {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition:
-    transform 0.22s ease,
-    filter 0.22s ease;
-}
-/* =========================================================
-   FORMATIONS
-========================================================= */
-.formation-1 {
-  grid-template-columns: 1fr;
-}
-.formation-2 {
-  grid-template-columns: 1fr;
-}
-.formation-3,
-.formation-4 {
-  grid-template-columns:
-    repeat(2, 1fr);
-}
-.formation-3
-.slot-3 {
-  grid-column:
-    1 / 3;
-}
-.formation-5 {
-  grid-template-columns:
-    repeat(6, 1fr);
-}
-.formation-5
-.slot-1 {
-  grid-column: 1 / 3;
-}
-.formation-5
-.slot-2 {
-  grid-column: 3 / 5;
-}
-.formation-5
-.slot-3 {
-  grid-column: 5 / 7;
-}
-.formation-5
-.slot-4 {
-  grid-column: 2 / 4;
-}
-.formation-5
-.slot-5 {
-  grid-column: 4 / 6;
-}
-.formation-6 {
-  grid-template-columns:
-    repeat(3, 1fr);
-}
-.formation-7 {
-  grid-template-columns:
-    repeat(8, 1fr);
-}
-.formation-7
-.slot-1 {
-  grid-column: 1 / 3;
-}
-.formation-7
-.slot-2 {
-  grid-column: 3 / 5;
-}
-.formation-7
-.slot-3 {
-  grid-column: 5 / 7;
-}
-.formation-7
-.slot-4 {
-  grid-column: 7 / 9;
-}
-.formation-7
-.slot-5 {
-  grid-column: 2 / 4;
-}
-.formation-7
-.slot-6 {
-  grid-column: 4 / 6;
-}
-.formation-7
-.slot-7 {
-  grid-column: 6 / 8;
-}
-.formation-8 {
-  grid-template-columns:
-    repeat(4, 1fr);
-}
-/* =========================================================
-   CARD SIZES
-========================================================= */
-/*
-  1 ACTIVE CARD
-*/
-.formation-1
-:deep(.battle-card) {
-  width:
-    clamp(
-      230px,
-      16vw,
-      270px
-    );
-  height:
-    clamp(
-      410px,
-      46vh,
-      470px
-    );
-}
-/*
-  2 ACTIVE CARDS
-*/
-.formation-2
-:deep(.battle-card) {
-  width:
-    clamp(
-      195px,
-      13.5vw,
-      225px
-    );
-  height:
-    clamp(
-      350px,
-      40vh,
-      405px
-    );
-}
-/*
-  3 - 4 ACTIVE CARDS
-*/
-.formation-3
-:deep(.battle-card),
-.formation-4
-:deep(.battle-card) {
-  width:
-    clamp(
-      165px,
-      11.3vw,
-      190px
-    );
-  height:
-    clamp(
-      300px,
-      35vh,
-      345px
-    );
-}
-/*
-  5 - 6 ACTIVE CARDS
-  Ini kondisi pada screenshot MAX ACTIVE = 6.
-  Ukurannya sekarang lebih besar dari versi lama.
-*/
-.formation-5
-:deep(.battle-card),
-.formation-6
-:deep(.battle-card) {
-  width:
-    clamp(
-      145px,
-      10.4vw,
-      168px
-    );
-  height:
-    clamp(
-      275px,
-      32vh,
-      315px
-    );
-}
-/*
-  7 - 8 ACTIVE CARDS
-*/
-.formation-7
-:deep(.battle-card),
-.formation-8
-:deep(.battle-card) {
-  width:
-    clamp(
-      108px,
-      7.2vw,
-      126px
-    );
-  height:
-    clamp(
-      215px,
-      25vh,
-      245px
-    );
-}
-/* =========================================================
-   POWER STRIKE ATTACKER
-========================================================= */
-.combat-power-strike
-:deep(.battle-card) {
-  animation:
-    powerStrikeAura
-    0.75s ease-in-out
-    infinite alternate;
-  filter:
-    drop-shadow(
-      0 0 11px
-      #ffc83b
-    )
-    drop-shadow(
-      0 0 25px
-      rgba(255, 172, 27, 0.75)
-    );
-}
-@keyframes powerStrikeAura {
-  from {
-    transform:
-      scale(1.02);
-  }
-  to {
-    transform:
-      scale(1.07);
-  }
-}
-/* =========================================================
-   DEBUFF ATTACKER
-========================================================= */
-.combat-attack-debuff
-:deep(.battle-card) {
-  box-shadow:
-    0 0 0 4px
-    rgba(124, 178, 255, 0.28);
-  filter:
-    saturate(0.72)
-    hue-rotate(8deg)
-    drop-shadow(
-      0 0 14px
-      rgba(106, 174, 255, 0.8)
-    );
-}
-.combat-attack-debuff::before {
-  content: "❄ ATK DOWN";
-  position: absolute;
-  left: 50%;
-  top: -17px;
-  z-index: 20;
-  transform:
-    translateX(-50%);
-  padding:
-    4px
-    7px;
-  border-radius: 999px;
-  color: #3f659d;
-  background: #eff6ff;
-  font-size: 6px;
-  font-weight: 1000;
-  white-space: nowrap;
-}
-/* =========================================================
-   TARGET MODIFIERS
-========================================================= */
-.combat-defense-target::after {
-  content: "🛡 DEFENSE -50%";
-  position: absolute;
-  left: 50%;
-  top: -20px;
-  z-index: 20;
-  transform:
-    translateX(-50%);
-  padding:
-    4px
-    7px;
-  border-radius: 999px;
-  color: #236b9e;
-  background: #e9f6ff;
-  font-size: 6px;
-  font-weight: 1000;
-  white-space: nowrap;
-}
-.combat-water-target::before {
-  content: "💧 WATER SHIELD";
-  position: absolute;
-  left: 50%;
-  bottom: -19px;
-  z-index: 20;
-  transform:
-    translateX(-50%);
-  padding:
-    4px
-    7px;
-  border-radius: 999px;
-  color: #087b9d;
-  background: #e7fbff;
-  font-size: 6px;
-  font-weight: 1000;
-  white-space: nowrap;
-}
-.combat-impact {
-  animation:
-    targetHit
-    0.42s ease;
-}
-@keyframes targetHit {
-  20% {
-    transform:
-      translateX(-12px);
-    filter:
-      brightness(1.6);
-  }
-  45% {
-    transform:
-      translateX(9px);
-  }
-  70% {
-    transform:
-      translateX(-5px);
-  }
-}
-.combat-destroyed {
-  animation:
-    destroyedCard
-    0.55s ease
-    forwards;
-}
-@keyframes destroyedCard {
-  to {
-    opacity: 0.15;
-    filter:
-      grayscale(1);
-    transform:
-      scale(0.83)
-      translateY(18px);
-  }
-}
-/* =========================================================
-   ATTACK LANE
-========================================================= */
-.attack-lane {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  opacity: 0.5;
-}
-.attack-lane.p1 {
-  justify-content:
-    flex-end;
-}
-.attack-lane.p2 {
-  justify-content:
-    flex-start;
-}
-.lane-line {
-  width: 38%;
-  height: 2px;
-  background:
-    currentColor;
-}
-.attack-lane span {
-  font-size: 20px;
-  font-weight: 1000;
-}
-/* =========================================================
-   CENTER LINE
-========================================================= */
-.center-line {
-  width: 5px;
-  position: absolute;
-  left: 50%;
-  top: 0;
-  bottom: 0;
-  z-index: 10;
-  transform:
-    translateX(-50%);
-  background:
-    linear-gradient(
-      #31b6e9,
-      #ffffff,
-      #e85474
-    );
-}
-.center-orb {
-  width: 74px;
-  height: 74px;
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: 12;
-  transform:
-    translate(
-      -50%,
-      -50%
-    );
-  overflow: hidden;
-  border:
-    4px solid #ffffff;
-  border-radius: 50%;
-}
-.blue-half,
-.red-half {
-  width: 50%;
-  height: 100%;
-  position: absolute;
-}
-.blue-half {
-  left: 0;
-  background: #238fc7;
-}
-.red-half {
-  right: 0;
-  background: #c82d4e;
-}
-.center-orb i {
-  width: 17px;
-  height: 17px;
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: 4;
-  transform:
-    translate(
-      -50%,
-      -50%
-    )
-    rotate(45deg);
-  background: #ffffff;
-}
-/* =========================================================
-   BATTLE CARD CONTENT SAFETY
-   PublicActiveField memberi ruang lebih besar ke BattleCard.
-   Override di bawah memastikan angka 3 digit seperti 220 / 312
-   tidak berubah menjadi 2... dan judul panjang bisa 2 baris.
-========================================================= */
-.formation-slot
-:deep(.battle-card) {
-  min-width: 0;
-  min-height: 0;
-}
-.formation-slot
-:deep(.card-title strong) {
-  white-space: normal !important;
-  text-overflow: clip !important;
-  overflow: hidden !important;
-  display: -webkit-box !important;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-}
-.formation-slot
-:deep(.stat-grid) {
-  min-width: 0;
-}
-.formation-slot
-:deep(.stat) {
-  min-width: 0;
-  padding:
-    clamp(
-      5px,
-      0.45vw,
-      8px
-    );
-}
-.formation-slot
-:deep(.stat strong) {
-  width: 100%;
-  overflow: visible !important;
-  text-overflow: clip !important;
-  white-space: nowrap !important;
-  font-size:
-    clamp(
-      18px,
-      1.45vw,
-      29px
-    ) !important;
-  letter-spacing:
-    -0.045em;
-  line-height: 1;
-}
-.formation-slot
-:deep(.hp-heading strong) {
-  white-space: nowrap;
-}
-/* =========================================================
-   RESPONSIVE
-========================================================= */
-@media (
-  max-height: 820px
-) {
-  .public-active-field {
-    grid-template-rows:
-      108px
-      minmax(0, 1fr);
-  }
-  .formation-grid {
-    row-gap: 14px;
-    column-gap: 12px;
-  }
-  .formation-3
-  :deep(.battle-card),
-  .formation-4
-  :deep(.battle-card) {
-    width:
-      clamp(
-        150px,
-        10.4vw,
-        172px
-      );
-    height:
-      clamp(
-        265px,
-        32vh,
-        305px
-      );
-  }
-  .formation-5
-  :deep(.battle-card),
-  .formation-6
-  :deep(.battle-card) {
-    width:
-      clamp(
-        132px,
-        9.4vw,
-        150px
-      );
-    height:
-      clamp(
-        245px,
-        29vh,
-        280px
-      );
-  }
-  .formation-7
-  :deep(.battle-card),
-  .formation-8
-  :deep(.battle-card) {
-    width:
-      clamp(
-        98px,
-        6.6vw,
-        112px
-      );
-    height:
-      clamp(
-        195px,
-        23vh,
-        220px
-      );
-  }
-  .battle-status-chip {
-    padding:
-      3px
-      5px;
-  }
-}
+.tbc-stage { --gold:#f5d577; --navy:#071a43; --blue:#2dd4ff; --purple:#b44aff; position:relative; isolation:isolate; width:100%; height:100%; overflow:hidden; color:white; font-family:'Arial Narrow','Trebuchet MS',Arial,sans-serif; background:#55a7e2 url('/images/tbc-battle-background.png') center / cover no-repeat; }
+.tbc-stage * { box-sizing:border-box; }
+.tbc-stage-frame { position:absolute; z-index:10; inset:.5%; pointer-events:none; border:.45cqw solid transparent; border-image:linear-gradient(130deg,#ffed9c,#9b632e 16%,#fce18c 42%,#9f6f32 62%,#ffe69b) 1; box-shadow:inset 0 0 0 .2cqw #253353,inset 0 0 2cqw #061e5570; clip-path:polygon(0 0,100% 0,100% 100%,0 100%); }
+.tbc-top-ribbon { position:absolute; top:0; left:1%; width:98%; height:16%; background:linear-gradient(155deg,#f8df8c 0 2%,#152544 3% 35%,#bd9047 36% 38%,#152544 40% 61%,#e9bd62 62% 65%,#14263e 67% 96%,#efd286 97%); clip-path:polygon(0 0,28% 42%,40% 56%,50% 36%,61% 56%,74% 38%,100% 0,98% 28%,73% 66%,61% 81%,50% 60%,39% 81%,27% 68%,2% 29%); }
+.tbc-brand { position:absolute; z-index:6; left:38.5%; top:4%; width:23%; height:29%; text-align:center; filter:drop-shadow(0 .35cqw .5cqw #0008); }
+.tbc-brand-plaque { height:65%; position:relative; padding:1.2cqw .5cqw .5cqw; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; color:var(--gold); background:linear-gradient(135deg,#ffed9b,#a67630 40%,#fff0a2 70%,#ba853a); clip-path:polygon(0 15%,36% 11%,50% 0,64% 11%,100% 15%,87% 100%,13% 100%); }
+.tbc-brand-plaque::before { content:''; position:absolute; inset:.25cqw; background:linear-gradient(145deg,#1c3858,#102d50 50%,#061938); clip-path:inherit; z-index:-1; }
+.tbc-brand-plaque { isolation:isolate; }
+.tbc-compass { position:absolute; top:-.1cqw; width:6cqw; height:4.7cqw; }
+.tbc-brand-plaque > strong { font:bold 4.4cqw/.92 Georgia,serif; letter-spacing:-.15cqw; text-shadow:0 .12cqw #7e6130; }
+.tbc-brand-plaque > span:last-child { font-size:1.01cqw; font-weight:900; margin-top:.3cqw; }
+.tbc-round { position:relative; margin:.7cqw auto 0; width:66%; padding:.45cqw .2cqw; background:var(--gold); clip-path:polygon(8% 0,92% 0,100% 27%,100% 73%,92% 100%,8% 100%,0 73%,0 27%); font-size:2cqw; line-height:1; font-weight:900; color:#ffe695; isolation:isolate; }
+.tbc-round::before { content:''; position:absolute; inset:.22cqw; background:#052344; clip-path:inherit; z-index:-1; }
+.tbc-turn { display:inline-block; margin-top:.45cqw; padding:.2cqw .65cqw; border-radius:3cqw; color:#fff6d1; background:#06224bbd; font-size:.72cqw; font-weight:800; letter-spacing:.05em; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tbc-hud { --accent:var(--blue); position:absolute; z-index:5; top:3.7%; left:1.7%; width:32.6%; height:29.5%; filter:drop-shadow(0 .25cqw .3cqw #09215b99); }
+.tbc-hud.p2 { --accent:var(--purple); left:auto; right:1.7%; }
+.tbc-hud-shape { position:absolute; inset:0; background:var(--accent); clip-path:polygon(0 0,76% 12%,83% 24%,88% 30%,96% 60%,100% 71%,98% 100%,0 97%); }
+.tbc-hud-shape::before { content:''; position:absolute; inset:.25cqw; background:linear-gradient(125deg,#0f64a0d9,#082456 55%,#082048); clip-path:inherit; box-shadow:inset 0 0 1cqw var(--accent); }
+.tbc-hud-trim { position:absolute; inset:0; width:100%; height:100%; color:var(--accent); opacity:.5; pointer-events:none; }
+.tbc-hud-trim path { fill:none; stroke:currentColor; stroke-width:1.6; }
+.tbc-hud-trim path:last-child { fill:currentColor; }
+.p2 .tbc-hud-trim { transform:scaleX(-1); }
+.tbc-hud-shape::after { content:''; position:absolute; inset:.7cqw; border:.12cqw solid var(--accent); clip-path:inherit; opacity:.75; }
+.p2 .tbc-hud-shape { transform:scaleX(-1); }
+.p2 .tbc-hud-shape::before { background:linear-gradient(125deg,#7020a7e8,#281453 55%,#271041); }
+.tbc-portrait { position:absolute; z-index:2; left:-1%; top:-6%; width:46%; height:108%; overflow:hidden; clip-path:polygon(0 0,100% 0,100% 84%,85% 100%,0 100%); }
+.p2 .tbc-portrait { left:auto; right:-1%; width:50%; clip-path:polygon(0 0,100% 0,100% 100%,15% 100%,0 84%); }
+.tbc-trainer-sprite { width:100%; height:100%; background-image:url('/images/tbc-trainers.png'); background-size:200% 100%; background-position:left center; background-repeat:no-repeat; filter:drop-shadow(0 0 .3cqw var(--accent)); }
+.tbc-trainer-sprite.p2 { background-position:right center; }
+.tbc-custom-portrait { height:100%; width:100%; object-fit:cover; object-position:center 25%; }
+.tbc-avatar-badge { position:absolute; bottom:3%; left:8%; font-size:1.5cqw; filter:drop-shadow(0 .1cqw .2cqw #000); }
+.p2 .tbc-avatar-badge { left:auto; right:8%; }
+.tbc-hud-info { position:absolute; top:24%; left:49%; width:47%; }
+.p2 .tbc-hud-info { left:4%; }
+.tbc-hud-info h2 { margin:0 0 1cqw; padding:0 .3cqw .5cqw; font-size:1.95cqw; font-weight:900; line-height:1.05; text-shadow:0 .14cqw .2cqw #000; border-bottom:.12cqw solid #7ac5ff80; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.p2 .tbc-hud-info h2 { text-align:right; border-color:#cf84ff80; }
+.tbc-hp-label { display:flex; justify-content:flex-start; align-items:baseline; gap:2.1cqw; padding:0 .25cqw; line-height:1; }
+.tbc-hp-label > span { font-weight:900; font-size:1.65cqw; }
+.tbc-hp-label strong { font-family:Arial,sans-serif; font-size:2.65cqw; font-weight:900; letter-spacing:-.05em; }
+.p2 .tbc-hp-label { gap:1.5cqw; }
+.tbc-hp-label small { font-size:1.45cqw; letter-spacing:-.04em; }
+.tbc-hp-track { margin:.5cqw 0; height:1.65cqw; padding:.16cqw; background:#0c2039; border:.13cqw solid #fff0c2; border-radius:.35cqw; box-shadow:0 0 .5cqw #17eaff66; transform:skewX(-4deg); }
+.tbc-hp-track > i { display:block; height:100%; border-radius:.12cqw; background:linear-gradient(90deg,#10fa23,#9dff4c); box-shadow:inset 0 .12cqw .2cqw #fff8; transition:width .4s; }
+.p2 .tbc-hp-track > i { background:linear-gradient(90deg,#f62a49,#ff6344); }
+.tbc-ap,.tbc-ultimate { display:flex; align-items:center; gap:.5cqw; font-size:1.6cqw; line-height:1.2; }
+.tbc-ap > b,.tbc-ultimate > b { font-size:1.7cqw; }
+.tbc-ap > strong,.tbc-ultimate > strong { font-size:1.35cqw; margin-left:auto; white-space:nowrap; }
+.tbc-ap-orbs { display:flex; gap:.35cqw; flex:1; min-width:0; }
+.tbc-ap-orbs i { width:1.5cqw; aspect-ratio:1; border-radius:50%; border:.14cqw solid #467cc8; background:#071b47; flex:0 1 1.5cqw; }
+.tbc-ap-orbs .filled { border-color:#8df8ff; background:radial-gradient(circle at 38% 28%,white 9%,#bafcff 20%,#26cdff 64%,#1769d5); box-shadow:0 0 .8cqw #16c8ff; }
+.p2 .tbc-ap-orbs i { border-color:#8524b4; background:#301052; }
+.p2 .tbc-ap-orbs .filled { border-color:#e7aeff; background:radial-gradient(circle at 38% 28%,white 9%,#efc6ff 20%,#c14bff 64%,#6725d7); box-shadow:0 0 .8cqw #bc2eff; }
+.tbc-ultimate > span { flex:1; height:.5cqw; background:#030e2a; border-radius:1cqw; overflow:hidden; }
+.tbc-ultimate i { display:block; height:100%; background:linear-gradient(90deg,#44eaff,#e9f4ff); }
+.p2 .tbc-ultimate i { background:linear-gradient(90deg,#bb46ff,#ffe998); }
+.tbc-roster { --accent:var(--blue); position:absolute; z-index:6; left:1.55%; top:34%; width:12.4%; height:35%; padding:.42cqw; background:linear-gradient(135deg,#123b67e8,#081e43e8); border:.2cqw solid var(--accent); border-radius:.5cqw; box-shadow:0 0 .8cqw #43afff66,inset 0 0 .3cqw #72daff; transform:rotate(3deg); }
+.tbc-roster.p2 { --accent:var(--purple); left:auto; right:1.55%; transform:rotate(-3deg); background:linear-gradient(225deg,#48226fe8,#251443e8); }
+.tbc-roster-counts { display:flex; justify-content:space-between; gap:.3cqw; margin-top:.7cqw; padding:.4cqw; background:#092047d9; border:.1cqw solid #87bfff66; border-radius:.3cqw; font-size:.53cqw; transform:rotate(-3deg); }
+.p2 .tbc-roster-counts { transform:rotate(3deg); }
+.tbc-roster-counts b { color:var(--gold); font-size:.7cqw; margin-left:.15cqw; }
+.tbc-hero { --energy:#32d7ff; position:absolute; z-index:3; left:21%; top:36%; width:17.2%; height:46.5%; }
+.tbc-hero.p2 { --energy:#ff8a25; left:auto; right:24.5%; }
+.tbc-hero-stage { position:relative; width:100%; height:100%; perspective:80cqw; }
+.tbc-featured-card { width:100%; height:100%; position:relative; z-index:3; transform:rotate(-3deg) rotateY(8deg); filter:drop-shadow(0 0 .3cqw white) drop-shadow(0 0 1cqw var(--energy)); transition:filter .25s; }
+.p2 .tbc-featured-card { transform:rotate(3deg) rotateY(-8deg); }
+.tbc-featured-card :deep(.tbc-card) { height:100%; width:100%; }
+.tbc-card-aura { position:absolute; inset:-12% -30%; border-radius:50%; background:radial-gradient(ellipse,color-mix(in srgb,var(--energy) 48%,transparent),transparent 67%); filter:blur(.7cqw); pointer-events:none; }
+.tbc-energy-ring { position:absolute; pointer-events:none; left:-37%; top:25%; width:177%; height:47%; border:.22cqw solid transparent; border-top-color:var(--energy); border-bottom-color:#efffff; border-radius:50%; transform:rotate(-17deg); filter:drop-shadow(0 0 .4cqw var(--energy)); box-shadow:0 -.1cqw .4cqw var(--energy),0 .2cqw .8cqw var(--energy); }
+.ring-back { z-index:1; top:32%; transform:rotate(16deg); opacity:.75; }
+.ring-front { z-index:4; clip-path:polygon(0 48%,100% 48%,100% 100%,0 100%); animation:tbc-ring-glow 2.8s ease-in-out infinite alternate; }
+.tbc-status-callout { position:absolute; z-index:7; top:53%; left:89%; display:flex; align-items:center; gap:.45cqw; color:#f7feff; font-size:3.15cqw; font-weight:900; font-style:italic; line-height:1; white-space:nowrap; text-shadow:.13cqw .13cqw #003aa8,-.13cqw -.13cqw #003aa8,0 0 .8cqw #00bdff; filter:drop-shadow(0 0 .5cqw #00caff); }
+.tbc-status-callout > span { font-size:5.5cqw; font-style:normal; }
+.tbc-status-emblem { width:5.4cqw; height:6.8cqw; overflow:visible; flex:none; }
+.tbc-status-swirl { position:absolute; z-index:4; left:-35%; top:-12%; width:170%; height:127%; pointer-events:none; overflow:visible; color:var(--energy); filter:drop-shadow(0 0 .2cqw white) drop-shadow(0 0 .7cqw var(--energy)); }
+.tbc-status-swirl path { stroke:currentColor; stroke-width:3; fill:none; }
+.tbc-status-swirl path:nth-child(2) { stroke:#f7ffff; stroke-width:1.8; }
+.tbc-status-swirl path:last-child { fill:#f3ffff; stroke-width:1; }
+.tbc-protected { --energy:#39d6ff; }
+.tbc-burning { --energy:#ff7920; }
+.tbc-status-callout.burn { text-shadow:.13cqw .13cqw #bb1a00,-.13cqw -.13cqw #bb1a00,0 0 .8cqw #ff6c00; filter:drop-shadow(0 0 .5cqw #ff6200); }
+.tbc-arena-floor { position:absolute; inset:71% -15% -31%; pointer-events:none; transform:perspective(35cqw) rotateX(52deg); border-radius:50%; border:.2cqw solid #9cefff; box-shadow:0 0 1cqw #06aaff,inset 0 0 1cqw #0695ff; background:repeating-radial-gradient(ellipse at center,transparent 0 9%,#69c6ff4d 9.3% 9.6%,transparent 10%),repeating-conic-gradient(from 0deg,#66c8ff50 0deg .2deg,transparent .3deg 18deg); opacity:.68; }
+.tbc-arena-floor i { position:absolute; inset:18%; border:.1cqw solid #91dbff; border-radius:50%; }
+.tbc-arena-floor i:last-child { inset:33%; }
+.tbc-battle-log { position:absolute; z-index:8; left:24.8%; bottom:1.8%; width:47%; height:13%; padding:1cqw 2.7cqw; background:linear-gradient(115deg,#173b7c,#08194b); border:.22cqw solid #50adff; outline:.15cqw solid #0c376c; clip-path:polygon(4% 0,96% 0,100% 20%,100% 80%,96% 100%,4% 100%,0 80%,0 20%); box-shadow:inset 0 0 1cqw #3684e588; display:flex; flex-direction:column; justify-content:center; }
+.tbc-log-row { display:flex; align-items:center; gap:1.1cqw; min-height:0; height:50%; font-size:1.62cqw; font-weight:800; line-height:1.15; }
+.tbc-log-row + .tbc-log-row { border-top:.1cqw solid #4970c277; }
+.tbc-log-row > span:last-child { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tbc-log-row strong { color:#49ddff; font-style:italic; }
+.tbc-log-row.burn strong,.tbc-log-row.fire strong { color:#ffce43; text-shadow:0 0 .5cqw #ff3300; }
+.tbc-log-icon { font-size:2.05cqw; width:2.1cqw; text-align:center; flex-shrink:0; color:#72e4ff; }
+.tbc-corner-brand { position:absolute; z-index:5; bottom:1.5%; right:1%; width:19%; height:12%; padding:1cqw 1cqw .2cqw 3.8cqw; display:flex; flex-direction:column; align-items:center; justify-content:center; background:linear-gradient(140deg,#1a589ccf,#10285de8); border-bottom:.2cqw solid var(--gold); clip-path:polygon(22% 5%,94% 0,100% 25%,100% 100%,0 100%); color:var(--gold); }
+.tbc-corner-compass { position:absolute; top:-.3cqw; width:5cqw; height:3cqw; }
+.tbc-corner-brand strong { font:bold 3cqw/.9 Georgia,serif; }
+.tbc-corner-brand small { font-size:.85cqw; font-weight:900; margin-top:.4cqw; white-space:nowrap; }
+.combat-charge { animation:tbc-charge .4s ease-in-out infinite alternate; }
+.combat-impact,.combat-damaged { animation:tbc-hit .28s ease-in-out 2; }
+.combat-destroyed { opacity:.2; filter:grayscale(1) brightness(2); }
+.tbc-active-turn { position:absolute; z-index:4; left:49%; top:12%; display:flex; align-items:center; gap:.35cqw; color:#fff4bf; font:800 .65cqw/1 Arial,sans-serif; letter-spacing:.08em; }
+.p2 .tbc-active-turn { left:4%; }
+.tbc-active-turn i,.tbc-broadcast-header small i { width:.4cqw; height:.4cqw; border-radius:50%; background:#9affac; box-shadow:0 0 .45cqw #6bffab; }
+.tbc-hud.is-turn { filter:drop-shadow(0 0 .45cqw var(--accent)) drop-shadow(0 .25cqw .3cqw #09215b99); }
+.tbc-turn.p1 { border-bottom:.15cqw solid var(--blue); }
+.tbc-turn.p2 { border-bottom:.15cqw solid var(--purple); }
+.tbc-roster-heading { display:none; }
+.tbc-broadcast-header { position:absolute; z-index:7; top:2.5%; left:23%; width:54%; height:8%; display:flex; align-items:center; justify-content:center; gap:1.3cqw; background:linear-gradient(110deg,#0b2448,#07172eee); border:.16cqw solid var(--gold); box-shadow:0 .3cqw .9cqw #051c4780,inset 0 0 0 .25cqw #234164; clip-path:polygon(2% 0,98% 0,100% 50%,98% 100%,2% 100%,0 50%); }
+.tbc-broadcast-header > svg { width:2.4cqw; height:2.4cqw; color:var(--gold); }
+.tbc-broadcast-header > span { font-size:1.5cqw; font-weight:900; letter-spacing:.025em; white-space:nowrap; }
+.tbc-broadcast-header > span strong { color:#c8ee87; }
+.tbc-broadcast-header small { display:flex; align-items:center; gap:.4cqw; font:800 .63cqw Arial,sans-serif; color:#e8f5ff; }
+.tbc-battle-log h3 { margin:0 0 .5cqw; display:flex; justify-content:space-between; font:800 .8cqw Arial,sans-serif; letter-spacing:.08em; color:#ffedb2; }
+.tbc-battle-log h3 span { color:#a5b9d8; font-size:.65cqw; }
 
+/* Two horizontal formations with a dedicated spotlight slot in each row. */
+.tbc-layout-top_bottom .tbc-top-ribbon { display:none; }
+.tbc-layout-top_bottom .tbc-broadcast-header { left:14%; width:72%; height:7.5%; }
+.tbc-layout-top_bottom .tbc-brand { left:76%; top:12%; width:20%; height:11%; }
+.tbc-layout-top_bottom .tbc-brand-plaque { display:none; }
+.tbc-layout-top_bottom .tbc-round { width:80%; margin:0 auto; font-size:1.65cqw; }
+.tbc-layout-top_bottom .tbc-turn { font-size:.85cqw; padding:.3cqw .7cqw; }
+.tbc-layout-top_bottom .tbc-hud { left:3.2%; right:auto; top:85.5%; width:68%; height:12%; }
+.tbc-layout-top_bottom .tbc-hud.p2 { top:12%; }
+.tbc-layout-top_bottom .tbc-hud-shape { transform:none; clip-path:polygon(2% 0,98% 0,100% 30%,98% 100%,0 100%,0 25%); }
+.tbc-layout-top_bottom .tbc-hud-trim { display:none; }
+.tbc-layout-top_bottom .tbc-portrait { top:-10%; left:.5%; right:auto; width:11%; height:110%; clip-path:polygon(0 0,100% 0,100% 85%,83% 100%,0 100%); }
+.tbc-layout-top_bottom .tbc-hud-info { top:12%; left:13%; width:82%; height:80%; display:grid; grid-template-columns:38% 1fr; grid-template-rows:42% 37% 21%; column-gap:2cqw; align-items:center; }
+.tbc-layout-top_bottom .tbc-hud-info h2 { grid-column:1; grid-row:1; margin:0; padding:0; border:0; text-align:left; font-size:1.3cqw; }
+.tbc-layout-top_bottom .tbc-hp-label { grid-row:2; grid-column:1; padding:0; gap:1cqw; }
+.tbc-layout-top_bottom .tbc-hp-label > span { font-size:.85cqw; }
+.tbc-layout-top_bottom .tbc-hp-label strong { font-size:1.65cqw; }
+.tbc-layout-top_bottom .tbc-hp-label small { font-size:1cqw; }
+.tbc-layout-top_bottom .tbc-hp-track { grid-row:3; grid-column:1; height:.6cqw; padding:.07cqw; margin:0; width:100%; border-width:.08cqw; }
+.tbc-layout-top_bottom .tbc-ap,.tbc-layout-top_bottom .tbc-ultimate { grid-column:2; grid-row:2 / 4; gap:.8cqw; }
+.tbc-layout-top_bottom .tbc-ap > b,.tbc-layout-top_bottom .tbc-ultimate > b { font-size:1.2cqw; }
+.tbc-layout-top_bottom .tbc-ap-orbs { gap:.4cqw; }
+.tbc-layout-top_bottom .tbc-ap-orbs i { width:1.15cqw; flex-basis:1.15cqw; }
+.tbc-layout-top_bottom .tbc-ap > strong,.tbc-layout-top_bottom .tbc-ultimate > strong { font-size:1.2cqw; }
+.tbc-layout-top_bottom .tbc-active-turn { top:15%; left:56%; font-size:.65cqw; }
+.tbc-layout-top_bottom .tbc-roster { left:5%; right:auto; top:63%; width:90%; height:18%; transform:none; padding:.6cqw; border-color:#5382a3; border-radius:.6cqw; background:linear-gradient(90deg,#092c4deb,#092c4d99,#092c4deb); box-shadow:0 .25cqw .8cqw #071b4670,inset 0 0 0 .18cqw #d6b96c50; }
+.tbc-layout-top_bottom .tbc-roster.p2 { top:29%; background:linear-gradient(90deg,#251a45eb,#251a4599,#251a45eb); border-color:#96629f; }
+.tbc-layout-top_bottom .tbc-roster-counts { position:absolute; top:auto; bottom:-8.3cqw; right:0; width:22%; margin:0; padding:.7cqw; transform:none; font-size:.75cqw; border-color:#d9c380; background:#092340f5; }
+.tbc-layout-top_bottom .p2 .tbc-roster-counts { bottom:auto; top:-3.1cqw; }
+.tbc-layout-top_bottom .tbc-roster-counts b { font-size:1.15cqw; }
+.tbc-layout-top_bottom .tbc-hero { left:45.2%; right:auto; top:60%; width:9.6%; height:25%; z-index:7; }
+.tbc-layout-top_bottom .tbc-hero.p2 { top:26%; }
+.tbc-layout-top_bottom .tbc-featured-card { transform:none; }
+.tbc-layout-top_bottom .tbc-energy-ring { left:-18%; width:136%; border-width:.12cqw; }
+.tbc-layout-top_bottom .tbc-status-swirl { left:-20%; width:140%; }
+.tbc-layout-top_bottom .tbc-status-callout { top:64%; bottom:auto; left:50%; transform:translateX(-50%); gap:.15cqw; font-size:1.3cqw; }
+.tbc-layout-top_bottom .tbc-status-emblem { width:1.8cqw; height:2.3cqw; }
+.tbc-layout-top_bottom .tbc-status-callout > span { font-size:2.1cqw; }
+.tbc-layout-top_bottom .tbc-battle-log { left:21%; bottom:auto; top:52%; width:58%; height:6.5%; padding:.3cqw 2cqw; border-width:.12cqw; background:linear-gradient(90deg,#09254aeb,#091b40f5,#09254aeb); }
+.tbc-layout-top_bottom .tbc-log-row { font-size:.98cqw; gap:.7cqw; }
+.tbc-layout-top_bottom .tbc-log-icon { font-size:1.1cqw; width:1.4cqw; }
+.tbc-layout-top_bottom .tbc-corner-brand { display:none; }
+.tbc-layout-top_bottom .tbc-arena-floor { inset:28% -10% 3%; opacity:.25; }
 
-/* =========================================================
-   PHASE 3D.18 • STATUS EFFECT UI
-========================================================= */
-.public-status-ribbon { display:flex; align-items:center; flex-wrap:wrap; gap:4px; margin-top:5px; }
-.public-status-ribbon.right { justify-content:flex-end; }
-.public-status-chip, .public-card-status-chip { --status-bg:rgba(255,255,255,.09); --status-border:rgba(255,255,255,.2); --status-text:#edf7ff; display:inline-flex; align-items:center; gap:3px; border:1px solid var(--status-border); background:var(--status-bg); color:var(--status-text); backdrop-filter:blur(9px); }
-.public-status-chip { min-height:19px; padding:3px 6px; border-radius:999px; }
-.public-status-chip b, .public-card-status-chip b { line-height:1; }
-.public-status-chip em, .public-card-status-chip em { font-style:normal; font-weight:950; letter-spacing:.04em; }
-.public-status-chip em { font-size:6px; }
-.public-status-chip small { font-size:5.5px; font-weight:900; }
-.public-status-more { font-size:7px; font-weight:950; opacity:.72; }
-.formation-slot { position:relative; }
-.public-card-statuses { position:absolute; top:5px; z-index:40; display:flex; align-items:center; flex-wrap:wrap; gap:3px; max-width:calc(100% - 10px); pointer-events:none; }
-.public-card-statuses.p1 { left:5px; justify-content:flex-start; }
-.public-card-statuses.p2 { right:5px; justify-content:flex-end; }
-.public-card-status-chip { min-height:18px; padding:2px 5px; border-radius:7px; box-shadow:0 5px 14px rgba(0,0,0,.18); }
-.public-card-status-chip em { font-size:5.5px; }
-.public-card-status-chip small { font-size:5px; font-weight:950; }
-.public-card-status-chip.more { font-size:6px; font-weight:950; }
-.public-status-chip.defense,.public-card-status-chip.defense{--status-bg:rgba(48,127,232,.22);--status-border:rgba(81,158,255,.58)}
-.public-status-chip.water,.public-card-status-chip.water{--status-bg:rgba(27,166,218,.22);--status-border:rgba(65,195,241,.58)}
-.public-status-chip.power,.public-card-status-chip.power{--status-bg:rgba(221,162,34,.24);--status-border:rgba(255,204,71,.62)}
-.public-status-chip.debuff,.public-card-status-chip.debuff,.public-status-chip.freeze,.public-card-status-chip.freeze{--status-bg:rgba(95,122,211,.24);--status-border:rgba(133,162,255,.58)}
-.public-status-chip.burn,.public-card-status-chip.burn{--status-bg:rgba(210,71,42,.24);--status-border:rgba(255,105,71,.62)}
-.public-status-chip.regen,.public-card-status-chip.regen,.public-status-chip.buff,.public-card-status-chip.buff{--status-bg:rgba(41,157,92,.24);--status-border:rgba(80,216,137,.58)}
-.public-status-chip.silence,.public-card-status-chip.silence,.public-status-chip.stun,.public-card-status-chip.stun,.public-status-chip.cooldown,.public-card-status-chip.cooldown{--status-bg:rgba(101,78,136,.26);--status-border:rgba(159,126,209,.56)}
-.public-status-chip.poison,.public-card-status-chip.poison,.public-status-chip.necro,.public-card-status-chip.necro{--status-bg:rgba(82,44,107,.3);--status-border:rgba(157,92,199,.58)}
-.public-status-chip.bleed,.public-card-status-chip.bleed{--status-bg:rgba(170,43,67,.26);--status-border:rgba(235,83,111,.58)}
-@media(max-width:900px){.public-status-chip em,.public-card-status-chip em{display:none}}
+/* Information stays on the edges; the central arena is reserved for the duel. */
+.tbc-layout-side_panel .tbc-top-ribbon { display:none; }
+.tbc-layout-side_panel .tbc-brand { left:41%; top:13%; width:18%; height:15%; }
+.tbc-layout-side_panel .tbc-brand-plaque { display:none; }
+.tbc-layout-side_panel .tbc-round { margin:0 auto; font-size:1.75cqw; width:80%; }
+.tbc-layout-side_panel .tbc-turn { font-size:.8cqw; }
+.tbc-layout-side_panel .tbc-hud { left:2%; top:14%; width:19%; height:24%; filter:none; }
+.tbc-layout-side_panel .tbc-hud.p2 { left:auto; right:2%; }
+.tbc-layout-side_panel .tbc-hud-shape { transform:none; clip-path:polygon(5% 0,95% 0,100% 5%,100% 100%,0 100%,0 5%); background:#bfa769; }
+.tbc-layout-side_panel .tbc-hud-shape::before { inset:.15cqw; background:linear-gradient(130deg,#183c60,#081b35 80%); box-shadow:none; }
+.tbc-layout-side_panel .p2 .tbc-hud-shape::before { background:linear-gradient(230deg,#432b62,#18152d 80%); }
+.tbc-layout-side_panel .tbc-hud-trim { display:none; }
+.tbc-layout-side_panel .tbc-portrait { top:-3%; left:1%; right:auto; width:43%; height:70%; }
+.tbc-layout-side_panel .tbc-hud-info { top:10%; left:6%; width:88%; }
+.tbc-layout-side_panel .tbc-hud-info h2 { width:57%; margin:0 0 .7cqw 43%; padding:0 0 .5cqw; font-size:1.4cqw; text-align:left; }
+.tbc-layout-side_panel .tbc-hp-label { margin-left:43%; gap:.45cqw; padding:0; }
+.tbc-layout-side_panel .tbc-hp-label > span { font-size:.75cqw; }
+.tbc-layout-side_panel .tbc-hp-label strong { font-size:1.65cqw; }
+.tbc-layout-side_panel .tbc-hp-label small { font-size:.95cqw; }
+.tbc-layout-side_panel .tbc-hp-track { margin:1.2cqw 0 .7cqw; height:1.05cqw; }
+.tbc-layout-side_panel .tbc-ap,.tbc-layout-side_panel .tbc-ultimate { gap:.55cqw; }
+.tbc-layout-side_panel .tbc-ap > b,.tbc-layout-side_panel .tbc-ultimate > b { font-size:1.2cqw; }
+.tbc-layout-side_panel .tbc-ap > strong,.tbc-layout-side_panel .tbc-ultimate > strong { font-size:1cqw; }
+.tbc-layout-side_panel .tbc-ap-orbs i { width:1cqw; flex-basis:1cqw; }
+.tbc-layout-side_panel .tbc-active-turn { top:87%; left:6%; font-size:.6cqw; }
+.tbc-layout-side_panel .tbc-hud.is-turn .tbc-hud-shape { background:var(--accent); }
+.tbc-layout-side_panel .tbc-roster { left:2%; top:38%; width:19%; height:46%; padding:.85cqw; transform:none; border:.15cqw solid #bfa769; border-top:0; border-radius:0 0 .5cqw .5cqw; background:linear-gradient(#081b35f5,#0b243ff5); box-shadow:0 .5cqw 1cqw #03142e80; }
+.tbc-layout-side_panel .tbc-roster.p2 { left:auto; right:2%; background:linear-gradient(#18152df5,#241e3df5); }
+.tbc-layout-side_panel .tbc-roster-heading { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:.3cqw; height:2.3cqw; margin-bottom:.4cqw; border-bottom:.1cqw solid #c8ac5a55; }
+.tbc-layout-side_panel .tbc-roster-heading strong { font-size:.9cqw; letter-spacing:.06em; color:#ffedb2; }
+.tbc-layout-side_panel .tbc-roster-heading span { font-size:.55cqw; color:#b6cce5; }
+.tbc-layout-side_panel .tbc-roster-counts { margin-top:.8cqw; transform:none; font-size:.65cqw; padding:.6cqw .4cqw; background:transparent; border:0; border-top:.1cqw solid #d7bb6f55; border-radius:0; }
+.tbc-layout-side_panel .tbc-roster-counts b { font-size:.95cqw; }
+.tbc-layout-side_panel .tbc-hero { left:29%; top:30%; width:16%; height:43%; }
+.tbc-layout-side_panel .tbc-hero.p2 { left:auto; right:29%; }
+.tbc-layout-side_panel .tbc-status-callout { left:20%; top:99%; gap:.15cqw; font-size:2.25cqw; }
+.tbc-layout-side_panel .tbc-status-emblem { width:3cqw; height:3.8cqw; }
+.tbc-layout-side_panel .tbc-status-callout > span { font-size:3cqw; }
+.tbc-layout-side_panel .tbc-battle-log { left:24%; width:52%; height:14%; bottom:3%; padding:.8cqw 2cqw; border-color:#d8bd78; background:linear-gradient(110deg,#122e50,#07182ff2); }
+.tbc-layout-side_panel .tbc-log-row { font-size:1.13cqw; gap:.6cqw; }
+.tbc-layout-side_panel .tbc-log-icon { font-size:1.4cqw; width:1.5cqw; }
+.tbc-layout-side_panel .tbc-corner-brand { display:none; }
+.tbc-layout-side_panel .tbc-arena-floor { inset:64% 15% -12%; opacity:.5; }
 
-
-
-
-/* =========================================================
-   PHASE 3D.19 • PUBLIC CARD STATUS VISUAL FX
-========================================================= */
-.formation-slot { isolation:isolate; }
-.public-card-fx-stack,
-.public-card-fx-layer { position:absolute; inset:0; pointer-events:none; }
-.public-card-fx-stack { z-index:50; overflow:hidden; border-radius:22px; }
-.public-card-fx-layer { display:block; border-radius:inherit; }
-
-.public-card-fx-stack .fx-fusion-layer {
-  inset:-20%;
-  background:conic-gradient(from 0deg,transparent,rgba(75,219,255,.22),rgba(151,82,255,.34),transparent,rgba(244,91,205,.24),transparent);
-  filter:blur(15px);
-  animation:publicFusionSpin 6.5s linear infinite;
-}
-.public-card-fx-stack .fx-necro-layer {
-  background:radial-gradient(circle at 15% 90%,rgba(121,36,190,.28),transparent 34%),radial-gradient(circle at 85% 16%,rgba(78,24,145,.22),transparent 30%),radial-gradient(circle at 50% 110%,rgba(38,7,75,.32),transparent 46%);
-  animation:publicNecroPulse 2.8s ease-in-out infinite;
-}
-.public-card-fx-stack .fx-defense-layer {
-  inset:0;
-  background:radial-gradient(ellipse at 50% 55%,rgba(76,184,255,.08),transparent 68%);
-  box-shadow:inset 0 -14px 24px -23px rgba(50,168,255,.58);
-  animation:publicDefensePulse 1.55s ease-in-out infinite;
-}
-.public-card-fx-stack .fx-shield-layer {
-  z-index:3;
-  background:linear-gradient(135deg,rgba(186,239,255,.13),rgba(255,255,255,.025) 42%,rgba(109,209,245,.12));
-  box-shadow:inset 0 0 0 2px rgba(190,239,255,.50),inset 0 0 26px rgba(91,207,255,.12),0 0 18px rgba(80,196,246,.22);
-  backdrop-filter:blur(1px) saturate(1.08);
-}
-.public-card-fx-stack .fx-shield-layer::before {
-  content:"";position:absolute;top:-35%;left:-55%;width:46%;height:175%;transform:rotate(20deg);background:linear-gradient(to right,transparent,rgba(255,255,255,.32),transparent);animation:publicShieldSweep 2.7s ease-in-out infinite;
-}
-.public-card-fx-stack .fx-burn-layer {
-  background:radial-gradient(circle at 18% 100%,rgba(255,83,20,.36),transparent 26%),radial-gradient(circle at 52% 108%,rgba(255,164,24,.30),transparent 32%),radial-gradient(circle at 86% 100%,rgba(223,50,18,.32),transparent 26%);
-  animation:publicBurnFlicker .85s ease-in-out infinite alternate;
-}
-.public-card-fx-stack .fx-freeze-layer {
-  background:linear-gradient(135deg,rgba(177,233,255,.22),transparent 32%,rgba(113,193,239,.14) 72%,rgba(220,249,255,.18)),radial-gradient(circle at 0 0,rgba(233,252,255,.38),transparent 28%),radial-gradient(circle at 100% 100%,rgba(186,231,255,.30),transparent 30%);
-  box-shadow:inset 0 0 25px rgba(133,212,255,.26);
-}
-.public-card-fx-stack .fx-poison-layer {
-  background:radial-gradient(circle at 20% 78%,rgba(101,194,77,.22),transparent 25%),radial-gradient(circle at 72% 22%,rgba(137,57,173,.22),transparent 28%),radial-gradient(circle at 82% 86%,rgba(79,164,61,.20),transparent 22%);
-  animation:publicPoisonDrift 2.4s ease-in-out infinite alternate;
-}
-.public-card-fx-stack .fx-stun-layer {
-  background:repeating-linear-gradient(118deg,transparent 0 24px,rgba(255,217,73,.18) 25px 27px,transparent 28px 52px);
-  mix-blend-mode:multiply;
-  animation:publicStunFlash .72s steps(2,end) infinite;
-}
-.public-card-fx-stack .fx-curse-layer {
-  background:radial-gradient(ellipse at 50% 55%,rgba(65,40,105,.22),transparent 62%),linear-gradient(145deg,transparent 36%,rgba(20,16,43,.18) 50%,transparent 68%);
-  animation:publicCurseDrift 2.8s ease-in-out infinite alternate;
-}
-
-@keyframes publicFusionSpin{to{transform:rotate(360deg)}}
-@keyframes publicNecroPulse{0%,100%{opacity:.62;transform:scale(1)}50%{opacity:1;transform:scale(1.035)}}
-@keyframes publicDefensePulse{0%,100%{opacity:.62}50%{opacity:1}}
-@keyframes publicDefenseSpin{to{transform:rotate(360deg)}}
-@keyframes publicShieldSweep{0%{transform:translateX(0) rotate(20deg);opacity:0}20%{opacity:.8}100%{transform:translateX(360%) rotate(20deg);opacity:0}}
-@keyframes publicBurnFlicker{from{opacity:.58;filter:brightness(.92)}to{opacity:1;filter:brightness(1.16)}}
-@keyframes publicPoisonDrift{from{transform:translate3d(-2px,2px,0) scale(1);opacity:.62}to{transform:translate3d(3px,-3px,0) scale(1.04);opacity:.92}}
-@keyframes publicStunFlash{0%,100%{opacity:.22}50%{opacity:.82}}
-@keyframes publicCurseDrift{from{opacity:.35;transform:translateY(2px)}to{opacity:.78;transform:translateY(-3px)}}
-@media(prefers-reduced-motion:reduce){.public-card-fx-layer,.public-card-fx-layer::before,.public-card-fx-layer::after{animation-duration:.01ms!important;animation-iteration-count:1!important}}
-
-
-/* PHASE 3D.20: status visibility and true viewport-aware spectator card sizing. */
-.public-active-field {
-  min-width: 0; min-height:0;
-  grid-template-rows: clamp(82px, 12.3vh, 140px) minmax(0,1fr);
-  overflow: hidden;
-}
-.battle-header { min-height:0; grid-template-columns:minmax(0,1fr) clamp(150px,15vw,245px) minmax(0,1fr); }
-.player-hud { min-height:0; padding:clamp(5px,.9vh,14px) clamp(6px,.9vw,18px); gap:clamp(4px,.7vw,12px); }
-.player-name-row strong { font-size:clamp(13px,1.15vw,23px); }
-.center-brand strong { font-size:clamp(20px,2.05vw,38px); }
-.field-side { min-height:0; padding:clamp(5px,.8vh,15px) clamp(5px,.7vw,12px); grid-template-rows:auto minmax(0,1fr) clamp(17px,2.7vh,36px); }
-.formation-stage { min-width:0; min-height:0; container-type:size; }
-.formation-grid { row-gap:clamp(5px,1vh,12px); column-gap:clamp(4px,.65vw,10px); max-height:100%; }
-/* Override old vh / vw minimums, which clipped cards on TVs and shorter browser windows. */
-.formation-1 :deep(.battle-card), .formation-2 :deep(.battle-card),
-.formation-3 :deep(.battle-card), .formation-4 :deep(.battle-card),
-.formation-5 :deep(.battle-card), .formation-6 :deep(.battle-card),
-.formation-7 :deep(.battle-card), .formation-8 :deep(.battle-card) {
-  width: var(--tv-card-w) !important;
-  height: var(--tv-card-h) !important;
-  min-height:0 !important; min-width:0 !important;
-  max-width:var(--tv-card-w);
-  max-height:var(--tv-card-h);
-}
-.formation-slot :deep(.stat strong) { font-size:clamp(12px, calc(var(--tv-card-w) * .115), 27px) !important; }
-.formation-slot :deep(.stat-copy strong) { font-size:clamp(12px, calc(var(--tv-card-w) * .11), 24px) !important; }
-.formation-slot :deep(.card-title strong),
-.formation-slot :deep(.title-hud h2) {
-  font-size:clamp(10px, calc(var(--tv-card-w) * .084), 21px) !important;
-  line-height:1.1 !important;
-}
-.public-card-statuses { z-index:70; gap:3px; }
-.public-card-status-chip { min-height:22px; padding:4px 6px; border:1px solid var(--status-border, rgba(255,255,255,.7));
-  background:var(--status-bg, rgba(33,64,85,.8)); color:#142d41; }
-.public-card-status-chip em { font-size:clamp(7px,.67vw,10px); }
-.public-card-status-chip small { font-size:clamp(7px,.60vw,10px); }
-.public-status-chip em {font-size:clamp(7px,.65vw,10px);}
-.public-status-chip small {font-size:clamp(7px,.6vw,10px);}
-@media(max-height:720px) {
-  .public-active-field {grid-template-rows:clamp(72px,12.1vh,98px) minmax(0,1fr);}
-  .field-side {padding-top:4px;padding-bottom:4px;grid-template-rows:auto minmax(0,1fr) 18px;}
-  .field-title {margin:0;}
-}
-@media(max-width:900px) {
-  .battle-header {grid-template-columns:minmax(0,1fr) 110px minmax(0,1fr);}
-  .player-hud {padding:4px;gap:4px;}
-  .avatar {width:30px;height:30px;flex:0 0 30px;}
-  .public-card-status-chip em {display:none;}
-}
-@media(prefers-reduced-motion:reduce) {
-}
-
+/* A suspended scoreboard and a continuous bottom rail frame the stadium duel. */
+.tbc-layout-stadium .tbc-top-ribbon { display:none; }
+.tbc-layout-stadium .tbc-broadcast-header { left:20%; width:60%; top:3%; }
+.tbc-scoreboard-rig { position:absolute; z-index:2; left:10%; top:15%; width:80%; height:25%; border:.22cqw solid #d9b76d; border-bottom-width:.5cqw; background:linear-gradient(135deg,#233c57,#071932 50%,#233c57); clip-path:polygon(0 0,100% 0,97% 86%,88% 100%,12% 100%,3% 86%); box-shadow:inset 0 0 0 .35cqw #091f3c; }
+.tbc-layout-stadium .tbc-brand { left:41.5%; width:17%; top:14%; height:24%; }
+.tbc-layout-stadium .tbc-brand-plaque { height:61%; }
+.tbc-layout-stadium .tbc-brand-plaque > strong { font-size:3.2cqw; }
+.tbc-layout-stadium .tbc-brand-plaque > span:last-child { font-size:.65cqw; }
+.tbc-layout-stadium .tbc-compass { width:4.2cqw; height:3.3cqw; }
+.tbc-layout-stadium .tbc-round { margin-top:.35cqw; font-size:1.5cqw; width:75%; padding:.3cqw; }
+.tbc-layout-stadium .tbc-turn { margin-top:.3cqw; font-size:.65cqw; }
+.tbc-layout-stadium .tbc-hud { left:12%; top:16%; width:29%; height:22%; }
+.tbc-layout-stadium .tbc-hud.p2 { left:auto; right:12%; }
+.tbc-layout-stadium .tbc-hud-info { top:18%; }
+.tbc-layout-stadium .tbc-hud-info h2 { margin-bottom:.5cqw; font-size:1.5cqw; padding-bottom:.3cqw; }
+.tbc-layout-stadium .tbc-hp-label { gap:.8cqw; }
+.tbc-layout-stadium .tbc-hp-label > span { font-size:1cqw; }
+.tbc-layout-stadium .tbc-hp-label strong { font-size:2cqw; }
+.tbc-layout-stadium .tbc-hp-label small { font-size:1.1cqw; }
+.tbc-layout-stadium .tbc-hp-track { height:1.1cqw; margin:.35cqw 0; padding:.1cqw; }
+.tbc-layout-stadium .tbc-ap > b,.tbc-layout-stadium .tbc-ultimate > b { font-size:1.1cqw; }
+.tbc-layout-stadium .tbc-ap > strong,.tbc-layout-stadium .tbc-ultimate > strong { font-size:1cqw; }
+.tbc-layout-stadium .tbc-ap-orbs { gap:.25cqw; }
+.tbc-layout-stadium .tbc-ap-orbs i { width:1.05cqw; flex-basis:1.05cqw; }
+.tbc-layout-stadium .tbc-active-turn { top:5%; font-size:.55cqw; }
+.tbc-layout-stadium .tbc-hero { left:31%; top:42%; width:14.4%; height:37%; }
+.tbc-layout-stadium .tbc-hero.p2 { left:auto; right:31%; }
+.tbc-layout-stadium .tbc-status-callout { left:42%; top:63%; font-size:2.15cqw; gap:.15cqw; }
+.tbc-layout-stadium .tbc-status-emblem { width:2.8cqw; height:3.5cqw; }
+.tbc-layout-stadium .tbc-status-callout > span { font-size:2.8cqw; }
+.tbc-layout-stadium .tbc-roster { left:3%; top:81%; width:27%; height:16%; transform:none; padding:.65cqw; background:linear-gradient(110deg,#0e3154f5,#091a30f5); border:.15cqw solid #c8ad6d; border-radius:.4cqw; box-shadow:0 .3cqw .8cqw #07142e80; }
+.tbc-layout-stadium .tbc-roster.p2 { left:auto; right:3%; background:linear-gradient(250deg,#36214ff5,#18152df5); }
+.tbc-layout-stadium .tbc-roster-heading { display:flex; align-items:center; justify-content:space-between; gap:.5cqw; height:1.5cqw; margin-bottom:.4cqw; }
+.tbc-layout-stadium .tbc-roster-heading strong { font-size:.9cqw; max-width:44%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tbc-layout-stadium .tbc-roster-heading span { font-size:.5cqw; color:#c3d2e5; }
+.tbc-layout-stadium .tbc-roster-counts { position:absolute; top:-2.2cqw; right:0; margin:0; transform:none; font-size:.6cqw; padding:.35cqw .6cqw; border-color:#d7bb6f99; }
+.tbc-layout-stadium .tbc-roster-counts b { font-size:.85cqw; }
+.tbc-layout-stadium .tbc-battle-log { left:31%; width:38%; bottom:3%; height:16%; padding:.8cqw 1.6cqw; border-color:#d8bd78; background:linear-gradient(110deg,#15304b,#07172f); }
+.tbc-layout-stadium .tbc-log-row { font-size:1cqw; gap:.6cqw; }
+.tbc-layout-stadium .tbc-log-icon { font-size:1.3cqw; width:1.4cqw; }
+.tbc-layout-stadium .tbc-corner-brand { display:none; }
+.tbc-layout-stadium .tbc-arena-floor { inset:66% 14% -17%; opacity:.5; }
+.tbc-stadium-pennants > div { position:absolute; z-index:2; top:21%; left:2.5%; width:7%; height:50%; display:flex; flex-direction:column; align-items:center; gap:1cqw; padding-top:2cqw; color:#ffe49b; background:linear-gradient(90deg,#062d31ee,#0c4c47ed,#092c35ee); border:.22cqw solid #e0be6d; clip-path:polygon(0 0,100% 0,100% 86%,50% 100%,0 86%); }
+.tbc-stadium-pennants > .right { left:auto; right:2.5%; }
+.tbc-stadium-pennants svg { width:4.7cqw; height:5cqw; }
+.tbc-stadium-pennants strong { font:bold 2.3cqw Georgia,serif; margin-top:-2.4cqw; text-shadow:0 .15cqw #092c35; }
+.tbc-stadium-pennants span { font:800 .78cqw/1.7 Arial,sans-serif; text-align:center; letter-spacing:.05em; border-top:.1cqw solid #e0be6d66; padding-top:1cqw; }
+/* Dedicated areas keep Active and Bench visible even when either is empty. */
+.tbc-stage .tbc-roster { display:grid; grid-template-rows:auto minmax(0,1fr) auto; gap:.35cqw; transform:none; padding:.45cqw; }
+.tbc-stage .tbc-roster-heading { display:flex; align-items:center; justify-content:space-between; min-width:0; height:auto; gap:.5cqw; margin:0; border:0; }
+.tbc-stage .tbc-roster-heading strong { max-width:80%; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:#fff4ce; font-size:.85cqw; letter-spacing:.02em; }
+.tbc-stage .tbc-roster-heading > span { font-size:.55cqw; color:#b6cce5; }
+.tbc-roster-zones { display:grid; grid-template-rows:repeat(2,minmax(0,1fr)); gap:.5cqw; min-height:0; min-width:0; }
+.tbc-stage .tbc-roster-counts { position:static; width:auto; transform:none; margin:0; padding:.25cqw .1cqw 0; background:none; border:0; font-size:.62cqw; }
+.tbc-stage .tbc-roster-counts b { font-size:.75cqw; }
+.tbc-layout-center_duel .tbc-roster { --zone-columns:4; left:1.5%; top:35%; width:24%; height:61%; }
+.tbc-layout-center_duel .tbc-roster.p2 { left:auto; right:1.5%; }
+.tbc-layout-center_duel .tbc-corner-brand { display:none; }
+.tbc-layout-side_panel .tbc-roster { --zone-columns:4; top:38%; width:24%; height:59%; }
+.tbc-layout-stadium .tbc-roster { --zone-columns:4; left:2%; top:40%; width:26%; height:57%; }
+.tbc-layout-stadium .tbc-roster.p2 { left:auto; right:2%; }
+.tbc-layout-stadium .tbc-stadium-pennants > div { height:32%; }
+.tbc-layout-top_bottom .tbc-roster { display:block; padding:0; border:0; background:none; box-shadow:none; top:60%; height:25%; }
+.tbc-layout-top_bottom .tbc-roster.p2 { top:26%; background:none; }
+.tbc-layout-top_bottom .tbc-roster-heading { display:none; }
+.tbc-layout-top_bottom .tbc-roster-zones { --zone-columns:4; height:100%; grid-template-rows:minmax(0,1fr); grid-template-columns:minmax(0,1fr) minmax(0,1fr); column-gap:16%; }
+.tbc-layout-top_bottom .tbc-roster-counts { position:absolute; right:0; width:22%; bottom:-6.8cqw; padding:.6cqw; border:.1cqw solid #d7bb6f99; background:#092340f5; }
+.tbc-layout-top_bottom .p2 .tbc-roster-counts { top:-3.1cqw; bottom:auto; }
+.tbc-action-toast { --toast-accent:#f5d577; position:absolute; z-index:2; inset:0; display:flex; align-items:center; gap:1cqw; padding:.8cqw 2.2cqw; background:linear-gradient(110deg,#0e2948,#08172d); border-left:.25cqw solid var(--toast-accent); overflow:hidden; }
+.tbc-action-toast.p1 { --toast-accent:#6cddff; }.tbc-action-toast.p2 { --toast-accent:#d09bff; }
+.tbc-toast-icon { flex:none; color:var(--toast-accent); font-size:2cqw; }
+.tbc-toast-copy { min-width:0; }
+.tbc-toast-copy small { display:block; margin-bottom:.35cqw; color:var(--toast-accent); font:800 .75cqw/1.3 Arial,sans-serif; }
+.tbc-toast-copy small > span { color:#aec4dc; font-weight:500; }
+.tbc-toast-copy > strong { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; color:#fff; font:700 1.05cqw/1.35 Arial,sans-serif; overflow-wrap:anywhere; }
+.tbc-toast-progress { position:absolute; bottom:0; left:0; width:100%; height:.12cqw; background:var(--toast-accent); transform-origin:left; animation:toast-duration linear forwards; }
+.tbc-toast-enter-active,.tbc-toast-leave-active { transition:opacity .18s ease,translate .18s ease; }
+.tbc-toast-enter-from,.tbc-toast-leave-to { opacity:0; translate:0 .5cqw; }
+.tbc-layout-top_bottom .tbc-action-toast { padding:.35cqw 1.4cqw; gap:.7cqw; }
+.tbc-layout-top_bottom .tbc-toast-icon { font-size:1.3cqw; }
+.tbc-layout-top_bottom .tbc-toast-copy small { font-size:.65cqw; margin-bottom:.15cqw; }
+.tbc-layout-top_bottom .tbc-toast-copy > strong { font-size:.85cqw; -webkit-line-clamp:1; }
+@keyframes toast-duration { to { transform:scaleX(0); } }
+@keyframes tbc-ring-glow { to { opacity:.6; filter:drop-shadow(0 0 .8cqw var(--energy)); } }
+@keyframes tbc-charge { to { filter:brightness(1.35) drop-shadow(0 0 1.5cqw var(--energy)); } }
+@keyframes tbc-hit { 50% { translate:.4cqw 0; filter:brightness(1.7); } }
+@media(prefers-reduced-motion:reduce) { .tbc-stage * { animation:none!important; transition:none!important; } }
+/* Larger team cards use a full row; unused zones reserve only their label. */
+.tbc-layout-center_duel .tbc-hero { left:29%; width:17%; }
+.tbc-layout-center_duel .tbc-hero.p2 { left:auto; right:29%; }
+.tbc-layout-center_duel .tbc-battle-log { left:27%; width:46%; padding:1cqw 1.4cqw; }
+.tbc-layout-side_panel .tbc-hud { width:24%; }
+.tbc-layout-side_panel .tbc-battle-log { left:27%; width:46%; padding:.8cqw 1.4cqw; }
+.tbc-layout-stadium .tbc-stadium-pennants > div { height:25%; }
+.tbc-roster.empty-bench .tbc-roster-zones { grid-template-rows:minmax(0,1fr) 4cqw; }
+.tbc-roster.empty-active:not(.empty-bench) .tbc-roster-zones { grid-template-rows:4cqw minmax(0,1fr); }
+.tbc-layout-top_bottom .tbc-roster.empty-bench .tbc-roster-zones,.tbc-layout-top_bottom .tbc-roster.empty-active .tbc-roster-zones { grid-template-rows:minmax(0,1fr); }
+.tbc-roster.is-live-roster { border-color:#ffe695; }
+.tbc-roster-counts .live-graveyard { color:#ffe68a; text-decoration:underline; text-underline-offset:.2cqw; }
+.tbc-log-row.live .tbc-log-icon { color:#83efbb; font-size:.8cqw; }
+.tbc-log-row.live strong { color:#c0eaff; }
 </style>

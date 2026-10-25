@@ -1,14 +1,17 @@
 <script setup>
 import SearchableSelect from "../components/SearchableSelect.vue";
+import SkillIcon from '../components/battle/SkillIcon.vue';
+import { splitSkillIcon, skillMediaValue, skillLimitLabel, skillOptionLabel, describeBasicSkill } from '../lib/battle/skillPresentation.js';
 
-import { ref, computed, watch, onMounted, onUnmounted } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted, onActivated, onDeactivated } from "vue";
 
-import { useRouter } from "vue-router";
+import { useRouter, useRoute } from "vue-router";
 
 import { supabase } from "../lib/supabase"; // Sesuaikan path Supabase kamu
 import { compressImageFile, IMAGE_UPLOAD_LIMITS } from "../lib/compressImage";
 
 const router = useRouter();
+const route = useRoute();
 
 // State Form Pendaftaran/Edit Kartu Game
 
@@ -280,12 +283,15 @@ const skillName = ref("");
 const skillCode = ref("");
 const skillDescription = ref("");
 const skillIcon = ref("✨");
+const skillImageUrl = ref('');
+const skillActionPoints = ref(1);
 const skillType = ref("active");
 const activationTiming = ref("main_phase");
 const skillTargetType = ref("enemy_active");
 const skillCostType = ref("none");
 const skillCostValue = ref(0);
 const skillCooldownRounds = ref(0);
+const skillCooldownUnit = ref("owner");
 const skillMaxUses = ref(0);
 const skillOncePerBattle = ref(false);
 const skillConsumesTurn = ref(true);
@@ -335,6 +341,12 @@ const isImageUrl = (str) =>
 
 
 let realtimeChannel;
+let registrationActive = true;
+let registrationLoaded = false;
+const stopRegistrationListener = () => {
+  if (realtimeChannel) supabase.removeChannel(realtimeChannel);
+  realtimeChannel = null;
+};
 
 
 // =========================================================
@@ -363,21 +375,10 @@ const formatTagsInput = (tags) =>
 
 
 const physicalCopySources = computed(() => {
-  const byCode = new Map();
-  const preferredSources = [...gameCardCatalog.value].sort((a, b) =>
-    Number(Boolean(a?.uid)) - Number(Boolean(b?.uid)),
-  );
-
-  for (const card of preferredSources) {
-    if (card?.fusion_only) continue;
-
-    const code = String(card?.card_code ?? "").trim();
-    if (!code || byCode.has(code)) continue;
-
-    byCode.set(code, card);
-  }
-
-  return [...byCode.values()].sort((a, b) =>
+  const templates=gameCardCatalog.value.filter(card=>!card.fusion_only&&!card.uid);
+  const codes=new Set(templates.map(card=>card.card_code)),physical=[];
+  for(const card of gameCardCatalog.value){if(card.fusion_only||!card.uid||codes.has(card.card_code))continue;codes.add(card.card_code);physical.push(card);}
+  return [...templates,...physical].sort((a, b) =>
     String(a?.name ?? "").localeCompare(String(b?.name ?? "")),
   );
 });
@@ -506,7 +507,7 @@ const handleCardModeChange = async () => {
   if (cardMode.value === "copy") {
     successMessage.value = uid.value
       ? "UID baru siap. Pilih Existing Card Type yang ingin dicopy."
-      : "Scan RFID baru terlebih dahulu, lalu pilih Card Type yang ingin dicopy.";
+      : "Pilih kartu tersimpan, lalu scan RFID baru untuk menghubungkannya.";
   } else {
     successMessage.value = uid.value
       ? "Mode New Physical Card aktif."
@@ -529,6 +530,7 @@ const loadCopySourceCard = async () => {
   const newUid = uid.value;
 
   await applyCardDataToForm(source, { keepUid: true });
+  cardMetadata.value={...cardMetadata.value,catalog_source_id:source.id,studio_template:false};
 
   uid.value = newUid;
   cardCode.value = source.card_code ?? slugifyCardCode(source.name);
@@ -914,12 +916,15 @@ const resetNewSkillForm = () => {
   skillCode.value = "";
   skillDescription.value = "";
   skillIcon.value = "✨";
+  skillImageUrl.value = '';
+  skillActionPoints.value = 1;
   skillType.value = "active";
   activationTiming.value = "main_phase";
   skillTargetType.value = "enemy_active";
   skillCostType.value = "none";
   skillCostValue.value = 0;
   skillCooldownRounds.value = 0;
+  skillCooldownUnit.value = "owner";
   skillMaxUses.value = 0;
   skillOncePerBattle.value = false;
   skillConsumesTurn.value = true;
@@ -994,10 +999,14 @@ const builtinCardSkills = computed(() => {
     if (!identity || seen.has(identity)) return [];
     seen.add(identity);
 
-    const definition = allSkillDefinitions.value.find((skill) => {
+    const bound = existingCardSkillRelations.value.find(relation =>
+      Number(relation.sort_order) === Number(entry?.slot ?? index + 1)
+      && allSkillDefinitions.value.some(skill => skill.id === relation.special_skill_id && skill.metadata?.studio_generated),
+    );
+    const definition = (bound && allSkillDefinitions.value.find(skill => skill.id === bound.special_skill_id)) || allSkillDefinitions.value.find((skill) => {
       const codeMatches = entry?.code && normalizeSkillIdentity(skill.code) === normalizeSkillIdentity(entry.code);
       return codeMatches || normalizeSkillIdentity(skill.name) === normalizeSkillIdentity(name);
-    }) ?? null;
+    }) || null;
     const relation = definition
       ? existingCardSkillRelations.value.find((item) => String(item.special_skill_id) === String(definition.id))
       : null;
@@ -1011,7 +1020,8 @@ const builtinCardSkills = computed(() => {
 
     return [{
       key: `${identity}-${entry?.slot ?? index + 1}`,
-      name: name || definition?.name || "Skill kartu",
+      name: definition?.name || name || "Skill kartu",
+      icon: definition?.icon || entry?.icon || '✦',
       description: definition?.description ?? entry?.description ?? entry?.effect ?? "",
       slot: Number(entry?.slot ?? index + 1),
       definition,
@@ -1027,6 +1037,10 @@ const builtinCardSkills = computed(() => {
 const setBuiltinSkillEnabled = (item, event) => {
   if (!item?.definition || !item.battleReady) return;
   const enabled = Boolean(event?.target?.checked);
+  if (cardMetadata.value?.studio_card) {
+    const update = skills => (skills ?? []).map((skill,index) => Number(skill.slot ?? index+1) === item.slot ? {...skill,battle:{...(skill.battle ?? {}),enabled,selection_enabled:enabled}} : skill);
+    cardMetadata.value = {...cardMetadata.value,skills:update(cardMetadata.value.skills),studio_card:{...cardMetadata.value.studio_card,skills:update(cardMetadata.value.studio_card.skills)}};
+  }
   builtinSkillSelections.value = {
     ...builtinSkillSelections.value,
     [item.definition.id]: enabled,
@@ -1118,6 +1132,7 @@ const humanTargetLabel = (value) => {
   const labels = {
     enemy_active: "Enemy Active Card",
     ally_active: "Ally Active Card",
+    ally_field: "Kartu milikmu di Active atau Bench",
     self_card: "Kartu ini sendiri",
     self_player: "Player sendiri",
     enemy_player: "Player lawan",
@@ -1161,7 +1176,10 @@ const populateSkillForm = (skill) => {
   skillCode.value = skill.code ?? "";
   skillCodeAuto.value = false;
   skillDescription.value = skill.description ?? "";
-  skillIcon.value = skill.icon ?? "✨";
+  const media = splitSkillIcon(skill.icon);
+  skillIcon.value = media.symbol;
+  skillImageUrl.value = media.imageUrl;
+  skillActionPoints.value = Number(skill.limits?.action_points ?? 1);
   skillType.value = skill.skill_type ?? "active";
   activationTiming.value = skill.activation_timing ?? "main_phase";
   skillTargetType.value = resolveTargetTypeFromSkill(skill);
@@ -1169,8 +1187,9 @@ const populateSkillForm = (skill) => {
   skillCostValue.value = Number(
     skill.cost_spec?.value ?? skill.cost_spec?.amount ?? 0,
   );
+  skillCooldownUnit.value = Object.hasOwn(skill.limits ?? {}, "cooldown_turns") ? "owner" : "round";
   skillCooldownRounds.value = Number(
-    skill.limits?.cooldown_rounds ?? skill.limits?.cooldown ?? 0,
+    skill.limits?.cooldown_turns ?? skill.limits?.cooldown_rounds ?? skill.limits?.cooldown ?? 0,
   );
   skillMaxUses.value = Number(skill.limits?.max_uses ?? 0);
   skillOncePerBattle.value = Boolean(skill.limits?.once_per_battle);
@@ -1351,8 +1370,9 @@ const buildTargetSpec = () => {
   ]);
 
   return {
+    ...(specialSkillMode.value === 'edit' && resolveTargetTypeFromSkill(selectedSpecialSkill.value) === skillTargetType.value ? selectedSpecialSkill.value?.target_spec ?? {} : {}),
     type: skillTargetType.value,
-    required: cardTargetTypes.has(skillTargetType.value),
+    required: cardTargetTypes.has(skillTargetType.value) || skillTargetType.value === 'ally_field',
   };
 };
 
@@ -1368,8 +1388,10 @@ const buildCostSpec = () => ({
 
 const buildLimits = () => {
   const limits = {
+    ...(specialSkillMode.value === 'edit' ? selectedSpecialSkill.value?.limits ?? {} : {}),
+    action_points: Number(skillActionPoints.value),
     once_per_battle: Boolean(skillOncePerBattle.value),
-    cooldown_rounds: Math.max(
+    [skillCooldownUnit.value === "owner" ? "cooldown_turns" : "cooldown_rounds"]: Math.max(
       0,
       Number(skillCooldownRounds.value) || 0,
     ),
@@ -1377,12 +1399,16 @@ const buildLimits = () => {
 
   if (Number(skillMaxUses.value) > 0) {
     limits.max_uses = Number(skillMaxUses.value);
+  } else {
+    delete limits.max_uses;
   }
 
   if (skillOncePerBattle.value) {
     limits.max_uses = 1;
   }
 
+  delete limits[skillCooldownUnit.value === 'owner' ? 'cooldown_rounds' : 'cooldown_turns'];
+  delete limits.cooldown;
   return limits;
 };
 
@@ -1494,6 +1520,10 @@ const buildSkillPayload = () => {
   if (!skillName.value.trim()) {
     throw new Error("Nama Special Skill wajib diisi.");
   }
+  if (/^(?:https?:\/\/|data:|\/)/i.test(skillName.value.trim())) throw new Error('Nama skill harus berupa nama kemampuan. Masukkan URL di bagian Gambar skill.');
+  if (!skillDescription.value.trim()) throw new Error('Penjelasan skill wajib diisi sesuai aturan efeknya.');
+  if (skillType.value !== 'active' || activationTiming.value !== 'main_phase') throw new Error('Registrasi kartu memakai skill aktif manual pada Main phase. Simpan rancangan pasif atau terpicu di Skill & Catalog.');
+  if (!Number.isInteger(Number(skillActionPoints.value)) || Number(skillActionPoints.value)<1 || Number(skillActionPoints.value)>2) throw new Error('Biaya skill harus 1 atau 2 AP.');
 
   const finalCode =
     skillCode.value.trim() || slugifySkillCode(skillName.value);
@@ -1506,7 +1536,7 @@ const buildSkillPayload = () => {
     code: finalCode,
     name: skillName.value.trim(),
     description: skillDescription.value.trim() || null,
-    icon: skillIcon.value.trim() || null,
+    icon: skillMediaValue(skillImageUrl.value, skillIcon.value),
     category: "special",
     skill_type: skillType.value,
     activation_timing: activationTiming.value,
@@ -1524,8 +1554,16 @@ const buildSkillPayload = () => {
     catalog_status: "active",
     is_active: true,
     change_note: "Disimpan dari Register Card",
-    metadata: {},
+    metadata: specialSkillMode.value === 'edit' ? {...(selectedSpecialSkill.value?.metadata ?? {}),catalog_only:false} : {},
   };
+};
+
+const suggestSkillCopy = () => {
+  if (skillAdvancedMode.value) return;
+  const copy = describeBasicSkill({type:skillEffectType.value,amount:skillEffectAmount.value,target:skillTargetType.value,actionPoints:skillActionPoints.value,cooldown:skillCooldownRounds.value,cooldownUnit:skillCooldownUnit.value,once:skillOncePerBattle.value,endsTurn:skillConsumesTurn.value});
+  if (!copy) return;
+  if (!skillName.value.trim()) skillName.value = copy.name;
+  skillDescription.value = copy.description;
 };
 
 
@@ -1852,6 +1890,7 @@ const checkExistingCard = async (scannedUid) => {
 // ==========================================
 
 const setupRealtimeListener = () => {
+  if (!registrationActive || realtimeChannel) return;
 
   realtimeChannel = supabase
 
@@ -1877,7 +1916,7 @@ const setupRealtimeListener = () => {
 
         // Fusion Card tidak memakai RFID. Scan yang masuk saat mode Fusion
         // sengaja diabaikan supaya form virtual card tidak tertimpa.
-        if (cardMode.value === "fusion") {
+        if (!registrationActive || cardMode.value === "fusion") {
           return;
         }
 
@@ -1983,6 +2022,7 @@ const handleSubmit = async () => {
       rarity: cardRarity.value || "common",
       lore: cardLore.value || null,
       metadata: metadataForSave,
+      physical_scan_enabled: !isFusionCard,
       fusion_only: isFusionCard,
       name: cardName.value.trim(),
       element: element.value,
@@ -2019,8 +2059,10 @@ const handleSubmit = async () => {
     }
 
     // Special Skill tetap memakai sistem Phase 3C yang sudah works.
-    await syncCardSpecialSkill(savedCardId);
-    await syncBuiltinCardSkillToggles(savedCardId);
+    if (!metadataForSave.studio_card) {
+      await syncCardSpecialSkill(savedCardId);
+      await syncBuiltinCardSkillToggles(savedCardId);
+    }
 
     cardCode.value = finalCardCode;
 
@@ -2039,7 +2081,7 @@ const handleSubmit = async () => {
         : `${isFusionCard ? "Fusion Card virtual + Fusion Recipe" : "Physical Card"} dan Special Skill berhasil didaftarkan!`;
 
     setTimeout(() => {
-      router.push({ name: "battle-arena" });
+      router.push({ name: "album-card" });
     }, 1500);
   } catch (error) {
     console.error("Save Card:", error);
@@ -2212,6 +2254,22 @@ const resetForm = () => {
 };
 
 
+let appliedStudioSource='';
+const useStudioSource=async()=>{
+  const source=String(route.query.source??'');
+  if(!source||route.name!=='register-card')return;
+  const card=gameCardCatalog.value.find(item=>item.id===source);
+  if(!card){errorMessage.value='Kartu sumber belum ditemukan. Buka kembali dari Studio atau Album.';return;}
+  const signature=JSON.stringify(card);
+  if(appliedStudioSource===signature)return;
+  appliedStudioSource=signature;
+  try{
+    if(card.fusion_only){cardMode.value='fusion';selectedFusionCardId.value=source;await loadFusionCardForEdit();}
+    else{cardMode.value='copy';copySourceCardId.value=source;await loadCopySourceCard();}
+  }catch(error){appliedStudioSource='';errorMessage.value=error?.message||'Data kartu belum dapat dimuat.';}
+};
+watch(()=>route.query.source,()=>{if(registrationLoaded)loadGameCardCatalog().then(useStudioSource);});
+
 onMounted(async () => {
   loadStoredElements();
 
@@ -2220,9 +2278,20 @@ onMounted(async () => {
     loadGameCardCatalog(),
   ]);
 
-  setupRealtimeListener();
+  registrationLoaded = true;
+  await useStudioSource();
+  if (registrationActive) setupRealtimeListener();
 });
 
+onActivated(() => {
+  registrationActive = true;
+  if (registrationLoaded) { setupRealtimeListener(); loadGameCardCatalog().then(useStudioSource); }
+});
+
+onDeactivated(() => {
+  registrationActive = false;
+  stopRegistrationListener();
+});
 
 
 onUnmounted(() => {
@@ -2231,11 +2300,8 @@ onUnmounted(() => {
   if (physicalCardImagePreview.value.startsWith("blob:")) URL.revokeObjectURL(physicalCardImagePreview.value);
   if (avatarImagePreview.value.startsWith("blob:")) URL.revokeObjectURL(avatarImagePreview.value);
 
-  if (realtimeChannel) {
-
-    supabase.removeChannel(realtimeChannel);
-
-  }
+  registrationActive = false;
+  stopRegistrationListener();
 
 });
 
@@ -2253,7 +2319,7 @@ onUnmounted(() => {
         <div class="toolbar-heading">
           <span class="toolbar-kicker">TIMEDOOR · CARD STUDIO</span>
           <h1 class="toolbar-title">
-            {{ isExistingCard ? "Edit Card" : "Register Card" }}
+            {{ isExistingCard ? "Edit kartu terdaftar" : "Registrasi kartu" }}
           </h1>
           <span class="toolbar-subtitle">
             {{ uid ? `RFID ${uid}` : cardMode === "fusion" ? "Virtual fusion card" : "Menunggu kartu RFID" }}
@@ -2341,19 +2407,19 @@ onUnmounted(() => {
                 </div>
 
                 <div v-if="cardMode === 'copy'" class="input-group compact-field">
-                  <label for="copySourceCard">Copy dari Card Type</label>
+                  <label for="copySourceCard">Pilih kartu dari akun / katalog</label>
                   <SearchableSelect
                     id="copySourceCard"
                     v-model="copySourceCardId"
                     @change="loadCopySourceCard"
                   >
-                    <option value="">-- Pilih Card Type --</option>
+                    <option value="">-- Pilih kartu tersimpan --</option>
                     <option
                       v-for="card in physicalCopySources"
                       :key="card.id"
                       :value="card.id"
                     >
-                      {{ card.name }} — {{ card.metadata?.source_card_code || card.card_code }}
+                      {{ card.name }} — {{ card.metadata?.source_card_code || card.card_code }}{{ card.metadata?.studio_card ? " · Studio" : "" }}
                     </option>
                   </SearchableSelect>
                   <small class="help-text">
@@ -2391,6 +2457,8 @@ onUnmounted(() => {
                 </div>
               </template>
             </section>
+
+            <section class="bento-card"><h3>Desain &amp; publikasi</h3><p>Gunakan data kartu ini di Studio. Pilih kartu yang ditampilkan ke publik melalui Album.</p><RouterLink v-if="recordId || copySourceCardId" :to="{name:'card-generator',query:{catalog:recordId || copySourceCardId}}">Edit desain di Studio →</RouterLink><RouterLink :to="{name:'album-card'}">Kelola publikasi di Album →</RouterLink></section>
 
             <!-- IDENTITY -->
             <section class="bento-card bento-identity-card">
@@ -3055,7 +3123,7 @@ onUnmounted(() => {
 
               <article v-for="item in builtinCardSkills" :key="item.key" class="builtin-skill-toggle-row">
                 <div class="builtin-skill-toggle-copy">
-                  <strong>{{ item.definition?.icon || "✦" }} {{ item.name }}</strong>
+                  <div class="registration-skill-heading"><span class="registration-skill-art"><SkillIcon :icon="item.icon" :name="item.name" /></span><strong>{{ item.name }}</strong></div>
                   <small>{{ item.description || "Belum ada deskripsi skill." }}</small>
                   <em v-if="!item.battleReady">
                     {{ item.definition ? "Belum aktif di Skill Catalog; lengkapi efek dan aturan battle terlebih dahulu." : "Skill ini belum terdaftar di Skill Catalog." }}
@@ -3165,9 +3233,7 @@ onUnmounted(() => {
                     :key="skill.id"
                     :value="skill.id"
                   >
-                    {{ skill.icon || "✨" }}
-                    {{ skill.name }}
-                    ({{ skill.code }})
+                    {{ skillOptionLabel(skill) }}
                   </option>
                 </SearchableSelect>
               </div>
@@ -3178,18 +3244,21 @@ onUnmounted(() => {
               >
                 <div class="skill-summary-head">
                   <div class="skill-summary-icon">
-                    {{ selectedSpecialSkill.icon || "✨" }}
+                    <SkillIcon :icon="selectedSpecialSkill.icon" :name="selectedSpecialSkill.name" />
                   </div>
 
                   <div>
                     <strong>{{ selectedSpecialSkill.name }}</strong>
-                    <span>{{ selectedSpecialSkill.code }}</span>
+                    <span>{{ selectedSpecialSkill.skill_type === 'active' ? 'Skill aktif · dipakai saat giliranmu' : 'Skill kartu' }}</span>
                   </div>
                 </div>
 
                 <p>
                   {{ selectedSpecialSkill.description || "Tidak ada deskripsi." }}
                 </p>
+                <label v-if="splitSkillIcon(selectedSpecialSkill.icon).imageUrl" class="registration-skill-source">Gambar skill
+                  <input :value="splitSkillIcon(selectedSpecialSkill.icon).imageUrl" type="text" readonly aria-label="URL gambar skill tersimpan" />
+                </label>
 
                 <small v-if="selectedSpecialSkill.metadata?.catalog_only" class="help-text">
                   Skill ini sudah tertaut ke kartu sebagai data katalog. Efek battle-nya belum diaktifkan karena dokumen sumber menandainya perlu playtest.
@@ -3203,21 +3272,22 @@ onUnmounted(() => {
 
                   <span>
                     Cooldown:
-                    <strong>{{ selectedSpecialSkill.limits?.cooldown_rounds ?? 0 }} round</strong>
+                    <strong>{{ skillLimitLabel(selectedSpecialSkill) }}</strong>
                   </span>
 
                   <span>
                     Max Uses:
-                    <strong>{{ selectedSpecialSkill.limits?.max_uses ?? "Unlimited" }}</strong>
+                    <strong>{{ selectedSpecialSkill.limits?.once_per_battle ? '1× per battle' : selectedSpecialSkill.limits?.max_uses || 'Tidak terbatas' }}</strong>
                   </span>
 
                   <span>
-                    Turn:
-                    <strong>{{ selectedSpecialSkill.consumes_turn ? "Dipakai" : "Tidak dipakai" }}</strong>
+                    Poin giliran:
+                    <strong>{{ selectedSpecialSkill.limits?.action_points ?? 1 }} AP{{ selectedSpecialSkill.consumes_turn ? ' · mengakhiri giliran' : '' }}</strong>
                   </span>
                 </div>
 
-                <button
+                <RouterLink v-if="cardMetadata?.studio_card" class="btn-edit-skill" :to="{name:'skill-catalog',query:{skill:selectedSpecialSkill.id}}">Edit nama, gambar &amp; aturan skill →</RouterLink>
+                <button v-else
                   type="button"
                   class="btn-edit-skill"
                   @click="startEditSelectedSkill"
@@ -3301,7 +3371,7 @@ onUnmounted(() => {
               </div>
 
               <div class="input-group">
-                <label for="skillDescription">Description</label>
+                <label for="skillDescription">Penjelasan skill</label>
 
                 <textarea
                   id="skillDescription"
@@ -3313,15 +3383,27 @@ onUnmounted(() => {
 
               <div class="input-row">
                 <div class="input-group">
-                  <label for="skillIcon">Icon</label>
+                  <label for="skillIcon">Simbol pengganti</label>
 
                   <input
                     id="skillIcon"
                     v-model="skillIcon"
                     type="text"
                     placeholder="🔥"
+                    maxlength="32"
                   />
                 </div>
+                <div class="input-group">
+                  <label for="skillActionPoints">Biaya poin giliran (AP)</label>
+                  <select id="skillActionPoints" v-model.number="skillActionPoints"><option :value="1">1 AP</option><option :value="2">2 AP</option></select>
+                </div>
+
+              </div>
+              <section class="registration-skill-media" aria-label="Gambar skill">
+                <span class="registration-skill-art"><SkillIcon :icon="skillImageUrl || skillIcon" :name="skillName" /></span>
+                <div class="input-group"><label for="skillImageUrl">URL gambar skill</label><input id="skillImageUrl" v-model="skillImageUrl" type="text" inputmode="url" placeholder="https://…/skill.webp" /><small class="help-text">Gambar ditampilkan sebagai ikon. Nama dan penjelasan skill tetap diisi terpisah.</small></div>
+              </section>
+              <div class="input-row">
 
                 <div class="input-group">
                   <label for="skillTargetType">Target</label>
@@ -3337,6 +3419,7 @@ onUnmounted(() => {
                     <option value="ally_active">
                       Ally Active Card
                     </option>
+                    <option v-if="skillTargetType === 'ally_field'" value="ally_field">Kartu milikmu di Active atau Bench</option>
 
                     <option value="self_card">
                       Self Card
@@ -3397,8 +3480,9 @@ onUnmounted(() => {
 
               <div class="input-row">
                 <div class="input-group">
+                  <label for="skillCooldownUnit">Hitung cooldown per</label><select id="skillCooldownUnit" v-model="skillCooldownUnit"><option value="owner">Giliran pemilik</option><option value="round">Round (aturan lama)</option></select>
                   <label for="skillCooldownRounds">
-                    Cooldown Rounds
+                    Cooldown
                   </label>
 
                   <input
@@ -3500,6 +3584,7 @@ onUnmounted(() => {
                   sebesar <b>{{ skillEffectAmount }}</b>
                   ke <b>{{ humanTargetLabel(skillTargetType) }}</b>.
                 </div>
+                <button v-if="!skillAdvancedMode" type="button" class="btn-edit-skill" @click="suggestSkillCopy">Isi nama &amp; penjelasan dari aturan</button>
 
                 <label class="checkbox-option advanced-toggle">
                   <input
@@ -3625,6 +3710,8 @@ onUnmounted(() => {
 
 
 <style scoped>
+.landing-toggle{display:flex;align-items:center;gap:10px}.landing-toggle input{width:18px!important;height:18px}.landing-fields{display:grid;gap:14px;margin-top:16px}.landing-fields label{display:grid;gap:6px}.landing-fields .landing-toggle{display:flex}.landing-card-preview{display:flex;align-items:center;gap:12px;padding:14px;background:#f2f7ef;border:1px solid #d7e3d4;border-radius:12px}.landing-card-preview img{width:70px;height:90px;object-fit:contain}.landing-card-preview div{display:grid;gap:6px}.landing-fields p{font-size:13px;color:#526458}
+
 
 .register-container {
 
@@ -5636,4 +5723,23 @@ textarea {
   .ide-builder-page *, .ide-builder-page *::before, .ide-builder-page *::after { scroll-behavior:auto !important; transition-duration:.01ms !important; }
 }
 
+.registration-skill-heading{display:flex;align-items:center;gap:10px;min-width:0}
+.registration-skill-art{display:grid;place-items:center;flex:none;width:48px;height:48px;overflow:hidden;border:1px solid #cfe0d0;border-radius:12px;background:#edf7ed;font-size:25px}
+.registration-skill-heading>strong{min-width:0;overflow-wrap:anywhere}
+.ide-main-grid .builtin-skill-toggle-copy{flex:1;min-width:0}
+.ide-main-grid .builtin-skill-toggle-copy small{font-size:11px;line-height:1.6;overflow-wrap:anywhere}
+.ide-main-grid .builtin-skill-toggle-copy strong{font-size:13px;line-height:1.4}
+.ide-main-grid .builtin-skill-toggle-list>header>div{min-width:0}
+.ide-main-grid .builtin-skill-toggle-list>header small{white-space:normal;line-height:1.5}
+.ide-main-grid .skill-summary-head>div:last-child{min-width:0;flex:1;overflow-wrap:anywhere}
+.ide-main-grid .skill-summary-icon{width:56px;height:56px;flex:none;overflow:hidden;border-radius:12px;background:#edf7ed}
+.ide-main-grid .skill-summary-head strong{font-size:16px;line-height:1.3}
+.ide-main-grid .skill-summary-card>p{font-size:12px;line-height:1.65;overflow-wrap:anywhere}
+.registration-skill-source{display:grid;gap:6px;color:#52725a;font-size:10px;font-weight:700}
+.ide-main-grid .registration-skill-source>input{box-sizing:border-box;width:100%;min-width:0;padding:9px;border:1px solid #d8e8d8;border-radius:7px;background:#f8fbf6;color:#637d69;font:10px/1.5 ui-monospace,monospace;text-overflow:ellipsis}
+.registration-skill-media{display:flex;align-items:center;gap:12px;min-width:0;margin:12px 0;padding:12px;border:1px solid #d8e8d8;border-radius:12px;background:#f7fbf5}
+.ide-main-grid .registration-skill-media .input-group{flex:1;min-width:0;margin:0}
+.ide-main-grid .registration-skill-media input{width:100%;min-width:0;box-sizing:border-box}
+.ide-main-grid a.btn-edit-skill{display:block;box-sizing:border-box;white-space:normal;text-decoration:none;text-align:center;background:#edf7ed;border-color:#c7dfc9;color:#21693c;line-height:1.5}
+.ide-main-grid a.btn-edit-skill:hover{background:#dfeede;color:#164d2a}
 </style>

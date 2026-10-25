@@ -4,6 +4,10 @@ import { ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { supabase } from "../lib/supabase";
 import QRCode from "qrcode";
+import PublicLayoutPicker from "../components/battle/PublicLayoutPicker.vue";
+import PlayerPhotoUpload from "../components/battle/PlayerPhotoUpload.vue";
+import { usePlayerSetupPhotos } from "../composables/battle/usePlayerSetupPhotos.js";
+import { PUBLIC_BATTLE_LAYOUTS, normalizePublicBattleLayout } from "../utils/publicBattleLayouts.js";
 
 // =========================================================
 // ROUTER
@@ -17,6 +21,7 @@ const router = useRouter();
 
 const player1Name = ref("Player 1");
 const player2Name = ref("Player 2");
+const { photos, processingPhotos, selectPhoto, clearPhoto, clearPhotos, uploadPhotos } = usePlayerSetupPhotos();
 
 // =========================================================
 // GAME RULES
@@ -25,6 +30,8 @@ const player2Name = ref("Player 2");
 const totalRounds = ref(10);
 const startingPlayer = ref("random");
 const turnDurationSeconds = ref(45);
+const publicLayout = ref('center_duel');
+const selectedLayout = computed(() => PUBLIC_BATTLE_LAYOUTS.find(layout => layout.id === publicLayout.value));
 
 // =========================================================
 // TCG V1
@@ -119,6 +126,9 @@ const questionTopicOptions = [
 const loading = ref(false);
 const error = ref(null);
 const createdBattle = ref(null);
+const createdLayoutName = computed(() => PUBLIC_BATTLE_LAYOUTS.find(
+  layout => layout.id === normalizePublicBattleLayout(createdBattle.value?.public_layout),
+)?.name);
 
 // =========================================================
 // PLAYER QR CODE
@@ -148,7 +158,7 @@ const publicUrl = computed(() => {
     return "";
   }
 
-  return `${window.location.origin}/battle/${createdBattle.value.code}`;
+  return `${window.location.origin}/battle/${createdBattle.value.code}?layout=${normalizePublicBattleLayout(createdBattle.value.public_layout)}`;
 });
 
 const player1Url = computed(() => {
@@ -508,6 +518,7 @@ const validateForm = () => {
 // =========================================================
 
 const createBattle = async () => {
+  if (loading.value || processingPhotos.value) return;
   error.value = null;
 
   const validationError =
@@ -520,33 +531,33 @@ const createBattle = async () => {
     return;
   }
 
-  if (questionEnabled.value) {
-    let questionPool = supabase
-      .from("coding_questions")
-      .select("id", { count: "exact", head: true })
-      .eq("is_active", true);
-    if (questionLevel.value !== "mixed") {
-      questionPool = questionPool.eq("difficulty", questionLevel.value);
-    }
-    if (questionTopics.value.length) {
-      questionPool = questionPool.in("category", questionTopics.value);
-    }
-    const { count, error: questionPoolError } = await questionPool;
-    if (questionPoolError) {
-      error.value = `Bank soal tidak dapat diperiksa: ${questionPoolError.message}`;
-      return;
-    }
-    if (!count) {
-      error.value = "Belum ada soal aktif untuk kombinasi topik dan level ini. Pilih topik lain atau aktifkan level Mixed.";
-      return;
-    }
-  }
-
   loading.value = true;
-
+  const selectedPublicLayout = normalizePublicBattleLayout(publicLayout.value);
   createdBattle.value = null;
 
   try {
+    if (questionEnabled.value) {
+      let questionPool = supabase
+        .from("coding_questions")
+        .select("id", { count: "exact", head: true })
+        .eq("is_active", true);
+      if (questionLevel.value !== "mixed") {
+        questionPool = questionPool.eq("difficulty", questionLevel.value);
+      }
+      if (questionTopics.value.length) {
+        questionPool = questionPool.in("category", questionTopics.value);
+      }
+      const { count, error: questionPoolError } = await questionPool;
+      if (questionPoolError) {
+        error.value = `Bank soal tidak dapat diperiksa: ${questionPoolError.message}`;
+        return;
+      }
+      if (!count) {
+        error.value = "Belum ada soal aktif untuk kombinasi topik dan level ini. Pilih topik lain atau aktifkan level Mixed.";
+        return;
+      }
+    }
+
     // =====================================================
     // USER
     // =====================================================
@@ -566,6 +577,8 @@ const createBattle = async () => {
         "Session login tidak ditemukan.",
       );
     }
+
+    const avatarFields = await uploadPhotos(user.id);
 
     // =====================================================
     // STARTING PLAYER
@@ -605,6 +618,7 @@ const createBattle = async () => {
         // =================================================
 
         code,
+        public_layout: selectedPublicLayout,
         player1_access_code: generatePlayerAccessCode(),
         player2_access_code: generatePlayerAccessCode(),
 
@@ -617,6 +631,7 @@ const createBattle = async () => {
 
         player2_name:
           player2Name.value.trim(),
+        ...avatarFields,
 
         // =================================================
         // RULESET
@@ -879,23 +894,27 @@ const createBattle = async () => {
       // INSERT
       // ===================================================
 
-      const {
-        data,
-        error: insertError,
-      } = await supabase
-        .from(
-          "battle_sessions",
-        )
-        .insert(payload)
-        .select("*")
-        .single();
+      let insertResult = await supabase.from("battle_sessions").insert(payload).select("*").single();
+      // Older installations still preserve the layout in the shareable public URL.
+      // Only a missing layout column permits this retry; other errors remain visible.
+      if (['PGRST204', '42703'].includes(insertResult.error?.code) &&
+          String(insertResult.error?.message ?? '').includes('public_layout')) {
+        const legacyPayload = { ...payload };
+        delete legacyPayload.public_layout;
+        insertResult = await supabase.from("battle_sessions").insert(legacyPayload).select("*").single();
+      }
+      const { data, error: insertError } = insertResult;
+      if (['PGRST204', '42703'].includes(insertError?.code) &&
+          /player[12]_avatar_url/.test(String(insertError?.message ?? ''))) {
+        throw new Error("Penyimpanan avatar belum aktif. Jalankan migrasi 025_player_battle_avatar_selection.sql di Supabase, lalu coba lagi.");
+      }
 
       // ===================================================
       // SUCCESS
       // ===================================================
 
       if (!insertError) {
-        created = data;
+        created = { ...data, public_layout: selectedPublicLayout };
 
         break;
       }
@@ -1019,6 +1038,7 @@ const openPublicBattle = () => {
 
   router.push({
     name: "public-battle",
+    query: { layout: normalizePublicBattleLayout(createdBattle.value.public_layout) },
 
     params: {
       code:
@@ -1067,6 +1087,7 @@ const openPlayer = (
 // =========================================================
 
 const createAnother = () => {
+  clearPhotos();
   createdBattle.value =
     null;
 
@@ -1179,8 +1200,7 @@ const createAnother = () => {
               </h2>
 
               <p>
-                Tentukan nama
-                kedua pemain.
+                Tentukan nama dan foto kedua pemain.
               </p>
             </div>
           </div>
@@ -1200,6 +1220,7 @@ const createAnother = () => {
                   player1Name
                 "
                 type="text"
+                :disabled="loading"
                 maxlength="40"
                 placeholder="Player 1"
               />
@@ -1217,10 +1238,25 @@ const createAnother = () => {
                   player2Name
                 "
                 type="text"
+                :disabled="loading"
                 maxlength="40"
                 placeholder="Player 2"
               />
             </label>
+          </div>
+
+          <div class="form-grid two setup-player-photos">
+            <PlayerPhotoUpload
+              v-for="side in ['p1', 'p2']" :key="side"
+              :player="side"
+              :name="side === 'p1' ? player1Name : player2Name"
+              :preview="photos[side].preview"
+              :processing="photos[side].processing"
+              :error="photos[side].error"
+              :disabled="loading"
+              @select="file => selectPhoto(side, file)"
+              @remove="clearPhoto(side)"
+            />
           </div>
 
           <div class="question-extra-grid" :class="{ disabled: !questionEnabled }">
@@ -1253,9 +1289,13 @@ const createAnother = () => {
 
             <label class="question-setting-toggle">
               <input v-model="questionBonusEnabled" type="checkbox" :disabled="!questionEnabled" />
-              <span><strong>Bonus untuk jawaban benar</strong><small>Pemenang kuis memilih satu dari tiga bonus skill.</small></span>
+              <span><strong>Bonus untuk jawaban benar</strong><small>Pemenang memilih satu bonus dari pilihan yang diatur di admin.</small></span>
             </label>
           </div>
+        </section>
+
+        <section class="setup-card">
+          <PublicLayoutPicker v-model="publicLayout" :disabled="loading" />
         </section>
 
         <!-- ===============================================
@@ -2135,7 +2175,7 @@ const createAnother = () => {
                 </h2>
 
                 <p>
-                  Pemain yang menjawab benar lebih dulu mendapat tiga pilihan skill.
+                  Pemain yang menjawab benar lebih dulu mendapat pilihan badge bonus sesuai pengaturan admin (1–6 pilihan).
                 </p>
               </div>
             </div>
@@ -2277,7 +2317,7 @@ const createAnother = () => {
             type="submit"
             class="create-button"
             :disabled="
-              loading
+              loading || processingPhotos
             "
           >
             <template
@@ -2292,6 +2332,9 @@ const createAnother = () => {
               CREATING BATTLE...
             </template>
 
+            <template v-else-if="processingPhotos">
+              MENYIAPKAN FOTO…
+            </template>
             <template v-else>
               ⚔️ CREATE TCG BATTLE
             </template>
@@ -2310,12 +2353,14 @@ const createAnother = () => {
 
         <div class="setup-preview-arena">
           <div class="setup-preview-player blue">
+            <img v-if="photos.p1.preview" class="setup-preview-photo" :src="photos.p1.preview" :alt="`Foto ${player1Name}`" />
             <span>P1</span>
             <strong>{{ player1Name || "Player 1" }}</strong>
             <small>{{ playerStartingHp }} HP</small>
           </div>
           <div class="setup-preview-vs">VS</div>
           <div class="setup-preview-player red">
+            <img v-if="photos.p2.preview" class="setup-preview-photo" :src="photos.p2.preview" :alt="`Foto ${player2Name}`" />
             <span>P2</span>
             <strong>{{ player2Name || "Player 2" }}</strong>
             <small>{{ playerStartingHp }} HP</small>
@@ -2358,6 +2403,10 @@ const createAnother = () => {
           <p v-else class="setup-preview-note">Battle berjalan tanpa ronde quiz.</p>
         </section>
 
+        <div class="setup-preview-footer">
+          <span>Public layout</span>
+          <strong>{{ selectedLayout.name }}</strong>
+        </div>
         <div class="setup-preview-footer">
           <span>Starting player</span>
           <strong>{{ startingPlayer === "random" ? "Dipilih acak" : startingPlayer === "p1" ? player1Name : player2Name }}</strong>
@@ -2552,6 +2601,10 @@ const createAnother = () => {
       </div>
 
       <!-- DECK READY -->
+
+      <div class="created-rule-summary created-layout-summary">
+        <div><span>PUBLIC LAYOUT</span><strong>{{ createdLayoutName }}</strong></div>
+      </div>
 
       <div
         class="created-rule-summary"
@@ -3987,6 +4040,7 @@ select {
 .created-rule-summary {
   margin-top: -7px;
 }
+.created-layout-summary { grid-template-columns:1fr; }
 
 /* =========================================================
    PRIMARY ACTIONS
@@ -4704,6 +4758,8 @@ select {
 .ide-setup-workspace .setup-preview-player strong { overflow:hidden; color:#274a2f; font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
 .ide-setup-workspace .setup-preview-player small { color:#728574; font-size:9px; font-weight:800; }
 .ide-setup-workspace .setup-preview-player.red > span { color:#bb5670; }
+.ide-setup-workspace .setup-player-photos { margin-top:16px; }
+.ide-setup-workspace .setup-preview-photo { width:44px; height:44px; object-fit:cover; object-position:center 25%; border-radius:10px; border:1px solid #c5daca; }
 .ide-setup-workspace .setup-preview-vs { color:#9aab9a; font-size:8px; font-weight:950; text-align:center; }
 .ide-setup-workspace .setup-preview-block { display:grid; gap:10px; padding:13px; border:1px solid #e1ede0; border-radius:12px; background:#fff; }
 .ide-setup-workspace .setup-preview-block-title { display:flex; align-items:center; justify-content:space-between; gap:8px; }

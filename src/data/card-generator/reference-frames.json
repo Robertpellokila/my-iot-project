@@ -1,0 +1,50 @@
+{
+  "common": {
+    "url": "/images/card-generator/reference-frames/common.png",
+    "sha256": "a16141ddd019f767c8f816025a09a2468725fc833fd274eeb84b507cb644555e",
+    "width": 1024,
+    "height": 1536,
+    "trim_height": 1464,
+    "source": "ChatGPT Image Oct 21, 2026, 10_51_58 AM-1.png"
+  },
+  "uncommon": {
+    "url": "/images/card-generator/reference-frames/uncommon.png",
+    "sha256": "d84a793dffa172f1a6333a3b91020aeb82194399d5d9f77462eb2f91173049c1",
+    "width": 1024,
+    "height": 1536,
+    "trim_height": 1464,
+    "source": "ChatGPT Image Oct 21, 2026, 10_52_06 AM-8.png"
+  },
+  "rare-knight": {
+    "url": "/images/card-generator/reference-frames/rare-knight.png",
+    "sha256": "72921217f99cebe150cd5750bb1e65ebac6c8c114ef8927fd3fce0a35ed1bd25",
+    "width": 1024,
+    "height": 1536,
+    "trim_height": 1464,
+    "source": "ChatGPT Image Oct 21, 2026, 10_52_03 AM-5.png"
+  },
+  "rare-thunder": {
+    "url": "/images/card-generator/reference-frames/rare-thunder.png",
+    "sha256": "a8187f9df392547dfec2e154637f67b13242ef0de34b11cef8ec6cb78da2173a",
+    "width": 1024,
+    "height": 1536,
+    "trim_height": 1464,
+    "source": "ChatGPT Image Oct 21, 2026, 10_52_04 AM-6.png"
+  },
+  "rare-forest": {
+    "url": "/images/card-generator/reference-frames/rare-forest.png",
+    "sha256": "1ae03ad13a0e39eb70f5709cc5c834f85ca256efc8092260da65ac77ed576821",
+    "width": 1024,
+    "height": 1536,
+    "trim_height": 1464,
+    "source": "ChatGPT Image Oct 21, 2026, 10_52_08 AM-9.png"
+  },
+  "epic": {
+    "url": "/images/card-generator/reference-frames/epic.png",
+    "sha256": "1a74ff6115be4f9b38e775121adcfa1ec2ddc6e8541a4645bd5cd816cdfc8814",
+    "width": 1024,
+    "height": 1536,
+    "trim_height": 1464,
+    "source": "ChatGPT Image Oct 21, 2026, 10_52_09 AM-10.png"
+  }
+}

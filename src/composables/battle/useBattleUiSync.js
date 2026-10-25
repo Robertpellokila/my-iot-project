@@ -1,19 +1,27 @@
 import {
   reactive,
   ref,
+  shallowRef,
+  toRaw,
 } from "vue";
 
 import {
   supabase,
 } from "../../lib/supabase";
+import { normalizeSkillIntent } from '../../lib/battle/skillCinematic.js';
+import { clonePlayerFocus, newerSpotlight, normalizeSpotlight } from '../../utils/battleSpotlight.js';
 
 // =========================================================
 // STATE HELPERS
 // =========================================================
 
 const emptyPlayerState = () => ({
+  focus: { selected: null, target: null },
+  skillIntent: null,
   viewerZone: null,
   viewerIndex: 0,
+  viewerCardId: null,
+  viewerTurn: null,
 
   draggingCardId: null,
   draggingCardName: "",
@@ -26,6 +34,10 @@ const emptyPlayerState = () => ({
 const cloneState = (
   state,
 ) => ({
+  focus: clonePlayerFocus(state?.focus),
+  skillIntent: normalizeSkillIntent(state?.skillIntent),
+  viewerCardId: state?.viewerCardId == null ? null : String(state.viewerCardId).slice(0, 128),
+  viewerTurn: Number.isSafeInteger(state?.viewerTurn) && state.viewerTurn >= 0 ? state.viewerTurn : null,
   viewerZone:
     state?.viewerZone ??
     null,
@@ -83,8 +95,13 @@ export function useBattleUiSync() {
   // CONNECTION
   // =======================================================
 
-  const channel =
-    ref(null);
+  const channel = shallowRef(null);
+  let reconnectTimer = null;
+  let reconnectAttempt = 0;
+  const clearReconnect = () => {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  };
 
   const connected =
     ref(false);
@@ -124,6 +141,27 @@ export function useBattleUiSync() {
       p2:
         emptyPlayerState(),
     });
+
+  // This stays latched when a selection is cleared by an action or a player leaves.
+  const spotlight = reactive({ p1: null, p2: null });
+  const storageKey = suffix => `tbc:battle-spotlight:${battleId.value}:${suffix}`;
+  const readSaved = suffix => {
+    try { return JSON.parse(sessionStorage.getItem(storageKey(suffix)) || 'null'); }
+    catch { return null; }
+  };
+  const saveState = (suffix, state) => {
+    if (!battleId.value) return;
+    try { sessionStorage.setItem(storageKey(suffix), JSON.stringify(state)); }
+    catch { /* Realtime remains available when browser storage is disabled. */ }
+  };
+  const rememberFocus = (player, focus) => {
+    const opposite = player === 'p1' ? 'p2' : 'p1';
+    const next = clonePlayerFocus(focus);
+    for (const [side, record] of [[player, next.selected], [opposite, next.target]]) {
+      if (newerSpotlight(record, spotlight[side])) spotlight[side] = record;
+    }
+    saveState('display', spotlight);
+  };
 
   // =======================================================
   // DEBUG
@@ -185,6 +223,8 @@ export function useBattleUiSync() {
       cloneState(
         state,
       );
+
+    rememberFocus(player, next.focus);
 
     if (
       Number(
@@ -433,7 +473,7 @@ export function useBattleUiSync() {
       );
 
       localState.updatedAt =
-        Date.now();
+        Math.max(Date.now(), localState.updatedAt + 1);
 
       if (
         !connected.value ||
@@ -473,15 +513,15 @@ export function useBattleUiSync() {
   // =======================================================
 
   async function disconnect() {
+    clearReconnect();
     connected.value =
       false;
 
-    if (
-      channel.value
-    ) {
+    const previousChannel = channel.value;
+    channel.value = null;
+    if (previousChannel) {
       try {
-        await channel.value
-          .untrack();
+        await previousChannel.untrack();
       } catch {
         // ignore
       }
@@ -489,7 +529,7 @@ export function useBattleUiSync() {
       try {
         await supabase
           .removeChannel(
-            channel.value,
+            previousChannel,
           );
       } catch {
         // ignore
@@ -510,6 +550,9 @@ export function useBattleUiSync() {
 
     resetRemote();
 
+    spotlight.p1 = null;
+    spotlight.p2 = null;
+
     resetState(
       localState,
     );
@@ -529,6 +572,7 @@ export function useBattleUiSync() {
           "spectator",
 
       player = null,
+      resumeState = null,
     }) => {
       if (
         !newBattleId
@@ -558,6 +602,15 @@ export function useBattleUiSync() {
         )
           ? player
           : null;
+
+      const savedDisplay = readSaved('display');
+      spotlight.p1 = normalizeSpotlight(savedDisplay?.p1);
+      spotlight.p2 = normalizeSpotlight(savedDisplay?.p2);
+      if (role.value === 'player' && ownPlayer.value) {
+        localState.focus = clonePlayerFocus(readSaved(`player:${ownPlayer.value}`));
+        rememberFocus(ownPlayer.value, localState.focus);
+      }
+      if (resumeState) Object.assign(localState, cloneState(resumeState));
 
       clientId.value =
         randomId();
@@ -684,6 +737,7 @@ export function useBattleUiSync() {
             async (
               status,
             ) => {
+              if (toRaw(channel.value) !== nextChannel) return;
               debug(
                 "channel status",
                 status,
@@ -692,11 +746,9 @@ export function useBattleUiSync() {
                 ownPlayer.value,
               );
 
-              if (
-                status ===
-                  "SUBSCRIBED" &&
-                !settled
-              ) {
+              if (status === "SUBSCRIBED") {
+                clearReconnect();
+                reconnectAttempt = 0;
                 settled =
                   true;
 
@@ -728,9 +780,21 @@ export function useBattleUiSync() {
                     "TIMED_OUT" ||
                   status ===
                     "CLOSED"
-                ) &&
-                !settled
+                )
               ) {
+                connected.value = false;
+                if (!reconnectTimer) {
+                  const retry = { battleId: battleId.value, role: role.value, player: ownPlayer.value };
+                  reconnectTimer = setTimeout(() => {
+                    reconnectTimer = null;
+                    if (toRaw(channel.value) !== nextChannel || connected.value) return;
+                    // Retain actions queued while disconnected, including an opened pile.
+                    void connect({ ...retry, resumeState: cloneState(localState) }).catch(error => {
+                      console.debug('[BattleUiSync] reconnect pending:', error.message);
+                    });
+                  }, Math.min(15000, (status === 'CLOSED' ? 1000 : 5000) * 2 ** Math.min(reconnectAttempt++, 3)));
+                }
+                if (settled) return;
                 settled =
                   true;
 
@@ -754,9 +818,13 @@ export function useBattleUiSync() {
     async (
       zone,
       index = 0,
+      turn = null,
+      cardId = null,
     ) => {
       await publish(
         {
+          viewerTurn: turn,
+          viewerCardId: cardId,
           viewerZone:
             zone,
 
@@ -775,6 +843,8 @@ export function useBattleUiSync() {
     async () => {
       await publish(
         {
+          viewerTurn: null,
+          viewerCardId: null,
           viewerZone:
             null,
 
@@ -787,6 +857,8 @@ export function useBattleUiSync() {
   const setViewerIndex =
     async (
       index,
+      cardId = null,
+      turn = null,
     ) => {
       const value =
         Math.max(
@@ -799,13 +871,15 @@ export function useBattleUiSync() {
       if (
         localState
           .viewerIndex ===
-        value
+        value && localState.viewerCardId === cardId && localState.viewerTurn === turn
       ) {
         return;
       }
 
       await publish(
         {
+          viewerCardId: cardId,
+          viewerTurn: turn,
           viewerIndex:
             value,
         },
@@ -886,8 +960,27 @@ export function useBattleUiSync() {
   // RETURN
   // =======================================================
 
+  const focusCards = async ({ selectedCardId, targetCardId, turn }) => {
+    if (selectedCardId == null && targetCardId == null) return;
+    const at = Math.max(Date.now(), localState.updatedAt + 1,
+      (localState.focus.selected?.at ?? 0) + 1, (localState.focus.target?.at ?? 0) + 1);
+    const focus = clonePlayerFocus(localState.focus);
+    // Null is deliberately ignored: clearing an action picker must not reset TV focus.
+    if (selectedCardId != null) focus.selected = normalizeSpotlight({ cardId: selectedCardId, turn, at });
+    if (targetCardId != null) focus.target = normalizeSpotlight({ cardId: targetCardId, turn, at });
+    if (ownPlayer.value) {
+      saveState(`player:${ownPlayer.value}`, focus);
+      rememberFocus(ownPlayer.value, focus);
+    }
+    await publish({ focus });
+  };
+
   return {
     connected,
+
+    spotlight,
+    focusCards,
+    skillIntent: value => publish({ skillIntent: normalizeSkillIntent(value) }),
 
     players,
 

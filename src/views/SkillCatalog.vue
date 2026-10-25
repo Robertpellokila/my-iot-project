@@ -1,9 +1,16 @@
 <script setup>
 import SearchableSelect from "../components/SearchableSelect.vue";
-import { computed, onMounted, ref } from "vue";
+import SkillIcon from '../components/battle/SkillIcon.vue';
+import { splitSkillIcon, skillMediaValue, describeBasicSkill } from '../lib/battle/skillPresentation.js';
+import { computed, defineAsyncComponent, onMounted, ref, watch } from "vue";
+const BattleRuleCatalog=defineAsyncComponent(()=>import('../components/battle/BattleRuleCatalog.vue'));
+import { useRoute } from 'vue-router';
 import { supabase } from "../lib/supabase";
+const props=defineProps({embedded:Boolean,cardId:String});
+const emit=defineEmits(['saved','saving']);
 
 const cards = ref([]);
+const route = useRoute();
 const skills = ref([]);
 const links = ref([]);
 const recipes = ref([]);
@@ -12,6 +19,7 @@ const playtests = ref([]);
 const revisions = ref([]);
 const loading = ref(true);
 const saving = ref(false);
+watch(saving,value=>emit('saving',value));
 const savingPlaytest = ref(false);
 const errorMessage = ref("");
 const successMessage = ref("");
@@ -25,15 +33,17 @@ const rulesJson = ref("[]");
 const playtestForm = ref({ outcome: "observation", scenario: "", observed_result: "", change_summary: "" });
 
 const blankDraft = () => ({
-  name: "", code: "", description: "", icon: "✦", catalog_status: "draft",
+  name: "", code: "", description: "", icon: "✦", image_url: '', catalog_status: "draft",
   skill_type: "active", trigger_type: "main_phase", activation_timing: "main_phase",
   target_type: "enemy_active", target_required: true,
-  cost_type: "none", cost_value: 0, action_points: 1, cooldown_rounds: 0, max_uses: 0,
+  cost_type: "none", cost_value: 0, action_points: 1, cooldown_unit: "owner", cooldown_rounds: 0, max_uses: 0,
   once_per_battle: false, consumes_turn: true,
   effect_type: "damage_card", effect_amount: 30, effect_status: "burn", effect_duration: 1,
   change_note: "",
 });
 const draft = ref(blankDraft());
+const basicRuleSnapshot = ref('');
+const basicRuleKey = row => JSON.stringify([row.effect_type,row.effect_amount,row.effect_status,row.effect_duration,row.target_type]);
 
 const cardById = computed(() => new Map(cards.value.map((card) => [String(card.id), card])));
 const selectedSkill = computed(() => skills.value.find((skill) => String(skill.id) === String(selectedSkillId.value)) ?? null);
@@ -63,6 +73,9 @@ const ruleIssues = (skill, { fromDraft = false } = {}) => {
 
   const issues = [];
   if (!String(row.name ?? "").trim()) issues.push("Nama skill belum diisi.");
+  else if (/^(?:https?:\/\/|data:|\/)/i.test(String(row.name).trim())) issues.push('Nama skill harus berupa nama kemampuan; pindahkan URL ke Gambar skill.');
+  if ((fromDraft ? row.catalog_status === 'active' : row.is_active) && !String(row.description ?? '').trim()) issues.push('Penjelasan skill aktif wajib diisi.');
+  if (fromDraft) { try { skillMediaValue(row.image_url,row.icon); } catch(error) { issues.push(error.message); } }
   if (String(row.skill_type ?? "") !== "active") issues.push("Battle saat ini hanya menjalankan skill aktif manual; pasif/terpicu tetap di Draft atau Playtest.");
   if (!trigger) issues.push("Pemicu skill belum dipilih.");
   else if (trigger !== "main_phase") issues.push("Pemicu otomatis belum didukung saat battle; gunakan Main phase untuk aktivasi.");
@@ -125,6 +138,7 @@ const statusCounts = computed(() => Object.fromEntries(["draft", "playtest", "ac
 const filteredSkills = computed(() => {
   const query = search.value.trim().toLocaleLowerCase();
   return skills.value.filter((skill) => {
+    if(props.embedded && !links.value.some(link=>link.game_card_id===props.cardId && link.special_skill_id===skill.id))return false;
     const statusMatch = statusFilter.value === "all" || skill.catalog_status === statusFilter.value;
     const cardNames = cardNamesForSkill(skill.id).join(" ");
     const queryMatch = !query || `${skill.name} ${skill.code} ${skill.description ?? ""} ${cardNames}`.toLocaleLowerCase().includes(query);
@@ -178,7 +192,8 @@ const syncDraftFromSkill = (skill) => {
     name: skill.name ?? "",
     code: skill.code ?? "",
     description: skill.description ?? "",
-    icon: skill.icon ?? "✦",
+    icon: splitSkillIcon(skill.icon).symbol,
+    image_url: splitSkillIcon(skill.icon).imageUrl,
     catalog_status: skill.catalog_status ?? (skill.is_active ? "active" : "draft"),
     skill_type: skill.skill_type ?? "active",
     trigger_type: skill.trigger_spec?.type ?? skill.activation_timing ?? "main_phase",
@@ -188,7 +203,8 @@ const syncDraftFromSkill = (skill) => {
     cost_type: cost.type ?? "none",
     cost_value: Number(cost.value ?? cost.amount ?? 0),
     action_points: Number(limits.action_points ?? 1),
-    cooldown_rounds: Number(limits.cooldown_rounds ?? limits.cooldown ?? 0),
+    cooldown_unit: Object.hasOwn(limits, "cooldown_turns") ? "owner" : "round",
+    cooldown_rounds: Number(limits.cooldown_turns ?? limits.cooldown_rounds ?? limits.cooldown ?? 0),
     max_uses: Number(limits.max_uses ?? 0),
     once_per_battle: Boolean(limits.once_per_battle),
     consumes_turn: Boolean(skill.consumes_turn ?? true),
@@ -197,6 +213,7 @@ const syncDraftFromSkill = (skill) => {
     effect_status: first.status_key ?? "burn",
     effect_duration: Number(first.duration_turns ?? 1),
   };
+  basicRuleSnapshot.value = basicRuleKey(draft.value);
 };
 
 const selectSkill = async (id) => {
@@ -234,7 +251,9 @@ const loadCatalog = async () => {
   links.value = linkResult.data ?? [];
   recipes.value = recipeResult.data ?? [];
   materials.value = materialResult.data ?? [];
-  if (!selectedSkillId.value && skills.value.length) await selectSkill(skills.value[0].id);
+  if(props.embedded){const available=filteredSkills.value;await selectSkill(available.some(skill=>skill.id===selectedSkillId.value)?selectedSkillId.value:available[0]?.id);}
+  else if (route.query.skill && skills.value.some(skill => skill.id === route.query.skill)) await selectSkill(String(route.query.skill));
+  else if (!selectedSkillId.value && skills.value.length) await selectSkill(skills.value[0].id);
   else if (selectedSkillId.value) await selectSkill(selectedSkillId.value);
   loading.value = false;
 };
@@ -243,7 +262,8 @@ const saveSkill = async () => {
   if (!selectedSkill.value) return;
   errorMessage.value = "";
   successMessage.value = "";
-  const effects = (() => {
+  let effects;
+  try { effects = (() => {
     if (ruleAdvanced.value) {
       try {
         const parsed = JSON.parse(rulesJson.value);
@@ -253,20 +273,23 @@ const saveSkill = async () => {
         throw new Error(error?.message || "JSON efek tidak valid.");
       }
     }
-    return buildBasicEffect();
-  })();
+    return basicRuleKey(draft.value) === basicRuleSnapshot.value ? selectedSkill.value.effects : buildBasicEffect();
+  })(); } catch(error) { errorMessage.value=error.message; return; }
   const updatedRule = {
     ...draft.value,
-    target_spec: { type: draft.value.target_type, required: Boolean(draft.value.target_required) },
+    target_spec: { ...(draft.value.target_type === selectedSkill.value.target_spec?.type ? selectedSkill.value.target_spec : {}), type: draft.value.target_type, required: Boolean(draft.value.target_required) },
     cost_spec: { type: draft.value.cost_type, value: draft.value.cost_type === "none" ? 0 : Math.max(0, Number(draft.value.cost_value) || 0) },
     limits: {
+      ...(selectedSkill.value.limits ?? {}),
       action_points: Math.max(1, Math.min(2, Number(draft.value.action_points) || 1)),
-      cooldown_rounds: Math.max(0, Number(draft.value.cooldown_rounds) || 0),
+      [draft.value.cooldown_unit === "owner" ? "cooldown_turns" : "cooldown_rounds"]: Math.max(0, Number(draft.value.cooldown_rounds) || 0),
       once_per_battle: Boolean(draft.value.once_per_battle),
       max_uses: draft.value.once_per_battle ? 1 : Math.max(0, Number(draft.value.max_uses) || 0),
     },
     effects,
   };
+  delete updatedRule.limits[draft.value.cooldown_unit === 'owner' ? 'cooldown_rounds' : 'cooldown_turns'];
+  delete updatedRule.limits.cooldown;
   const issues = ruleIssues(updatedRule, { fromDraft: true });
   if (draft.value.catalog_status === "active" && issues.length) {
     errorMessage.value = `Skill belum dapat diaktifkan: ${issues.join(" ")}`;
@@ -283,10 +306,10 @@ const saveSkill = async () => {
       name: updatedRule.name.trim(),
       code: updatedRule.code.trim().toLowerCase(),
       description: updatedRule.description.trim() || null,
-      icon: updatedRule.icon.trim() || "✦",
+      icon: skillMediaValue(updatedRule.image_url, updatedRule.icon),
       skill_type: updatedRule.skill_type,
       activation_timing: updatedRule.trigger_type,
-      trigger_spec: { type: updatedRule.trigger_type, label: updatedRule.trigger_type === "main_phase" ? "Aktif manual pada main phase" : "Pemicu event katalog" },
+      trigger_spec: { ...(selectedSkill.value.trigger_spec?.type === updatedRule.trigger_type ? selectedSkill.value.trigger_spec : {}), type: updatedRule.trigger_type, label: updatedRule.trigger_type === "main_phase" ? "Aktif manual pada main phase" : "Pemicu event katalog" },
       target_spec: updatedRule.target_spec,
       cost_spec: updatedRule.cost_spec,
       limits: updatedRule.limits,
@@ -295,10 +318,12 @@ const saveSkill = async () => {
       catalog_status: updatedRule.catalog_status,
       is_active: updatedRule.catalog_status === "active",
       change_note: draft.value.change_note?.trim() || null,
+      metadata: {...(selectedSkill.value.metadata ?? {}),...(selectedSkill.value.metadata?.studio_generated ? {studio_customized:true} : {}),...(updatedRule.catalog_status === 'active' ? {catalog_only:false} : {})},
     };
     const { error } = await supabase.from("special_skills").update(payload).eq("id", selectedSkillId.value);
     if (error) throw error;
     successMessage.value = "Skill tersimpan. Versi dan riwayat perubahan tercatat otomatis.";
+    emit('saved',{...selectedSkill.value,...payload});
     await loadCatalog();
   } catch (error) {
     errorMessage.value = error?.message ?? "Gagal menyimpan skill.";
@@ -337,14 +362,20 @@ const addPlaytest = async () => {
 };
 
 const statusLabel = (status) => ({ draft: "Draft", playtest: "Playtest", active: "Aktif", archived: "Arsip" }[status] ?? "Draft");
+const suggestSkillCopy = () => {
+  if (ruleAdvanced.value) return;
+  const row=draft.value,copy=describeBasicSkill({type:row.effect_type,amount:row.effect_amount,target:row.target_type,actionPoints:row.action_points,cooldown:row.cooldown_rounds,cooldownUnit:row.cooldown_unit,once:row.once_per_battle,endsTurn:row.consumes_turn});
+  if (copy) {if(!row.name.trim())row.name=copy.name;row.description=copy.description;}
+};
+watch(()=>route.query.skill,id=>{if(id && skills.value.some(skill=>skill.id===id))selectSkill(String(id));});
 const issueLabel = (issues) => issues[0] ?? "Aturan belum lengkap";
 
 onMounted(loadCatalog);
 </script>
 
 <template>
-  <main class="skill-catalog-page">
-    <header class="catalog-heading">
+  <main class="skill-catalog-page" :class="{'skill-catalog-embedded':embedded}">
+    <header v-if="!embedded" class="catalog-heading">
       <div>
         <span class="eyebrow">TIMEDOOR · CARD WORKSHOP</span>
         <h1>Skill & kelengkapan katalog</h1>
@@ -356,21 +387,24 @@ onMounted(loadCatalog);
     <div v-if="errorMessage" class="notice notice-error" role="alert">{{ errorMessage }}</div>
     <div v-if="successMessage" class="notice notice-success" role="status">{{ successMessage }}</div>
 
-    <section class="metric-row" aria-label="Ringkasan skill">
+    <section v-if="!embedded" class="metric-row" aria-label="Ringkasan skill">
       <button type="button" class="metric" @click="statusFilter = 'draft'; activeTab = 'skills'"><span>Draft</span><strong>{{ statusCounts.draft ?? 0 }}</strong></button>
       <button type="button" class="metric" @click="statusFilter = 'playtest'; activeTab = 'skills'"><span>Playtest</span><strong>{{ statusCounts.playtest ?? 0 }}</strong></button>
       <button type="button" class="metric metric-active" @click="statusFilter = 'active'; activeTab = 'skills'"><span>Aktif</span><strong>{{ statusCounts.active ?? 0 }}</strong></button>
       <button type="button" class="metric metric-warning" @click="activeTab = 'audit'"><span>Temuan katalog</span><strong>{{ cardsMissingSkills.length + incompleteSkills.length + incompleteRecipes.length }}</strong></button>
     </section>
 
-    <nav class="catalog-tabs" aria-label="Bagian katalog">
+    <nav v-if="!embedded" class="catalog-tabs" aria-label="Bagian katalog">
       <button type="button" :class="{ selected: activeTab === 'skills' }" @click="activeTab = 'skills'">Skill</button>
+      <button type="button" :class="{ selected: activeTab === 'synergy' }" @click="activeTab = 'synergy'">Synergy per tipe</button>
+      <button type="button" :class="{ selected: activeTab === 'quiz_bonus' }" @click="activeTab = 'quiz_bonus'">Bonus kuis</button>
       <button type="button" :class="{ selected: activeTab === 'audit' }" @click="activeTab = 'audit'">Pemeriksaan katalog</button>
     </nav>
 
+    <BattleRuleCatalog v-if="!embedded && ['synergy','quiz_bonus'].includes(activeTab)" :kind="activeTab"/>
     <section v-if="activeTab === 'skills'" class="skill-workspace">
       <aside class="skill-list-panel">
-        <div class="list-tools">
+        <div v-if="!embedded" class="list-tools">
           <input v-model="search" type="search" placeholder="Cari skill atau nama kartu…" aria-label="Cari skill atau kartu">
           <SearchableSelect v-model="statusFilter" aria-label="Filter status skill">
             <option value="all">Semua status</option>
@@ -389,7 +423,7 @@ onMounted(loadCatalog);
           :class="{ selected: String(skill.id) === String(selectedSkillId) }"
           @click="selectSkill(skill.id)"
         >
-          <span class="skill-item-icon">{{ skill.icon || '✦' }}</span>
+          <span class="skill-item-icon"><SkillIcon :icon="skill.icon" :name="skill.name" /></span>
           <span class="skill-item-copy"><strong>{{ skill.name }}</strong><small>{{ cardNamesForSkill(skill.id).slice(0, 2).join(' · ') || 'Belum terpasang pada kartu' }}</small></span>
           <span class="status-chip" :class="skill.catalog_status">{{ statusLabel(skill.catalog_status) }}</span>
         </button>
@@ -402,20 +436,26 @@ onMounted(loadCatalog);
           <span class="status-chip" :class="draft.catalog_status">{{ statusLabel(draft.catalog_status) }}</span>
         </div>
         <div class="linked-cards"><span>TERPASANG PADA</span><b v-for="name in cardNamesForSkill(selectedSkill.id)" :key="name">{{ name }}</b><em v-if="!cardNamesForSkill(selectedSkill.id).length">Belum ditautkan ke kartu</em></div>
+        <p v-if="selectedSkill.metadata?.studio_generated" class="studio-rule-note">{{ selectedSkill.metadata?.studio_customized ? 'Aturan kustom' : 'Aturan dari template' }} · Menyimpan perubahan di sini menjadikannya aturan kustom yang dipertahankan saat Studio disimpan ulang. Salinan RFID baru mengikuti aturan tersimpan ini.</p>
 
         <form class="skill-form" @submit.prevent="saveSkill">
+          <section class="catalog-skill-media" aria-label="Gambar skill">
+            <span class="catalog-skill-art"><SkillIcon :icon="draft.image_url || draft.icon" :name="draft.name" /></span>
+            <div><label>URL gambar skill<input v-model="draft.image_url" type="text" inputmode="url" placeholder="https://…/skill.webp"></label><p>Gambar digunakan sebagai ikon. Nama, penjelasan, dan aturan battle diisi pada bagiannya masing-masing.</p></div>
+          </section>
           <div class="form-grid">
-            <label>Nama skill<input v-model="draft.name" required></label>
+            <label>Nama skill<input v-model="draft.name" required placeholder="Contoh: Shell Brace"></label>
             <label>Kode internal<input v-model="draft.code" required></label>
+            <label>Simbol pengganti<input v-model="draft.icon" maxlength="32" placeholder="✦"><small>Ditampilkan jika gambar tidak tersedia.</small></label>
             <label class="span-two">Deskripsi kartu<textarea v-model="draft.description" rows="2" placeholder="Jelaskan efek yang dibaca pemain"></textarea></label>
             <label>Status katalog<SearchableSelect v-model="draft.catalog_status"><option value="draft">Draft</option><option value="playtest">Playtest</option><option value="active">Aktif</option><option value="archived">Arsip</option></SearchableSelect></label>
             <label>Tipe skill<SearchableSelect v-model="draft.skill_type"><option value="active">Aktif</option><option value="passive">Pasif</option><option value="triggered">Terpicu event</option></SearchableSelect></label>
             <label>Pemicu<SearchableSelect v-model="draft.trigger_type"><option value="main_phase">Main phase · manual</option><option value="on_summon">Saat dipanggil</option><option value="on_attack">Saat menyerang</option><option value="on_hit">Saat serangan mengenai</option><option value="on_damage">Saat menerima damage</option><option value="turn_start">Awal turn</option><option value="turn_end">Akhir turn</option><option value="passive">Selalu pasif</option></SearchableSelect><small v-if="draft.trigger_type !== 'main_phase'">Pemicu event masih dicatat sebagai rancangan dan belum berjalan otomatis di battle.</small></label>
-            <label>Target<SearchableSelect v-model="draft.target_type"><option value="enemy_active">Kartu lawan aktif</option><option value="enemy_active_or_bench">Kartu lawan aktif / bench</option><option value="ally_active">Kartu teman aktif</option><option value="self_card">Kartu ini</option><option value="self_player">Pemain sendiri</option><option value="enemy_player">Pemain lawan</option><option value="ally_graveyard">Kartu sendiri di graveyard</option></SearchableSelect></label>
+            <label>Target<SearchableSelect v-model="draft.target_type"><option value="enemy_active">Kartu lawan aktif</option><option value="enemy_active_or_bench">Kartu lawan aktif / bench</option><option value="ally_active">Kartu teman aktif</option><option value="ally_field">Kartu milikmu di Active / Bench</option><option value="self_card">Kartu ini</option><option value="self_player">Pemain sendiri</option><option value="enemy_player">Pemain lawan</option><option value="ally_graveyard">Kartu sendiri di graveyard</option></SearchableSelect></label>
             <label>Biaya<SearchableSelect v-model="draft.cost_type"><option value="none">Gratis</option><option value="skill_gauge">Skill gauge</option></SearchableSelect></label>
             <label v-if="draft.cost_type !== 'none'">Nilai biaya<input v-model.number="draft.cost_value" type="number" min="0"></label>
             <label>Poin Giliran<input v-model.number="draft.action_points" type="number" min="1" max="2"><small>Aktivasi skill memakai 1 atau 2 poin giliran.</small></label>
-            <label>Cooldown (turn)<input v-model.number="draft.cooldown_rounds" type="number" min="0"><small>Isi 0 jika tidak ada cooldown.</small></label>
+            <label>Satuan cooldown<select v-model="draft.cooldown_unit"><option value="owner">Giliran pemilik</option><option value="round">Round (legacy)</option></select></label><label>Cooldown<input v-model.number="draft.cooldown_rounds" type="number" min="0"><small>Isi 0 jika tidak ada cooldown.</small></label>
             <label>Batas penggunaan<input v-model.number="draft.max_uses" type="number" min="0"><small>Isi 0 jika tidak terbatas.</small></label>
           </div>
 
@@ -431,6 +471,7 @@ onMounted(loadCatalog);
                 <label v-if="draft.effect_type === 'add_status'">Durasi (turn)<input v-model.number="draft.effect_duration" type="number" min="1"></label>
               </div>
               <p class="form-hint">Durasi berlaku untuk efek status. Efek langsung seperti damage atau heal selesai saat digunakan.</p>
+              <button class="secondary-button" type="button" @click="suggestSkillCopy">Isi nama &amp; penjelasan dari aturan</button>
             </template>
             <label v-else class="json-field">Daftar efek JSON<textarea v-model="rulesJson" rows="9" spellcheck="false"></textarea></label>
           </section>
@@ -445,7 +486,7 @@ onMounted(loadCatalog);
           <div class="form-actions"><button class="primary-button" type="submit" :disabled="saving">{{ saving ? 'Menyimpan…' : `Simpan skill · versi berikutnya` }}</button></div>
         </form>
 
-        <div class="history-block">
+        <div v-if="!embedded" class="history-block">
           <nav class="history-tabs"><button type="button" :class="{ selected: historyTab === 'playtests' }" @click="historyTab = 'playtests'">Playtest ({{ playtests.length }})</button><button type="button" :class="{ selected: historyTab === 'revisions' }" @click="historyTab = 'revisions'">Riwayat versi ({{ revisions.length }})</button></nav>
           <section v-if="historyTab === 'playtests'" class="playtest-area">
             <form class="playtest-form" @submit.prevent="addPlaytest">
@@ -464,7 +505,7 @@ onMounted(loadCatalog);
       <div v-else class="empty-editor">Pilih skill di daftar untuk mengatur aturan dan playtest-nya.</div>
     </section>
 
-    <section v-else class="audit-view">
+    <section v-else-if="activeTab === 'audit'" class="audit-view">
       <div class="audit-intro"><span class="eyebrow">PEMERIKSAAN KATALOG</span><h2>Yang perlu dibereskan sebelum rilis</h2><p>Skill katalog lama masih tercatat sebagai Draft karena efeknya belum memiliki aturan battle final.</p></div>
       <div class="audit-grid">
         <section class="audit-panel"><header><span>DATA KARTU</span><b>{{ cardsMissingSkills.length }} perlu skill</b></header><p>Kartu non-fusion tanpa skill tertaut maupun deskripsi skill di metadata.</p><button v-for="card in cardsMissingSkills.slice(0, 12)" :key="card.id" type="button" class="audit-row">{{ card.name }} <small>{{ card.element || 'Tanpa elemen' }}</small></button><div v-if="!cardsMissingSkills.length" class="audit-ok">✓ Semua kartu memiliki skill.</div><small v-if="cardsMissingSkills.length > 12" class="more-note">dan {{ cardsMissingSkills.length - 12 }} kartu lainnya</small></section>
@@ -481,4 +522,15 @@ onMounted(loadCatalog);
 @media(max-width:1100px){.skill-workspace{grid-template-columns:minmax(230px,290px) minmax(0,1fr)}.audit-grid{grid-template-columns:1fr}.audit-panel>p{min-height:0}}
 @media(max-width:800px){.skill-workspace{grid-template-columns:1fr}.skill-list-panel{max-height:330px;min-height:0}.metric-row{grid-template-columns:repeat(2,minmax(0,1fr))}.skill-editor-panel{padding:14px}}
 @media(max-width:560px){.catalog-heading{align-items:stretch;flex-direction:column}.refresh-button{align-self:flex-start}.form-grid,.effect-grid,.playtest-form{grid-template-columns:1fr}.span-two{grid-column:auto}.check-row{flex-direction:column;gap:8px}.metric{min-height:60px;padding:10px}.metric strong{font-size:21px}.skill-list-item{gap:6px}.status-chip{font-size:7px;padding:4px 5px}.editor-heading h2{font-size:19px}}
+.catalog-skill-media{display:flex;align-items:center;gap:16px;margin:0 0 18px;padding:14px;border:1px solid #d7e5d7;border-radius:12px;background:#f4faf2}
+.studio-rule-note{margin:0 22px 18px;padding:12px 14px;border:1px solid #d7e5d7;border-radius:10px;background:#f4faf2;color:#42664a;font-size:12px;line-height:1.6}
+.skill-catalog-embedded{padding:12px;min-height:0;background:white}.skill-catalog-embedded .skill-workspace{display:block}.skill-catalog-embedded .skill-list-panel{display:flex;flex-wrap:wrap;position:static;max-height:none;padding:6px;gap:6px;margin-bottom:12px}.skill-catalog-embedded .skill-list-item{flex:1;min-width:140px;padding:10px;min-height:68px}.skill-catalog-embedded .skill-item-icon{width:32px;height:32px;flex:none}.skill-catalog-embedded .skill-item-copy{min-width:0}.skill-catalog-embedded .skill-item-copy small,.skill-catalog-embedded .linked-cards{display:none}.skill-catalog-embedded .editor-heading{padding:14px}.skill-catalog-embedded .editor-heading h2{font-size:20px}.skill-catalog-embedded .form-grid{grid-template-columns:1fr}.skill-catalog-embedded .span-two{grid-column:auto}.skill-catalog-embedded .skill-form{padding:12px}.skill-catalog-embedded .studio-rule-note{margin:0 12px 12px;font-size:11px}.skill-catalog-embedded .skill-form :is(input,textarea,select){font-size:12px}.skill-catalog-embedded .catalog-skill-media{padding:10px;gap:10px}.skill-catalog-embedded .catalog-skill-art{width:48px;height:48px}.skill-catalog-embedded .form-actions{position:sticky;bottom:0;background:#fff;padding:10px 0}.skill-catalog-embedded .form-actions button{width:100%}
+.skill-catalog-embedded .skill-list-panel{min-height:0;align-items:start}.skill-catalog-embedded .skill-editor-panel{padding:0}.skill-catalog-embedded .skill-form label{font-size:11px;font-weight:650}.skill-catalog-embedded .skill-form label small{font-size:10px}
+.catalog-skill-art{display:grid;place-items:center;flex:none;width:76px;height:76px;overflow:hidden;border:1px solid #ccdfcc;border-radius:16px;background:#fff;font-size:36px}
+.catalog-skill-media>div{flex:1;min-width:0}
+.catalog-skill-media p{margin:8px 0 0;color:#657d69;font-size:11px;line-height:1.5}
+.skill-item-icon{overflow:hidden}
+.skill-form .catalog-skill-media label{font-size:11px}
+.skill-form .catalog-skill-media input{font-size:12px}
+@media(max-width:520px){.catalog-skill-media{align-items:flex-start;gap:10px;padding:10px}.catalog-skill-art{width:52px;height:52px;border-radius:10px}}
 </style>

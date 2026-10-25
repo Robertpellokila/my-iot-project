@@ -1,0 +1,85 @@
+card_code,card_name,skill_slot,skill_name,status,runtime_skills,rfid_copy_runtime_skills,same_name_catalog_definitions,same_name_active_definitions,message
+F12,ACADEMY NEXUS,1,Nexus Choice,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+F12,ACADEMY NEXUS,2,Team Sync,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+F05,AQUA VECTOR SENTINEL,1,Aqua Purge,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+F05,AQUA VECTOR SENTINEL,2,Vector Mark,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+FOX-006,BYTE FOX — Byte Raider,1,Byte Raider,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+FOX-006,BYTE FOX — Byte Raider,2,Smoke Pixel,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+FOX-003,BYTE FOX — Quick Cache,1,Byte Swipe,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+FOX-003,BYTE FOX — Quick Cache,2,Smoke Pixel,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+FOX-007,BYTE FOX — Turbo Fox,1,Turbo Route,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+FOX-007,BYTE FOX — Turbo Fox,2,Quick Step,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+F03,BYTE SPROUT HACKER,1,Sprout Firewall,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+F03,BYTE SPROUT HACKER,2,Byte Ambush,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+TUR-007,CACHE TURTLE — Reef Fortress,1,Undertow Slam,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+TUR-007,CACHE TURTLE — Reef Fortress,2,Reef Cover,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+TUR-006,CACHE TURTLE — Tidal Defender,1,Tide Bump,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+TUR-006,CACHE TURTLE — Tidal Defender,2,Shell Brace,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+F01,CIRCUIT GROVE GUARDIAN,1,Grove Aegis,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+F01,CIRCUIT GROVE GUARDIAN,2,Regrowth Protocol,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+COB-006,COBY — Arc Vanguard,1,Arc Rally,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+COB-006,COBY — Arc Vanguard,2,Team Spirit,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+COB-003,COBY — Circuit Buddy,1,Spark Link,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+COB-003,COBY — Circuit Buddy,2,Banner Cover,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+COB-008,COBY — Thunder Standard,1,Charge Formation,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+COB-008,COBY — Thunder Standard,2,Banner Cover,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+COB-007,COBY — Volt Commander,1,Flag Jab,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+COB-007,COBY — Volt Commander,2,Team Spirit,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+F04,ECLIPSE SIGNAL,1,Eclipse Lock,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+F04,ECLIPSE SIGNAL,2,Dark Signal,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+FAL-003,FALCON — Draft Glider,1,Wing Tap,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+FAL-003,FALCON — Draft Glider,2,Wind Relay,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+FAL-006,FALCON — Gale Diver,1,Aerial Cut,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+FAL-006,FALCON — Gale Diver,2,Safe Draft,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+FAL-007,FALCON — Storm Navigator,1,Storm Route,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+FAL-007,FALCON — Storm Navigator,2,Wind Relay,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+F09,HYDRO CACHE ENGINE,1,Cache Restore,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+F09,HYDRO CACHE ENGINE,2,Hydro Barrier,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+NUL-007,NULL CAT — Night Disabler,1,Night Slash,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+NUL-007,NULL CAT — Night Disabler,2,Signal Break,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+NUL-006,NULL CAT — Void Claw,1,Void Claw,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+NUL-006,NULL CAT — Void Claw,2,Necro Recall,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+F08,PHANTOM BLOOM,1,Phantom Root,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+F08,PHANTOM BLOOM,2,Bloom Decay,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+PIC-006,PICO CAT — Blaze Decoy,1,Ember Dash,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+PIC-006,PICO CAT — Blaze Decoy,2,Flare Feint,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+PIC-007,PICO CAT — Cinder Scout,1,Flame Hop,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+PIC-007,PICO CAT — Cinder Scout,2,Flare Feint,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+PIC-003,PICO CAT — Soot Sneaker,1,Ember Tap,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+PIC-003,PICO CAT — Soot Sneaker,2,Soot Screen,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+F10,PIXEL EMBER PACK,1,Pixel Pack Guard,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+F10,PIXEL EMBER PACK,2,Ember Mark,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+RAB-007,PIXEL RABBIT — Canopy Constructor,1,Block Wall,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+RAB-007,PIXEL RABBIT — Canopy Constructor,2,Canopy Brace,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+RAB-003,PIXEL RABBIT — Patch Bunny,1,Block Bonk,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+RAB-003,PIXEL RABBIT — Patch Bunny,2,Patch Kit,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+RAB-006,PIXEL RABBIT — Pixel Medic,1,Patch Pulse,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+RAB-006,PIXEL RABBIT — Pixel Medic,2,Mini Wall,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+OTT-006,SCRIPT OTTER — Aqua Scripter,1,Aqua Script,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+OTT-006,SCRIPT OTTER — Aqua Scripter,2,Clean Code,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+OTT-007,SCRIPT OTTER — Coral Physician,1,Coral Mend,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+OTT-007,SCRIPT OTTER — Coral Physician,2,Tidal Note,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+OTT-008,SCRIPT OTTER — Ocean Compiler,1,Ocean Compile,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+OTT-008,SCRIPT OTTER — Ocean Compiler,2,Flow Buffer,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+F07,SKYBYTE RUNNER,1,Rapid Shift,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+F07,SKYBYTE RUNNER,2,Velocity Strike,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+PAN-007,SPARK PANDA — Chain Caster,1,Bolt Punch,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+PAN-007,SPARK PANDA — Chain Caster,2,Thunder Chain,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+F11,SPIRIT CURRENT,1,Spirit Wash,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+F11,SPIRIT CURRENT,2,Guiding Current,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+F06,STEAM FORTRESS,1,Steam Guard,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+F06,STEAM FORTRESS,2,Pressure Burst,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+F02,TEMPEST FLAG MARSHAL,1,Tempest Vanguard,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+F02,TEMPEST FLAG MARSHAL,2,Storm Standard,BLOCKED_NO_BATTLE_BINDING,0,N/A Fusion,0,0,Special Skill tidak ditemukan pada Card ini.
+TOC-008,TOCHI — Emerald Illusion,1,Thorn Circuit,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+TOC-008,TOCHI — Emerald Illusion,2,Camo Guard,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+TOC-006,TOCHI — Forest Scout,1,Vine Trick,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+TOC-006,TOCHI — Forest Scout,2,Green Recovery,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+TOC-003,TOCHI — Sprout Keeper,1,Leaf Swipe,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+TOC-003,TOCHI — Sprout Keeper,2,Camo Guard,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+TOC-005,TOCHI — Vine Tactician,1,Leaf Swipe,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+TOC-005,TOCHI — Vine Tactician,2,Vine Trick,BLOCKED_NO_BATTLE_BINDING,0,0,1,0,Special Skill tidak ditemukan pada Card ini.
+WLF-006,VECTOR WOLF — Blaze Tracker,1,Blaze Track,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+WLF-006,VECTOR WOLF — Blaze Tracker,2,Mark Prey,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+WLF-007,VECTOR WOLF — Inferno Duelist,1,Inferno Duel,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.
+WLF-007,VECTOR WOLF — Inferno Duelist,2,Heat Guard,BLOCKED_NO_BATTLE_BINDING,0,0,0,0,Special Skill tidak ditemukan pada Card ini.

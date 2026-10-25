@@ -1,0 +1,16 @@
+{
+  "Trial Join": {
+    "url": "/images/card-generator/edition-frames/trial-join-v2.png",
+    "sha256": "6f443f7063704489847016211439c246c7945e67dbb60c1f9042f97532be1fb9",
+    "width": 1024,
+    "height": 1536,
+    "trim_height": 1536
+  },
+  "Winning": {
+    "url": "/images/card-generator/edition-frames/winning-v2.png",
+    "sha256": "c010df74c9d3fd4d64a5460ebcaf92b3f487c6d922b454f187efb4e98adee16a",
+    "width": 1024,
+    "height": 1536,
+    "trim_height": 1536
+  }
+}

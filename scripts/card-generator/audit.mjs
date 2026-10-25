@@ -1,0 +1,16 @@
+import { readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { FIXED_BACK } from '../../src/lib/card-generator/cardBack.js';
+import { PILOT } from '../../src/lib/card-generator/cardSchema.js';
+import { validateDataset } from '../../src/lib/card-generator/cardValidationService.js';
+import { textIssues } from '../../src/lib/card-generator/cardRenderer.js';
+const manifest=JSON.parse(readFileSync(new URL('../../src/data/card-generator/artwork-manifest.json',import.meta.url)));
+const errors=validateDataset(PILOT);
+const backFile=new URL('../../public/images/tbc-back.png',import.meta.url);
+const backVerified=existsSync(backFile) && createHash('sha256').update(readFileSync(backFile)).digest('hex')===FIXED_BACK.sha256;
+if(!backVerified) errors.push('Approved shared back is missing or changed.');
+const missing=manifest.entries.filter(entry=>!entry.artwork_path || !existsSync(new URL(`../../public/${entry.artwork_path}`,import.meta.url))).map(entry=>entry.card_code);
+const textReview=PILOT.cards.flatMap(card=>textIssues(card,PILOT).map(issue=>({card_code:card.card_code,issue})));
+console.log(JSON.stringify({dataset:PILOT.id,data_errors:errors,missing_artwork:missing,artwork_files_present:42-missing.length,text_review:textReview,shared_back:{path:FIXED_BACK.url,sha256:FIXED_BACK.sha256,verified:backVerified},print_ready:false},null,2));
+if(errors.length || (process.argv.includes('--require-print-ready') && (missing.length || textReview.length))) process.exitCode=1;
