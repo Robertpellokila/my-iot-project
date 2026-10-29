@@ -23,6 +23,7 @@ test('Studio battle choices, Bench switch and multi-target selections send exact
  const actions=[];
  await page.route(`${supabaseUrl}/rest/v1/**`,async route=>{
   const request=route.request(),url=new URL(request.url()),resource=url.pathname.split('/').at(-1);
+  if(resource==='get_battle_player_state'||resource==='get_public_battle_state')return route.fulfill({json:{ok:true,battle}});
   if(resource==='battle_sessions')return route.fulfill({json:battle});
   if(resource==='battle_cards')return route.fulfill({json:url.searchParams.get('zone')==='eq.graveyard'?[]:cards});
   if(resource==='battle_card_skills')return route.fulfill({json:skills});
@@ -30,7 +31,8 @@ test('Studio battle choices, Bench switch and multi-target selections send exact
   return route.fulfill({json:resource==='profiles'?{...user,role:'admin'}:[]});
  });
  battle.player1_avatar_url='🐻';
- await page.goto('/play/SKILLTEST/p1?token=qa1');
+ await page.addInitScript(()=>sessionStorage.setItem('tbc:player:SKILLTEST:p1',JSON.stringify({token:'qa1'})));
+ await page.goto('/play/SKILLTEST/p1');
  await expect(page.locator('.cyber-card').first()).toBeVisible();
  await page.locator('.cyber-card').filter({hasText:'Coby'}).first().click();
  await page.locator('.player-action-panel [data-action="special"]').click();

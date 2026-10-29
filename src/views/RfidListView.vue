@@ -1,4 +1,5 @@
 <script setup>
+import {useAdminFeedback} from '../composables/useAdminToast.js';
 import SearchableSelect from "../components/SearchableSelect.vue";
 import AdminTable from "../components/AdminTable.vue";
 import {
@@ -114,6 +115,7 @@ const handleDelete =
     }
 
     try {
+      successMessage.value='';errorMessage.value='';
       await deleteRfid(
         rfid.id
       );
@@ -153,6 +155,7 @@ const editRfid =
 
 
 onMounted(loadRfids);
+const adminToast=useAdminFeedback({error:errorMessage,success:successMessage,scope:'RfidListView'});
 </script>
 
 

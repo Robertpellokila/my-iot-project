@@ -1,4 +1,5 @@
 import {fitText} from './cardTextFitter.js';
+import { EDITION_ARTWORK } from './cardLayoutTokens.js';
 export const EDITION_TEMPLATES=['Trial Join','Winning'];
 export const isEditionTemplate=card=>EDITION_TEMPLATES.includes(card?.design_template);
 const fit=(value,width,lines,sizes,bold=false)=>fitText(value,width,lines,sizes,{weight:bold?800:400,family:'Arial'});
@@ -21,7 +22,7 @@ export function renderEdition(card,artwork,uid,template,h){
  const boundsText=(block,x,y,bounds,id,opts={})=>`<defs><clipPath id="${uid}-edition-${id}"><rect x="${bounds[0]}" y="${bounds[1]}" width="${bounds[2]}" height="${bounds[3]}"/></clipPath></defs><g clip-path="url(#${uid}-edition-${id})">${textBlock(block,x,y,{label:`edition-${id}`,fill:'#061e56',weight:800,...opts,extra:`${opts.extra??''} data-panel-bounds="${bounds.join(',')}"`})}</g>`;
  // Leave space for the italic glyph overhang and outline on champion stats.
  const value=(number,x,y,width,height,id,size=67,color='#09214c',extra='')=>boundsText(fit(String(number),width-(extra?14:0),1,[size,size-8,size-16,size-24,size-32],true),x,y,[x-width/2,y-height+8,width,height],id,{anchor:'middle',fill:color,extra});
- const art=trial?{x:0,y:0,w:1024,h:1035}:{x:36,y:147,w:952,h:850};
+ const art=EDITION_ARTWORK[template];
  const layers=['background','character','foreground'].map((key,i)=>{const asset=artwork[key],url=imageUrl(asset?.url);if(!url)return '';const p=placement(asset),cx=art.x+art.w/2,cy=art.y+art.h/2;return `<image data-art-layer="${i}" href="${esc(url)}" x="${art.x}" y="${art.y}" width="${art.w}" height="${art.h}" preserveAspectRatio="xMidYMid ${asset.fit==='contain'?'meet':'slice'}" transform="translate(${cx+p.x*1024/704} ${cy+p.y*1536/1056}) scale(${p.scale}) translate(${-cx} ${-cy})"/>`;}).join('');
  const placeholder=layers?'':`<rect width="1024" height="1536" fill="${trial?'#cde5be':'#d0eafb'}"/><text x="512" y="480" text-anchor="middle" font-size="30" fill="#285766">Upload ilustrasi kartu</text>`;
  const orb=(i,x,y,r)=>{

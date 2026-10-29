@@ -1,4 +1,5 @@
 <script setup>
+import {useAdminFeedback} from '../../composables/useAdminToast.js';
 import {computed,onMounted,ref,watch} from 'vue';
 import {supabase} from '../../lib/supabase';
 import SkillIcon from './SkillIcon.vue';
@@ -32,6 +33,7 @@ async function saveSettings(){if(settingsSaving.value)return;settingsSaving.valu
  }catch(err){error.value=err.message||'Pengaturan gagal disimpan.';}finally{settingsSaving.value=false;}}
 watch(()=>props.kind,(next,previous)=>{if(draft.value)savedDrafts.set(previous,copy(draft.value));error.value='';notice.value='';const saved=savedDrafts.get(next);if(saved)draft.value=saved;else if(visible.value[0])edit(visible.value[0]);else create();});
 onMounted(load);
+const adminToast=useAdminFeedback({error,success:notice,scope:'battle/BattleRuleCatalog'});
 </script>
 <template>
  <section class="battle-rule-catalog" aria-label="Pengaturan Synergy dan bonus kuis">

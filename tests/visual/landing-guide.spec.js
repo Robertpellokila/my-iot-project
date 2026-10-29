@@ -47,7 +47,7 @@ test('interactive Player/Public guide, action explanations and AP example work w
   await page.getByRole('button', { name: 'Panduan bermain' }).click();
   const guide = page.locator('#panduan');
   await expect(guide.getByRole('heading', { name: /Kenali layar/ })).toBeInViewport();
-  await expect(guide.locator('.guide-pin')).toHaveCount(7);
+  await expect(guide.locator('.guide-pin')).toHaveCount(8);
   await expect(guide.locator('.guide-explanation h3')).toHaveText('HP pemain, giliran, AP, dan timer');
   await expect(guide.locator('.guide-step-buttons button').first()).toBeDisabled();
   await guide.locator('.guide-pin').nth(2).click();
@@ -56,6 +56,7 @@ test('interactive Player/Public guide, action explanations and AP example work w
   await expect(guide.locator('.guide-explanation h3')).toContainText('Graveyard');
   await guide.locator('.guide-menu-list button').last().click();
   await expect(guide.locator('.guide-step-buttons button').last()).toBeDisabled();
+  await expect(guide.locator('.guide-explanation h3')).toHaveText('Lihat kartu lawan sebelum menyerang');
   await expect(guide.locator('.guide-image img')).toHaveJSProperty('naturalWidth', 1600);
   await guide.locator('.guide-tour-tabs').scrollIntoViewIfNeeded();
   await page.screenshot({ path: 'test-results/home-guide-desktop.png', fullPage: false });
@@ -63,7 +64,7 @@ test('interactive Player/Public guide, action explanations and AP example work w
   const publicTab = guide.getByRole('tab', { name: /Public Battle/ });
   await publicTab.click();
   await expect(publicTab).toHaveAttribute('aria-selected', 'true');
-  await expect(guide.locator('.guide-image img')).toHaveAttribute('src', '/images/tutorial/public-battle-guide.jpg');
+  await expect(guide.locator('.guide-image img')).toHaveAttribute('src', '/images/tutorial/public-battle-guide-v2.jpg');
   await guide.locator('.guide-pin').nth(4).click();
   await expect(guide.locator('.guide-explanation h3')).toBeVisible();
   await expect(guide.locator('.guide-explanation h3')).toContainText('Bench, deck, dan Graveyard');
@@ -87,11 +88,16 @@ test('interactive Player/Public guide, action explanations and AP example work w
   await expect(guide.locator('.guide-action-detail')).toContainText('dua giliranmu berikutnya');
   await guide.locator('.guide-action-list').getByRole('button', { name: 'Akhiri giliran', exact: true }).click();
   await expect(guide.locator('.guide-action-detail')).toContainText('Sisa AP tidak disimpan');
-  await guide.locator('.guide-example-steps').getByRole('button', { name: /Ke Bench/ }).click();
+  await guide.locator('.guide-example-steps').getByRole('button', { name: /Akhiri giliran/ }).click();
   await expect(guide.locator('.guide-ap-readout strong')).toHaveText('0');
+  await expect(guide.locator('.guide-example-text')).toContainText('Kartu penyerang tetap di Active');
+  await guide.getByRole('button',{name:/Perbesar layar/}).click();
+  await expect(guide.getByRole('dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(guide.getByRole('dialog')).not.toBeVisible();
   await guide.locator('.guide-example-steps').getByRole('button', { name: /Mulai/ }).click();
   await expect(guide.locator('.guide-ap-readout strong')).toHaveText('3');
-  const rules = guide.locator('.guide-rules details').first();
+  const rules = guide.locator('.guide-rules details').filter({hasText:'Bagaimana cara menang?'});
   await rules.locator('summary').click();
   await expect(rules).toHaveAttribute('open', '');
   await expect(rules.locator('p')).toContainText('HP pemain lawan sampai 0');
@@ -111,7 +117,7 @@ test('mobile guide keeps every menu available without horizontal overflow', asyn
   await guide.locator('.guide-menu-list button').nth(4).click();
   await expect(guide.locator('.guide-explanation h3')).toContainText('Bench');
   await expect(guide.locator('.guide-explanation h3')).toBeInViewport();
-  await expect(guide.locator('.guide-menu-list button')).toHaveCount(7);
+  await expect(guide.locator('.guide-menu-list button')).toHaveCount(8);
   await expect(guide.locator('.guide-image img')).toHaveJSProperty('naturalWidth', 1600);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   const offscreenButtons = await guide.locator('button').evaluateAll(buttons => buttons.filter(button => {

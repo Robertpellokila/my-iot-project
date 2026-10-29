@@ -5,6 +5,14 @@ export const PUBLIC_BATTLE_LAYOUTS = Object.freeze([
   { id: 'stadium', name: 'Stadium Scoreboard', description: 'Papan skor besar di atas, kartu tim di tepi bawah.', detail: 'Untuk layar acara & penonton' },
 ]);
 
+// Cinematic is a local spectator view; the four saved match layouts retain
+// their existing database contract.
+export const PUBLIC_BATTLE_VIEWS = Object.freeze([
+  ...PUBLIC_BATTLE_LAYOUTS,
+  { id: 'cinematic', name: 'Cinematic Focus', description: 'Fokus pada duel dan aksi pemain.', detail: 'HUD minimal' },
+]);
+export const isPublicBattleView = value => PUBLIC_BATTLE_VIEWS.some(view => view.id === value);
+
 export const isPublicBattleLayout = (value) =>
   typeof value === 'string' && PUBLIC_BATTLE_LAYOUTS.some(layout => layout.id === value);
 

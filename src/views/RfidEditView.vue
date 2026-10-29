@@ -1,4 +1,5 @@
 <script setup>
+import {useAdminFeedback} from '../composables/useAdminToast.js';
 import SearchableSelect from "../components/SearchableSelect.vue";
 import {
   onMounted,
@@ -134,6 +135,7 @@ const handleUpdate =
       );
 
 
+      adminToast.success('Perubahan RFID berhasil disimpan.');
       await router.push({
         name: "rfid-list",
       });
@@ -151,6 +153,7 @@ const handleUpdate =
 
 
 onMounted(loadData);
+const adminToast=useAdminFeedback({error:errorMessage,scope:'RfidEditView'});
 </script>
 
 

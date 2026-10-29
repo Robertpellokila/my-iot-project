@@ -1,25 +1,11 @@
 import { supabase } from "../lib/supabase";
 
-export const getBattleByCode =
-  async (code) => {
-
-    const {
-      data,
-      error,
-    } =
-      await supabase
-        .from("battle_sessions")
-        .select("*")
-        .eq("code", code)
-        .single();
-
-    if (error) {
-      throw error;
-    }
-
-    return data;
-  };
-
+export const getBattleByCode=async(code,access=null)=>{
+ const {data,error}=await supabase.rpc(access?'get_battle_player_state':'get_public_battle_state',access?{p_code:code,p_player:access.player,p_token:access.token}:{p_code:code});
+ if(error)throw error;
+ if(!data?.ok){const failure=new Error(data?.message||'Battle belum dapat dimuat.');failure.code=data?.code;throw failure;}
+ return data.battle;
+};
 
 export const getBattleCards =
   async (battleId) => {

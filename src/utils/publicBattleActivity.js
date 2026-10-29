@@ -5,7 +5,7 @@ export const battleCardId = card => card?.battleId ?? card?.battle_id ?? card?.i
 // UI presence is transient. Only the player whose turn it is may direct the TV.
 // A turn stamp prevents a previously opened pile from resurfacing next round.
 export function publicBattleActivity(battle, states, fields) {
-  if (!battle || battle.status !== 'battle' || battle.winner || battle.question_active) return null;
+  if (!battle || battle.status !== 'battle' || battle.winner || battle.question_active || battle.teacher_paused) return null;
   const side = { player1: 'p1', player_1: 'p1', player2: 'p2', player_2: 'p2' }[battle.current_turn] ?? battle.current_turn;
   if (!['p1', 'p2'].includes(side)) return null;
   const state = states?.[side];

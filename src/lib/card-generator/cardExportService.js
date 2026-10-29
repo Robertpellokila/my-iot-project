@@ -1,7 +1,7 @@
 import { renderCardSvg } from './cardRenderer.js';
 import { printGeometry, cardPrintSettings } from './cardLayoutTokens.js';
-import { cardReadiness, validateRenderedSvg, validateDataset } from './cardValidationService.js';
-import { verifyAsset } from './cardArtworkService.js';
+import { cardReadiness, renderSignature, validateRenderedSvg, validateDataset } from './cardValidationService.js';
+import { verifyAsset, duplicateArtworkCodes } from './cardArtworkService.js';
 import { pngWithDensity } from './pngDensity.js';
 import { FIXED_BACK, fixedBackAvailable } from './cardBack.js';
 import { validateDraft } from './cardDrafts.js';
@@ -12,16 +12,20 @@ export function downloadBlob(blob, name) {
   const url = URL.createObjectURL(blob); const link = document.createElement('a');
   link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
-export function checkExport(card, dataset, artwork, back, proof) {
+export function checkExport(card, dataset, artwork, back, proof, print = {}) {
   if (validateDataset(dataset).length) throw new Error('Dataset tidak valid; perbaiki sebelum ekspor.');
   if (card.is_custom && validateDraft(card).length) throw new Error(validateDraft(card).join(' '));
-  if (!proof && !cardReadiness(card, dataset, artwork, back).ready) throw new Error(`${card.card_code} belum Ready for Print. Gunakan proof untuk review.`);
+  if (!proof) {
+    const status = cardReadiness(card, dataset, artwork, back, print);
+    if (!status.ready) throw new Error(`${card.card_code} belum Ready for Print: ${status.errors.join(' ')}`);
+  }
 }
 export async function embeddedArtwork(artwork, back, cache = new Map(), frame = null) {
   const embed = async asset => {
     if (!asset?.url) return null;
-    if (!cache.has(asset.sha256)) cache.set(asset.sha256, blobDataUrl(await verifyAsset(asset)));
-    return { ...asset, url: await cache.get(asset.sha256) };
+    const key = JSON.stringify([asset.url, asset.sha256, asset.width, asset.height]);
+    if (!cache.has(key)) cache.set(key, verifyAsset(asset).then(blobDataUrl));
+    return { ...asset, url: await cache.get(key) };
   };
   return { ...artwork, background: await embed(artwork.background), character: await embed(artwork.character), foreground: await embed(artwork.foreground),
     skill_icons: await Promise.all([0,1].map(index => embed(artwork.skill_icons?.[index]))),
@@ -34,12 +38,53 @@ export function inspectSvg(markup) {
   try { return validateRenderedSvg(host.querySelector('svg')); } finally { host.remove(); }
 }
 export async function svgForExport(card, dataset, artwork, back, options = {}, cache) {
-  checkExport(card, dataset, artwork, back, options.proof);
+  checkExport(card, dataset, artwork, back, options.proof, options.print);
   await document.fonts.ready;
   const embedded = await embeddedArtwork(artwork, back, cache, options.side === 'back' ? null : referenceFrameFor(card, options.template));
   const svg = renderCardSvg(card, dataset, embedded, { ...options, bleed: true });
   if (!options.proof && options.side !== 'back' && inspectSvg(svg).length) throw new Error('Teks melewati ruang aman cetak.');
   return svg;
+}
+
+// Approval is an explicit review action; asset/render verification is automatic.
+// Work from snapshots and only commit receipts for the exact design we checked.
+export async function prepareCardsForPrint(cards, dataset, workspace, options = {}, progress = () => {}, cache = new Map()) {
+  if (!cards.length) throw new Error('Pilih minimal satu kartu.');
+  const snapshots = cards.map(source => {
+    const card = JSON.parse(JSON.stringify(source));
+    const target = workspace.artworks[card.card_code];
+    const artwork = JSON.parse(JSON.stringify(target ?? {}));
+    return { source, card, target, artwork, signature: renderSignature(card, artwork) };
+  });
+  await document.fonts.ready;
+  const readyCards = [], failures = [];
+  for (const [index, { source, card, target, artwork, signature }] of snapshots.entries()) {
+    try {
+      const duplicates = duplicateArtworkCodes(workspace.artworks, card.card_code);
+      if (duplicates.length) throw new Error(`Artwork karakter sama dengan ${duplicates.join(', ')}. Ganti salah satu ilustrasi.`);
+      const candidate = { ...artwork, asset_status: 'verified', render_receipt: signature,
+        approval_status: options.approveArtwork === true ? 'approved' : artwork.approval_status };
+      const back = { ...workspace.back, asset_status: 'verified' };
+      checkExport(card, dataset, candidate, back, false, options.print);
+      const embedded = await embeddedArtwork(artwork, back, cache, referenceFrameFor(card));
+      const errors = inspectSvg(renderCardSvg(card, dataset, embedded, { print: options.print, bleed: true }));
+      if (errors.length) throw new Error(errors.join(' '));
+      if (workspace.artworks[card.card_code] !== target || renderSignature(source, target) !== signature) {
+        throw new Error('Desain berubah selama pemeriksaan. Periksa ulang kartu ini.');
+      }
+      Object.assign(target, { approval_status: candidate.approval_status, asset_status: 'verified',
+        render_receipt: signature, production_status: 'ready_for_print' });
+      workspace.back.asset_status = 'verified';
+      readyCards.push(source);
+    } catch (error) {
+      if (target && workspace.artworks[card.card_code] === target && renderSignature(source, target) === signature) {
+        target.asset_status = 'unchecked'; target.render_receipt = null;
+      }
+      failures.push({ code: card.card_code, message: error.message });
+    }
+    progress((index + 1) / cards.length);
+  }
+  return { readyCards, failures };
 }
 export async function rasterizeSvg(markup, settings) {
   const geometry = printGeometry(settings);
@@ -72,11 +117,15 @@ export function sheetPositions(count, settings, flip = 'long-edge', back = false
 }
 export async function exportCards(cards, dataset, workspace, options, progress = () => {}) {
   if (!cards.length) throw new Error('Pilih minimal satu kartu.');
-  if (!options.proof) {
-    const hashes = Object.values(workspace.artworks).map(art => art.character?.sha256).filter(Boolean);
-    if (new Set(hashes).size !== hashes.length) throw new Error('Artwork karakter duplikat; setiap kartu memerlukan ilustrasi unik.');
-  }
   const geometry = printGeometry(cardPrintSettings(cards[0],options.print)), cache = new Map();
+  if (!options.proof) {
+    const report = await prepareCardsForPrint(cards, dataset, workspace, { print: options.print }, value => progress(value * .3), cache);
+    if (report.failures.length) {
+      const error = new Error(report.failures.map(item => `${item.code}: ${item.message}`).join('\n'));
+      error.failures = report.failures;
+      throw error;
+    }
+  }
   const side = options.side ?? 'front';
   const sides = side === 'both' ? ['front', 'back'] : [side];
   const extension = options.format === 'svg' ? 'svg' : 'png';
@@ -87,7 +136,9 @@ export async function exportCards(cards, dataset, workspace, options, progress =
     for (const cardSide of sides) {
       const svg = await svgForExport(card, dataset, artwork, workspace.back, { ...options, side: cardSide }, cache);
       const png = options.format !== 'svg' ? await rasterizeSvg(svg, print) : null;
-      entries.push({ card, side: cardSide, svg, png, print, geometry:printGeometry(print) }); progress(++done / (cards.length * sides.length));
+      entries.push({ card, side: cardSide, svg, png, print, geometry:printGeometry(print) });
+      const rendered = ++done / (cards.length * sides.length);
+      progress(options.proof ? rendered : .3 + rendered * .7);
     }
   }
   const prefix = options.proof ? 'PROOF-' : '';

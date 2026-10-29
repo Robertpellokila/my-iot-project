@@ -68,15 +68,18 @@ test('all 42 cards review, filtering, source skill and safe SVG geometry',async(
 
 test('actual PNG, PDF and ZIP exports have correct dimensions and production gate',async({page})=>{
   await authenticate(page);
-  await page.locator('.cg-header-actions .cg-primary').click();
+  await page.getByRole('button',{name:/Export \/ Cetak/}).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.getByRole('checkbox',{name:/Proof berwatermark/}).uncheck();
   await page.getByRole('button',{name:'Download export',exact:true}).click();
   await expect(page.locator('.cg-export-dialog .cg-error')).toContainText('belum Ready for Print');
+  await expect(page.locator('.admin-toast[data-type="danger"]')).toContainText('belum Ready for Print');
   await page.getByRole('checkbox',{name:/Proof berwatermark/}).check();
   const downloading=page.waitForEvent('download');
   await page.getByRole('button',{name:'Download export',exact:true}).click();
   expect((await downloading).suggestedFilename()).toBe('PROOF-COB-006-front.png');
+  await expect(page.locator('.admin-toast[data-type="success"]')).toContainText('Berkas kartu siap diunduh.');
+  await expect(page.locator('.admin-toast[data-type="loading"]')).toHaveCount(0);
   await page.getByRole('button',{name:'Tutup ekspor',exact:true}).click();
   const result=await page.evaluate(async()=>{
     const {PILOT}=await import('/src/lib/card-generator/cardSchema.js');
@@ -365,4 +368,107 @@ test('independent skill icon uploads persist, export as embedded images and rese
   await expect(page.locator('.cg-data-form .cg-skill-icon-upload')).toHaveCount(2);
   await page.getByLabel('Upload ikon Skill 1',{exact:true}).setInputFiles({name:'custom-skill.png',mimeType:'image/png',buffer:one});
   await expect(page.locator('.cg-preview-artboard image[data-skill-icon-image="1"]')).toHaveCount(1);
+});
+
+test('bulk print review exports current artwork without watermark and identifies the one overflowing card', async ({page}) => {
+  await authenticate(page, 'COB-003');
+  await page.evaluate(async userId => {
+    const {PILOT} = await import('/src/lib/card-generator/cardSchema.js');
+    const {emptyArtwork, emptyBack, digestBlob} = await import('/src/lib/card-generator/cardArtworkService.js');
+    const artworks = Object.fromEntries(PILOT.cards.map(card => [card.card_code, emptyArtwork()]));
+    for (const [index, code] of ['COB-003', 'NUL-006'].entries()) {
+      const canvas = document.createElement('canvas'); canvas.width = 1122; canvas.height = 793;
+      const context = canvas.getContext('2d'); context.fillStyle = index ? '#aabbcc' : '#ccbb66'; context.fillRect(0,0,1122,793);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      artworks[code].character = {url:canvas.toDataURL('image/png'), sha256:await digestBlob(blob), width:1122, height:793, x:0, y:0, scale:1, fit:'cover'};
+    }
+    localStorage.setItem(`tbc:card-generator:${userId}:${PILOT.id}`, JSON.stringify({dataset_id:PILOT.id, custom_cards:[], artworks, back:emptyBack()}));
+  }, user.id);
+  await page.reload();
+  await page.getByRole('button',{name:'Review 42 kartu',exact:true}).click();
+  for (const code of ['COB-003','NUL-006']) await page.locator('.cg-review-card-heading').getByLabel(code, {exact:true}).check();
+  await page.getByRole('button',{name:/Export \/ Cetak/}).click();
+  await page.getByRole('checkbox',{name:/Proof berwatermark/}).uncheck();
+  const prepare = page.getByRole('button',{name:'Setujui & periksa 2 kartu',exact:true});
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect(prepare).toBeDisabled();
+  await page.getByRole('checkbox',{name:/Saya sudah meninjau/}).check();
+  await prepare.click();
+  await expect(page.locator('.cg-print-review')).toContainText('1 / 2 kartu Ready for Print');
+  await expect(page.locator('.cg-print-failures')).toContainText('NUL-006');
+  await expect(page.locator('.cg-print-failures')).toContainText('Skill 2 melebihi ruang aman cetak');
+  await page.locator('.cg-export-dialog').screenshot({path:'test-results/card-print-review-mobile.png'});
+  const download = page.waitForEvent('download');
+  await page.getByRole('button',{name:'Download 1 kartu yang lolos',exact:true}).click();
+  expect((await download).suggestedFilename()).toBe('COB-003-front.png');
+  await expect(page.getByRole('button',{name:'Buka NUL-006',exact:true})).toBeEnabled();
+  await page.getByRole('button',{name:'Buka NUL-006',exact:true}).click();
+  await expect(page.locator('.cg-export-dialog')).toHaveCount(0);
+  await expect(page.locator('.cg-preview-heading')).toContainText('NUL-006');
+});
+
+test('clean export revalidates approved reloads and rejects corrupt assets, duplicates and higher DPI', async ({page}) => {
+  await authenticate(page, 'TOC-003');
+  const result = await page.evaluate(async () => {
+    const {PILOT} = await import('/src/lib/card-generator/cardSchema.js');
+    const {initialArtwork, emptyBack, sanitizeWorkspace} = await import('/src/lib/card-generator/cardArtworkService.js');
+    const {prepareCardsForPrint, exportCards} = await import('/src/lib/card-generator/cardExportService.js');
+    const card = PILOT.cards.find(card => card.card_code === 'TOC-003');
+    const workspace = {dataset_id:PILOT.id, custom_cards:[], artworks:{[card.card_code]:initialArtwork(card.card_code)}, back:emptyBack()};
+    const originalCharacter = JSON.stringify(workspace.artworks[card.card_code].character);
+    const unapproved = await prepareCardsForPrint([card],PILOT,workspace);
+    const approved = await prepareCardsForPrint([card],PILOT,workspace,{approveArtwork:true});
+    const restored = sanitizeWorkspace(workspace,PILOT.cards);
+    const beforeReload = restored.artworks[card.card_code].asset_status;
+    const svg = await exportCards([card],PILOT,restored,{proof:false,format:'svg',side:'front'});
+    const highDpi = await prepareCardsForPrint([card],PILOT,restored,{print:{dpi:600}});
+    // Unrelated duplicates in the workspace do not prevent exporting this card.
+    restored.artworks.X = {character:{...restored.artworks[card.card_code].character,sha256:'a'.repeat(64)}};
+    restored.artworks.Y = structuredClone(restored.artworks.X);
+    const unrelated = await prepareCardsForPrint([card],PILOT,restored);
+    restored.artworks.X = structuredClone(restored.artworks[card.card_code]);
+    const duplicate = await prepareCardsForPrint([card],PILOT,restored);
+    delete restored.artworks.X; delete restored.artworks.Y;
+    restored.artworks[card.card_code].character.sha256 = 'b'.repeat(64);
+    const corrupt = await prepareCardsForPrint([card],PILOT,restored);
+    return {unapproved:unapproved.failures,approved:approved.readyCards.length,beforeReload,watermarked:(await svg.blob.text()).includes('PROOF · NOT FOR PRINT'),name:svg.name,unchanged:JSON.stringify(workspace.artworks[card.card_code].character)===originalCharacter,highDpi:highDpi.failures,unrelated:unrelated.readyCards.length,duplicate:duplicate.failures,corrupt:corrupt.failures};
+  });
+  expect(result.unapproved[0].message).toContain('Artwork Draft');
+  expect(result.approved).toBe(1); expect(result.beforeReload).toBe('unchecked');
+  expect(result.watermarked).toBe(false); expect(result.name).toBe('TOC-003-front.svg'); expect(result.unchanged).toBe(true);
+  expect(result.highDpi[0].message).toContain('perlu 600 DPI'); expect(result.unrelated).toBe(1);
+  expect(result.duplicate[0].message).toContain('sama dengan X');
+  expect(result.corrupt[0].message).toContain('Isi artwork berubah');
+});
+
+test('batch review never approves a design changed while asset verification is running', async ({page}) => {
+  await authenticate(page, 'TOC-003');
+  const result = await page.evaluate(async () => {
+    const {PILOT} = await import('/src/lib/card-generator/cardSchema.js');
+    const {initialArtwork,emptyBack} = await import('/src/lib/card-generator/cardArtworkService.js');
+    const {prepareCardsForPrint} = await import('/src/lib/card-generator/cardExportService.js');
+    const card = structuredClone(PILOT.cards.find(card => card.card_code === 'TOC-003'));
+    const art = initialArtwork(card.card_code);
+    const workspace = {artworks:{[card.card_code]:art},back:emptyBack()};
+    const realFetch = window.fetch;
+    let release, started;
+    const gate = new Promise(resolve => release = resolve);
+    const requested = new Promise(resolve => started = resolve);
+    window.fetch = async (...args) => {
+      if (args[0] === art.character.url) { started(); await gate; }
+      return realFetch(...args);
+    };
+    try {
+      const pending = prepareCardsForPrint([card],PILOT,workspace,{approveArtwork:true});
+      await requested;
+      art.character.scale = 1.1;
+      release();
+      const report = await pending;
+      return {ready:report.readyCards.length,failures:report.failures,approval:art.approval_status,receipt:art.render_receipt};
+    } finally { window.fetch = realFetch; }
+  });
+  expect(result.ready).toBe(0);
+  expect(result.failures[0].message).toContain('Desain berubah');
+  expect(result.approval).toBe('not_reviewed'); expect(result.receipt).toBeNull();
 });

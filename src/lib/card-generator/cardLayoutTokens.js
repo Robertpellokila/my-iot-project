@@ -33,6 +33,11 @@ export const TEXT_BOXES = Object.freeze({
   tags: { x:285, y:995, width:427, height:28 },
 });
 export const DEFAULT_PRINT = Object.freeze({ width: 63, height: 88, bleed: 3, dpi: 300, guides: true });
+// Native 1024 × 1536 coordinates shared by rendering and print resolution checks.
+export const EDITION_ARTWORK = Object.freeze({
+  'Trial Join': { x: 0, y: 0, w: 1024, h: 1035 },
+  Winning: { x: 36, y: 147, w: 952, h: 850 },
+});
 export function cardPrintSettings(card, options = {}) {
   const edition = ['Trial Join','Winning'].includes(card?.design_template);
   const width = options.width ?? DEFAULT_PRINT.width;

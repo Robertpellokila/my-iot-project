@@ -1,4 +1,5 @@
 <script setup>
+import {useAdminFeedback,studioNoticeType} from '../composables/useAdminToast.js';
 import { computed, ref, watch, onDeactivated } from 'vue';
 import {useRoute} from 'vue-router';
 import SearchableSelect from '../components/SearchableSelect.vue';
@@ -7,7 +8,7 @@ import { useCardGenerator } from '../composables/useCardGenerator.js';
 import { PILOT, CARD_BY_CODE } from '../lib/card-generator/cardSchema.js';
 import manifest from '../data/card-generator/artwork-manifest.json';
 import { fusionsFor } from '../lib/card-generator/cardFusionResolver.js';
-import { cardReadiness, renderSignature, validateDataset } from '../lib/card-generator/cardValidationService.js';
+import { cardReadiness, renderSignature, validateDataset, artworkResolutionIssue } from '../lib/card-generator/cardValidationService.js';
 import { renderCardSvg } from '../lib/card-generator/cardRenderer.js';
 import { uploadArtwork, verifyAsset, invalidateArtwork, emptyArtwork, setArtworkAsset, artworkAssets } from '../lib/card-generator/cardArtworkService.js';
 import { inspectSvg, downloadBlob } from '../lib/card-generator/cardExportService.js';
@@ -105,7 +106,7 @@ const applySkillImage=async(index,url)=>{
  if(artwork.value.skill_icons?.[index]?.url===url)return;
  setArtworkAsset(artwork.value,`skill-${index+1}-icon`,await catalogImageAsset(url));invalidateArtwork(artwork.value);
 };
-const openCatalog=async()=>{catalogOpen.value=true;const {data,error:err}=await supabase.from('game_cards').select('*').order('name');if(err){error.value=err.message;return;}catalogCards.value=data??[];};
+const openCatalog=async()=>{catalogOpen.value=true;const {data,error:err}=await supabase.from('game_cards').select('*').order('name');if(err){error.value=err.message;return;}catalogCards.value=(data??[]).filter(card=>!card.archived_at);};
 const importCatalog=async(id=catalogSelection.value)=>{
  if(!id||busy.value)return;busy.value=true;error.value='';
  try{
@@ -113,6 +114,7 @@ const importCatalog=async(id=catalogSelection.value)=>{
   if(!record){const result=await supabase.from('game_cards').select('*').eq('id',id).single();if(result.error)throw result.error;record=result.data;}
   const {data:links,error:linkError}=await supabase.from('game_card_special_skills').select('sort_order,enabled,special_skills(id,name,description,icon,metadata)').eq('game_card_id',id).order('sort_order');
   if(linkError)throw linkError;
+  if(record.archived_at)throw new Error('Kartu berada di Sampah. Pulihkan dari Album sebelum membukanya di Studio.');
   const storedKey=Object.keys(catalogLinks.value).find(key=>catalogLinks.value[key]===id);
   const definitions=(links??[]).filter(link=>link.special_skills).sort((a,b)=>a.sort_order-b.sort_order);
   ruleSlots.clear();definitions.slice(0,2).forEach((link,i)=>ruleSlots.set(link.special_skills.id,i));
@@ -135,6 +137,7 @@ watch([loading,()=>route.query.catalog,()=>route.query.rfid],async([waiting,id,r
 },{immediate:true});
 watch(selected,()=>{rulesOpen.value=false;fusionOpen.value=false;fusionCard.value=null;});
 const addCard = (template, source = null) => {
+  message.value='';
   if (workspace.custom_cards.length >= 200) { error.value = 'Maksimal 200 kartu baru per workspace.'; return; }
   let card = createDraft(template, workspace.custom_cards);
   if (source) {
@@ -170,12 +173,12 @@ const toggleCheck = code => { checked.value = checked.value.includes(code) ? che
 const selectVisible = codes => { checked.value = [...new Set([...checked.value, ...codes])]; };
 const openExport = codes => { exportSelection.value = libraryCards.value.filter(card => codes.includes(card.card_code)); exportOpen.value = true; };
 const jsonDownload = (data, filename) => downloadBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), filename);
-const downloadWorkspace = () => jsonDownload({ ...workspace, source_sha256: PILOT.source_sha256, saved_at: new Date().toISOString() }, 'TBC-pilot-workspace.json');
-const downloadManifest = () => jsonDownload({ ...manifest, entries: manifest.entries.map(brief => {
+const downloadWorkspace = () => {jsonDownload({ ...workspace, source_sha256: PILOT.source_sha256, saved_at: new Date().toISOString() }, 'TBC-pilot-workspace.json');adminToast.success('Berkas workspace siap diunduh.');};
+const downloadManifest = () => {jsonDownload({ ...manifest, entries: manifest.entries.map(brief => {
   const art = workspace.artworks[brief.card_code];
   return { ...brief, ...art, artwork_path: art.character?.path ?? null,
     production_status: statuses.value[brief.card_code].ready ? 'ready_for_print' : art.character ? art.approval_status === 'approved' ? 'reviewed' : 'draft' : 'artwork_required' };
-}) }, 'TBC-artwork-production-manifest.json');
+}) }, 'TBC-artwork-production-manifest.json');adminToast.success('Manifest artwork siap diunduh.');};
 const importWorkspace = async event => {
   const file = event.target.files?.[0]; if (!file) return;
   try { if (file.size > 2 * 1024 * 1024) throw new Error('File workspace maksimal 2 MB.'); const incoming = JSON.parse(await file.text());
@@ -193,7 +196,7 @@ const upload = (file, layer) => {
     message.value = `${code}: ${label} tersimpan. Review ulang sebelum approve.`;
   });
 };
-const remove = layer => { setArtworkAsset(artwork.value,layer,null); artwork.value.version++; artwork.value.asset_status = 'unchecked'; invalidateArtwork(artwork.value); };
+const remove = layer => { setArtworkAsset(artwork.value,layer,null); artwork.value.version++; artwork.value.asset_status = 'unchecked'; invalidateArtwork(artwork.value);adminToast.info('Gambar dilepas dari draft. Simpan ke akun untuk menerapkan perubahan.'); };
 const updateIconFit = (index,fit) => {
   const icon = artwork.value.skill_icons?.[index]; if (!icon || busy.value) return;
   icon.fit = fit === 'contain' ? 'contain' : 'cover'; artwork.value.version++; invalidateArtwork(artwork.value);
@@ -205,7 +208,8 @@ const approve = () => {
   return perform(async () => {
     if (!target.character) throw new Error('Upload artwork karakter terlebih dahulu.');
     if (Object.entries(workspace.artworks).some(([id, candidate]) => id !== code && candidate.character?.sha256 === target.character.sha256)) throw new Error('Artwork karakter harus unik untuk setiap kartu.');
-    if (target.character.width < 1200 || target.character.height < 800) throw new Error('Artwork memerlukan resolusi minimal 1200 × 800 px.');
+    const resolutionIssue = artworkResolutionIssue(currentCard.value, target.character);
+    if (resolutionIssue) throw new Error(resolutionIssue);
     await checkAssets(target); target.approval_status = 'approved'; target.production_status = 'reviewed'; target.render_receipt = null;
     message.value = `${code}: artwork disetujui. Jalankan pemeriksaan render untuk kesiapan cetak.`;
   });
@@ -240,13 +244,14 @@ const masters = computed(() => {
     artwork: workspace.artworks['TOC-003'], study: template !== 'Common',
   }));
 });
+const adminToast=useAdminFeedback({error,message,scope:'CardGeneratorView'});
 </script>
 
 <template>
   <main class="cg-workspace">
     <header class="cg-main-header"><div><span class="cg-eyebrow">TIMEDOOR BATTLE CARDS</span><h1>Card Studio</h1><p>Satu tempat untuk data, desain, skill, dan kartu fisikmu.</p></div><div class="cg-header-actions"><button class="cg-primary" type="button" :disabled="loading || !owner || cloudBusy || busy || editorSaving" @click="saveCurrent">{{ cloudBusy ? 'Menyimpan…' : tab==='review'&&checked.length ? `Simpan ${checked.length} kartu` : fusionOpen ? 'Simpan resep' : 'Simpan kartu' }}</button><button v-if="currentCard.kind==='fusion'" type="button" :disabled="loading || cloudBusy || busy || editorSaving" @click="openFusion">Atur resep Fusion</button><button type="button" :disabled="loading || !owner || cloudBusy || busy || editorSaving || currentCard.kind==='fusion'" :title="currentCard.kind==='fusion'?'Fusion dipanggil melalui resep tanpa RFID':undefined" @click="registerCurrent">Hubungkan RFID</button><button type="button" :disabled="!owner || busy || loading || editorSaving" @click="openExport(checked.length ? checked : [selected])">Export / Cetak <span>{{ checked.length || 1 }}</span> ↗</button></div></header>
     <p v-if="error" class="cg-error" role="alert">{{ error }} <button type="button" aria-label="Tutup pesan" @click="error = ''">×</button></p>
-    <p v-if="message" class="cg-message" role="status">{{ message }} <button type="button" aria-label="Tutup pesan" @click="message = ''">×</button></p>
+    <p v-if="message" class="cg-message" :class="{'cg-warning':studioNoticeType(message)==='warning'}" role="status">{{ message }} <button type="button" aria-label="Tutup pesan" @click="message = ''">×</button></p>
     <p v-if="loading" class="cg-empty">Memuat workspace…</p>
     <template v-else-if="owner">
       <div class="cg-catalog-actions"><button type="button" :disabled="busy || cloudBusy || rulesSaving" @click="openCatalog">Pilih kartu tersimpan</button><RouterLink :to="{name:'album-card'}">Buka Album ↗</RouterLink><span>{{ catalogLinks[selected]?'✓ Kartu tersedia di akun':'Draft baru · simpan tanpa UID terlebih dahulu' }}</span><span v-if="currentCard.kind==='fusion'">Fusion memakai resep, tanpa UID RFID.</span></div>
@@ -265,7 +270,7 @@ const masters = computed(() => {
       <section v-if="tab === 'review'" class="cg-review"><div class="cg-review-header"><div><h2>Pilot collection</h2><p>Periksa komposisi seluruh kartu. Pilih kartu untuk ekspor atau buka di studio.</p></div><button type="button" @click="checked = PILOT.cards.map(card => card.card_code)">Pilih semua 42</button><button type="button" @click="checked = []">Hapus pilihan</button></div><div class="cg-review-grid"><article v-for="card in pilotCards" :key="card.card_code"><div class="cg-review-card-heading"><label><input type="checkbox" :checked="checked.includes(card.card_code)" @change="toggleCheck(card.card_code)" />{{ card.card_code }}</label><span>{{ statuses[card.card_code].status }}</span></div><button type="button" class="cg-review-card" :aria-label="`Buka ${card.card_code} di studio`" @click="selected = card.card_code; tab = 'studio'"><CardFrameRenderer :card="card" :dataset="PILOT" :artwork="{ ...workspace.artworks[card.card_code], back: workspace.back }" /></button></article></div></section>
       <section v-if="tab === 'masters'" class="cg-review"><div class="cg-review-header"><div><h2>Template kartu</h2><p>Tujuh frame rarity, Trial Join Card, dan Winning Card. Artwork contoh dapat diganti dengan ilustrasi kartu milikmu.</p></div></div><div class="cg-review-grid cg-master-grid"><article v-for="master in masters" :key="master.template"><h3>{{ master.template }}</h3><p>{{ master.study ? 'Contoh isi · data & gambar bisa diganti' : master.card.card_code }}</p><CardFrameRenderer :card="master.card" :dataset="PILOT" :artwork="master.artwork" :template="master.template" /></article></div></section>
       <footer class="cg-workspace-footer"><span>Draft tersimpan di perangkat ini.</span><div><button type="button" :disabled="busy || cloudBusy" @click="downloadWorkspace">Download workspace</button><label class="cg-inline-file"><input type="file" accept="application/json,.json" :disabled="busy || cloudBusy" @change="importWorkspace" /><span>Import workspace</span></label><button type="button" :disabled="busy || cloudBusy" @click="loadCloud">Muat dari akun</button><button type="button" @click="downloadManifest">42 artwork briefs</button><button type="button" :disabled="busy" @click="auditProduction">Audit katalog existing</button></div></footer>
-      <CardExportDialog v-if="exportOpen" :cards="exportSelection" :dataset="PILOT" :workspace="workspace" @close="exportOpen = false" />
+      <CardExportDialog v-if="exportOpen" :cards="exportSelection" :dataset="PILOT" :workspace="workspace" @close="exportOpen = false" @edit="code => { selected = code; tab = 'studio'; exportOpen = false; }" />
       <CardRfidDialog v-if="rfidCard" :card="rfidCard" @close="rfidCard=null" @linked="data=>{message=`RFID ${data.uid} terhubung ke ${data.name}.`}"/>
     </template>
   </main>
@@ -274,4 +279,8 @@ const masters = computed(() => {
 <style scoped>
 .cg-edit-column{min-width:0}.cg-edit-tabs{display:flex;gap:6px;padding:8px;border:1px solid var(--cg-line);border-radius:10px 10px 0 0;background:#edf5e9}.cg-edit-tabs>button{flex:1;font-size:11px}.cg-edit-tabs>button[aria-pressed=true]{background:#fff;color:#17623d;border-color:#9dbd9d}.cg-rule-panel{max-height:calc(100dvh - 200px);overflow:auto;border:1px solid var(--cg-line);background:#fff;border-radius:0 0 10px 10px}.cg-edit-column>.cg-properties{border-radius:0 0 10px 10px}@media(max-width:1420px){.cg-edit-column{grid-column:1/-1}.cg-rule-panel{max-height:none}}
 .cg-catalog-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:20px}.cg-catalog-actions a{color:#176b49;font-weight:700;font-size:13px}.cg-catalog-actions span{margin-left:auto;color:#54735d;font-size:12px}.cg-catalog-picker{display:flex;align-items:end;gap:12px;padding:20px;background:white;border:1px solid #d7e4d8;border-radius:12px;margin-bottom:20px}.cg-catalog-picker label{display:grid;gap:8px;flex:1;min-width:0}.cg-catalog-picker button{flex-shrink:0}@media(max-width:700px){.cg-catalog-picker{flex-wrap:wrap}.cg-catalog-picker label{flex-basis:100%}}
+</style>
+
+<style scoped>
+.cg-message.cg-warning{color:#8b6429;background:#fff5dc;border-color:#e7d5a6}
 </style>

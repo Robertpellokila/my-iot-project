@@ -1,23 +1,24 @@
 <script setup>
 import {nextTick,onMounted,onBeforeUnmount,ref} from 'vue';
 import SkillIcon from './SkillIcon.vue';
-const props=defineProps({options:{type:Array,required:true},busy:Boolean,selectedCode:String,playerName:String,explanation:String,readonly:Boolean});
+const props=defineProps({options:{type:Array,required:true},busy:Boolean,paused:Boolean,selectedCode:String,playerName:String,explanation:String,readonly:Boolean});
 const emit=defineEmits(['choose']);
 const panel=ref(null);let previousFocus;
 onMounted(async()=>{if(props.readonly)return;previousFocus=document.activeElement;await nextTick();panel.value?.showModal();panel.value?.querySelector('h2')?.focus();});
 onBeforeUnmount(()=>{if(previousFocus?.isConnected)previousFocus.focus({preventScroll:true});});
-function choose(option){if(!props.busy&&!props.readonly)emit('choose',option.code);}
+function choose(option){if(!props.busy&&!props.paused&&!props.readonly)emit('choose',option.code);}
 </script>
 <template>
  <component :is="readonly?'section':'dialog'" ref="panel" class="quiz-bonus-award" :class="{'is-public':readonly}" aria-labelledby="quiz-bonus-award-title" :aria-busy="busy" @cancel.prevent>
   <header><span class="award-kicker">{{ readonly?'BONUS KUIS':'JAWABAN BENAR' }}</span><h2 id="quiz-bonus-award-title" tabindex="-1">{{ readonly?`${playerName||'Pemenang kuis'} memilih bonus`:'Pilih satu bonus untukmu' }}</h2><p>{{ readonly?'Pilihan bonus ditampilkan mengikuti aturan match.':`${playerName?`${playerName}, `:''}pilih satu dari ${options.length} bonus berikut. Battle berlanjut setelah pilihan tersimpan.` }}</p></header>
   <div class="award-options" :style="{'--award-columns':Math.min(3,options.length)}">
-   <button v-for="option in options" :key="option.code" type="button" class="award-option" :class="{chosen:selectedCode===option.code}" :disabled="busy||readonly" @click="choose(option)">
+   <button v-for="option in options" :key="option.code" type="button" class="award-option" :class="{chosen:selectedCode===option.code}" :disabled="busy||paused||readonly" @click="choose(option)">
     <span class="award-medallion"><SkillIcon :icon="option.icon" :name="option.name"/><span v-if="busy&&selectedCode===option.code" class="award-saving">Menyimpan…</span></span>
     <strong>{{ option.name }}</strong><span class="award-effect">{{ option.summary }}</span><small v-if="option.description">{{ option.description }}</small><span class="award-select">{{ selectedCode===option.code?'Terpilih':readonly?'':busy?'Tunggu…':'Pilih bonus ini' }}</span>
    </button>
   </div>
-  <p v-if="busy" class="award-status" role="status">Menyimpan pilihanmu. Bonus belum dipakai; gunakan nanti saat giliranmu.</p>
+  <p v-if="paused" class="award-status" role="status">Pertandingan dijeda Host. Pilihan dapat dilanjutkan setelah jeda.</p>
+  <p v-else-if="busy" class="award-status" role="status">Menyimpan pilihanmu. Bonus belum dipakai; gunakan nanti saat giliranmu.</p>
   <details v-if="explanation" class="award-explanation"><summary>Kenapa jawabannya benar?</summary><p>{{ explanation }}</p></details>
   <footer>{{ readonly?'Satu bonus hanya dapat digunakan sekali.':'Bonus masuk ke panel Bonus Skills. Gunakan sekali saat giliranmu, tanpa biaya AP.' }}</footer>
  </component>

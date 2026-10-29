@@ -1,4 +1,5 @@
 <script setup>
+import {useAdminFeedback} from '../composables/useAdminToast.js';
 import SearchableSelect from "../components/SearchableSelect.vue";
 import SkillIcon from '../components/battle/SkillIcon.vue';
 import { splitSkillIcon, skillMediaValue, skillLimitLabel, skillOptionLabel, describeBasicSkill } from '../lib/battle/skillPresentation.js';
@@ -2305,6 +2306,7 @@ onUnmounted(() => {
 
 });
 
+const adminToast=useAdminFeedback({error:errorMessage,message:successMessage,scope:'RegisterGameCard'});
 </script>
 
 

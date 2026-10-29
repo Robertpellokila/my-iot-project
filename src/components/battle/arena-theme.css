@@ -1,0 +1,8 @@
+/* Shared, opt-in chrome for the illustrated player arena and its teleported dialogs. */
+.arena-frame.arena-frame.arena-frame{border:14px solid transparent;border-image:url('/images/battle-arena/panel-frame.svg') 29 stretch;border-image-width:25px;border-radius:0;background:linear-gradient(135deg,#fff 15%,#f2f9ff);background-clip:padding-box;color:#102b5c;box-shadow:0 20px 70px #061e4b45}
+.arena-frame :is(h2,h3){color:#102b5c}
+.arena-frame :is(.command-eyebrow,.eyebrow,.inspection-heading>div>span){color:#0878b8}
+.arena-frame :is(.command-close,.modal-close,.inspection-close,.close-button){border:2px solid #187ca5;background:#f7fcff;box-shadow:inset 0 0 0 3px #fff,0 0 0 2px #d4e9ee;border-radius:12px;color:#143264}
+.arena-frame :is(.command-description,.inspection-heading p){color:#526c89}
+.arena-frame::backdrop{background:#092c5680;backdrop-filter:blur(5px)}
+@media(max-width:620px){.arena-frame.arena-frame.arena-frame{border-width:10px}}

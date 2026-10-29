@@ -1,4 +1,5 @@
 <script setup>
+import {useAdminFeedback} from '../composables/useAdminToast.js';
 import AdminTable from "../components/AdminTable.vue";
 import {
   computed,
@@ -99,6 +100,7 @@ const loadDashboard =
 
 
 onMounted(loadDashboard);
+const adminToast=useAdminFeedback({error:errorMessage,scope:'DashboardView'});
 </script>
 
 

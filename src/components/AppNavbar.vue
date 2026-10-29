@@ -1,6 +1,9 @@
 <script setup>
+import {useAdminToast} from '../composables/useAdminToast.js';
+const adminToast=useAdminToast();
 import {
   onMounted,
+  onBeforeUnmount,
   ref,
 } from "vue";
 
@@ -13,6 +16,7 @@ import {
 
 
 const router = useRouter();
+let active=true;onBeforeUnmount(()=>active=false);
 
 const isProfileOpen =
   ref(false);
@@ -31,6 +35,7 @@ const loadProfile = async () => {
 
   } catch (error) {
     console.error(error);
+    if(active)adminToast.danger('Profil admin belum dapat dimuat. Coba muat ulang halaman.');
   } finally {
     loading.value = false;
   }
@@ -40,6 +45,8 @@ const loadProfile = async () => {
 const handleLogout = async () => {
   try {
     await signOut();
+    adminToast.clear();
+    adminToast.success('Kamu berhasil keluar dari akun admin.');
 
     await router.replace({
       name: "login",
@@ -47,6 +54,7 @@ const handleLogout = async () => {
 
   } catch (error) {
     console.error(error);
+    adminToast.danger('Belum dapat keluar dari akun. Periksa koneksi dan coba lagi.');
   }
 };
 
@@ -120,12 +128,12 @@ onMounted(loadProfile);
             }}
           </strong>
 
-          <span>
+          <strong>
             {{
               profile?.role ||
               "admin"
             }}
-          </span>
+          </strong>
 
         </div>
 
@@ -144,7 +152,7 @@ onMounted(loadProfile);
 
         <div class="dropdown-item">
 
-          <span>
+          <span class="dropdown-muted">
             Role
           </span>
 

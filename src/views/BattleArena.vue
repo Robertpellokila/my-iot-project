@@ -1,4 +1,5 @@
 <script setup>
+import {useAdminFeedback} from '../composables/useAdminToast.js';
 import { computed, onMounted, watch } from "vue";
 
 import { supabase } from "../lib/supabase";
@@ -1140,6 +1141,7 @@ const resetArena = () => {
   // =====================================================
 
   engine.resetArena();
+  adminToast.info('Arena lokal direset.');
 
   // =====================================================
   // RESET RFID UID + PROCESSING
@@ -1188,6 +1190,9 @@ onMounted(() => {
     rfid.setupBattleListener();
   }
 });
+const adminToast=useAdminFeedback({error:questionError,scope:'BattleArena'});
+useAdminFeedback({message:()=>player1ProfilePopup.value?`Player 1 · ${player1ProfilePopup.value}`:'',messageType:value=>/tidak|belum|tunggu|gagal/i.test(value)?'warning':'info',scope:'local-arena:p1'});
+useAdminFeedback({message:()=>player2ProfilePopup.value?`Player 2 · ${player2ProfilePopup.value}`:'',messageType:value=>/tidak|belum|tunggu|gagal/i.test(value)?'warning':'info',scope:'local-arena:p2'});
 </script>
 
 <template>

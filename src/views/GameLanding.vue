@@ -4,6 +4,7 @@ import SkillIcon from "../components/battle/SkillIcon.vue";
 import BattleGuide from "../components/BattleGuide.vue";
 import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { savePlayerAccess } from "../lib/battle/playerAccess.js";
 import { supabase } from "../lib/supabase";
 import { normalizeTcgType } from "../utils/tcgTypes";
 
@@ -36,9 +37,9 @@ const fusionAvailability = ref("All");
 const fusionCurrentPage = ref(1);
 const fusionPageSize = 9;
 const expandedFusionRecipes = ref(new Set());
-const joinMode = ref("battle");
+const joinMode = ref("player");
 const accessCode = ref("");
-const side = ref("p1");
+
 const joining = ref(false);
 const joinError = ref("");
 const selectedCard = ref(null);
@@ -312,33 +313,14 @@ const joinGame = async () => {
   joinError.value = "";
   try {
     if (joinMode.value === "battle") {
-      const { data, error } = await supabase.from("battle_sessions").select("code,player1_token,player2_token").eq("code", entered.toUpperCase()).maybeSingle();
-      if (error) throw error;
-      const token = side.value === "p1" ? data?.player1_token : data?.player2_token;
-      if (!data || !token) throw new Error("Kode battle tidak ditemukan atau pemain belum tersedia.");
-      await router.push({ name: "player-battle", params: { code: data.code, player: side.value }, query: { token } });
-      return;
+      const {data,error}=await supabase.rpc('get_public_battle_state',{p_code:entered.toUpperCase()});
+      if(error)throw error;if(!data?.ok)throw new Error(data?.message||'Battle tidak tersedia.');
+      await router.push(`/battle/${encodeURIComponent(data.battle.code)}`);return;
     }
-    let player = "p1";
-    let result = await supabase.from("battle_sessions").select("code,player1_token,player2_token,player1_access_code,player2_access_code").eq("player1_access_code", entered.toUpperCase()).maybeSingle();
-    if (!result.error && !result.data) {
-      player = "p2";
-      result = await supabase.from("battle_sessions").select("code,player1_token,player2_token,player1_access_code,player2_access_code").eq("player2_access_code", entered.toUpperCase()).maybeSingle();
-    }
-    if (result.error) throw result.error;
-    // Accept old QR/token links while new player codes are resolved to the private token.
-    if (!result.data) {
-      player = "p1";
-      result = await supabase.from("battle_sessions").select("code,player1_token,player2_token").eq("player1_token", entered).maybeSingle();
-      if (!result.error && !result.data) {
-        player = "p2";
-        result = await supabase.from("battle_sessions").select("code,player1_token,player2_token").eq("player2_token", entered).maybeSingle();
-      }
-    }
-    if (result.error) throw result.error;
-    if (!result.data) throw new Error("Kode pemain tidak ditemukan.");
-    const token = player === "p1" ? result.data.player1_token : result.data.player2_token;
-    await router.push({ name: "player-battle", params: { code: result.data.code, player }, query: { token } });
+    const {data,error}=await supabase.rpc('redeem_battle_player_code',{p_access_code:entered});
+    if(error)throw error;if(!data?.ok)throw new Error(data?.message||'Kode pribadi tidak valid.');
+    savePlayerAccess(data.code,data.player,data.token);
+    await router.push({name:'player-battle',params:{code:data.code,player:data.player}});
   } catch (error) { joinError.value = error?.message ?? "Tidak dapat membuka battle."; }
   finally { joining.value = false; }
 };
@@ -374,7 +356,7 @@ const joinGame = async () => {
 
     <BattleGuide v-if="page === 'home'" />
 
-    <section v-if="page === 'play'" class="play-page"><div class="play-aside"><span class="eyebrow">READY PLAYER?</span><h1>Masuk ke<br><em>battle-mu.</em></h1><p>Gunakan kode battle yang dibagikan penyelenggara, atau masukkan kode khusus milikmu.</p><div class="play-mark">T<span>×</span>D</div></div><div id="join-game" class="join-card"><span class="eyebrow">PLAYER ACCESS</span><h2>Masukkan kode</h2><p>Kode pemain pribadi langsung memilih akun Player 1 atau Player 2.</p><form @submit.prevent="joinGame"><div class="mode-tabs"><button type="button" :class="{ active: joinMode === 'battle' }" @click="joinMode = 'battle'">Kode battle</button><button type="button" :class="{ active: joinMode === 'player' }" @click="joinMode = 'player'">Kode pemain</button></div><label class="form-field"><span>{{ joinMode === 'battle' ? 'KODE BATTLE' : 'KODE PEMAIN' }}</span><input v-model="accessCode" :placeholder="joinMode === 'battle' ? 'Contoh: A7K9Q2' : 'Masukkan kode akses pemain'" autocomplete="off" required></label><label v-if="joinMode === 'battle'" class="form-field"><span>MASUK SEBAGAI</span><SearchableSelect v-model="side"><option value="p1">Player 1</option><option value="p2">Player 2</option></SearchableSelect></label><button class="submit-play" :disabled="joining">{{ joining ? 'Membuka battle…' : 'Masuk ke game →' }}</button><p v-if="joinError" class="form-error" role="alert">{{ joinError }}</p></form><small class="privacy-note">Kode pemain bersifat pribadi. Minta kode Player 1 atau Player 2 dari penyelenggara.</small></div></section>
+    <section v-if="page === 'play'" class="play-page"><div class="play-aside"><span class="eyebrow">READY PLAYER?</span><h1>Masuk ke<br><em>battle-mu.</em></h1><p>Gunakan kode pribadi dari guru untuk bermain. Kode battle hanya membuka layar penonton.</p><div class="play-mark">T<span>×</span>D</div></div><div id="join-game" class="join-card"><span class="eyebrow">PLAYER ACCESS</span><h2>Masukkan kode</h2><p>Kode pemain pribadi langsung memilih akun Player 1 atau Player 2.</p><form @submit.prevent="joinGame"><div class="mode-tabs"><button type="button" :class="{ active: joinMode === 'battle' }" @click="joinMode = 'battle'">Tonton battle</button><button type="button" :class="{ active: joinMode === 'player' }" @click="joinMode = 'player'">Kode pribadi pemain</button></div><label class="form-field"><span>{{ joinMode === 'battle' ? 'KODE BATTLE' : 'KODE PEMAIN' }}</span><input v-model="accessCode" :placeholder="joinMode === 'battle' ? 'Contoh: A7K9Q2' : 'Masukkan kode akses pemain'" autocomplete="off" required></label><button class="submit-play" :disabled="joining">{{ joining ? 'Membuka battle…' : joinMode === 'battle' ? 'Tonton pertandingan →' : 'Masuk ke game →' }}</button><p v-if="joinError" class="form-error" role="alert">{{ joinError }}</p></form><small class="privacy-note">Kode pemain bersifat pribadi. Minta kode Player 1 atau Player 2 dari penyelenggara.</small></div></section>
 
     <section v-if="page === 'cards'" class="catalog-page"><div class="page-intro"><span class="eyebrow">KATALOG KARTU · {{ filteredCards.length }} KARTU</span><h1>Kenali timmu.</h1><p>Pilih kartu untuk melihat statistik, skill, elemen, dan cerita lengkapnya. Kartu hasil fusion ada di halaman Fusion.</p></div><label class="search"><span>⌕</span><input v-model="search" placeholder="Cari nama, kode, atau elemen"></label><div class="type-filters" aria-label="Filter tipe kartu"><button v-for="type in typeFilters" :key="type" type="button" :class="[{ active: selectedType === type }, type !== 'All' ? elementClass(type) : '']" @click="selectedType = type">{{ type === 'All' ? 'Semua tipe' : `${elementIcon(type)} ${type}` }}</button></div><div class="catalog-select-filters" aria-label="Filter katalog kartu"><label><span>RARITY</span><SearchableSelect v-model="selectedRarity"><option v-for="rarity in rarityFilters" :key="rarity" :value="rarity">{{ rarity === 'All' ? 'Semua rarity' : rarity }}</option></SearchableSelect></label><label><span>SKILL</span><SearchableSelect v-model="selectedSkill"><option v-for="skill in skillFilters" :key="skill" :value="skill">{{ skill === 'All' ? 'Semua skill' : skill }}</option></SearchableSelect></label><label><span>LEARNING ARC</span><SearchableSelect v-model="selectedLearningArc"><option v-for="arc in learningArcFilters" :key="arc" :value="arc">{{ arc === 'All' ? 'Semua arc' : arc }}</option></SearchableSelect></label></div><div v-if="!loading && !loadError" class="catalog-legend" aria-label="Panduan warna tipe dan rarity"><div class="legend-group"><b>TIPE</b><span v-for="type in typeFilters.slice(1)" :key="type" class="legend-chip" :class="elementClass(type)"><i>{{ elementIcon(type) }}</i>{{ type }}</span></div><div class="legend-group rarity-legend"><b>RARITY</b><span v-for="rarity in rarityFilters.slice(1)" :key="rarity" class="legend-chip" :class="rarityClass(rarity)"><i>{{ rarityIcon(rarity) }}</i>{{ rarity }}</span></div></div><div v-if="loading" class="empty-state">Memuat kartu…</div><div v-else-if="loadError" class="empty-state" role="alert">{{ loadError }} <button @click="loadFeatured">Coba lagi</button></div><div v-else class="unit-grid"><button v-for="card in visibleCards" :key="card.id" class="unit-card" :class="physicalCardImageUrl(card) ? 'physical-only' : [rarityClass(card.rarity), elementClass(card.element)]" type="button" :aria-label="physicalCardImageUrl(card) ? `Lihat kartu fisik ${card.name}` : `Lihat detail ${card.name}`" @click="openCard(card)"><img v-if="physicalCardImageUrl(card)" class="physical-card-image" :src="physicalCardImageUrl(card)" :alt="`Kartu fisik ${card.name}`" loading="lazy"><template v-else><div class="unit-art"><img v-if="card.image_url && /^https?:|^\//.test(card.image_url)" :src="card.image_url" :alt="card.name" loading="lazy"><span v-else>{{ card.image_url || card.avatar_url || '✦' }}</span><b :class="elementClass(card.element)"><i>{{ elementIcon(card.element) }}</i>{{ card.element || 'NEUTRAL' }}</b><i class="rarity-chip" :class="rarityClass(card.rarity)"><span>{{ rarityIcon(card.rarity) }}</span>{{ card.rarity || 'CARD' }}</i></div><div class="unit-info"><small>{{ card.card_code || 'TIMEDOOR CARD' }}</small><h2>{{ card.name }}</h2><div class="unit-stats"><span>HP <b>{{ card.hp ?? '—' }}</b></span><span>ATK <b>{{ card.attack ?? '—' }}</b></span><span>DEF <b>{{ card.defense ?? '—' }}</b></span></div><div class="unit-skills-preview"><span v-for="(skill, skillIndex) in skillsForCard(card).slice(0, 2)" :key="skill.id || skillIndex" :title="skill.description || skill.effect || skill.name">✦ {{ skill.name }}</span><span v-if="!skillsForCard(card).length">Kartu strategi</span></div></div></template></button><div v-if="!visibleCards.length && !loading" class="empty-state">Kartu tidak ditemukan.</div></div><nav v-if="pageCount > 1" class="catalog-pagination" aria-label="Halaman kartu"><button type="button" :disabled="currentPage === 1" @click="setPage(currentPage - 1)">← Sebelumnya</button><span>Halaman <b>{{ currentPage }}</b> dari {{ pageCount }}</span><button type="button" :disabled="currentPage === pageCount" @click="setPage(currentPage + 1)">Berikutnya →</button></nav></section>
 

@@ -1,4 +1,5 @@
 <script setup>
+import { revivalCardReason } from "../../lib/battle/pilotRules.js";
 import {
   computed,
   onMounted,
@@ -6,6 +7,9 @@ import {
 } from "vue";
 
 const props = defineProps({
+  arena: Boolean,
+  unlimitedBenchReturns: Boolean,
+  benchCardReason: Function,
   open: {
     type: Boolean,
     default: false,
@@ -113,25 +117,9 @@ const getCardId = (card) =>
   card?.uid ??
   null;
 
-const isFieldFusionUsed = (card) =>
-  Boolean(
-    card?.field_fusion_used ??
-      card?.fieldFusionUsed ??
-      false,
-  );
 
-const isNecroConsumed = (card) =>
-  Boolean(
-    card?.necro_consumed ??
-      card?.necroConsumed ??
-      false,
-  );
+const isNecroConsumed = card => Boolean(revivalCardReason(card));
 
-const isNecroReadyAfterFusion = (card) =>
-  Boolean(
-    isFieldFusionUsed(card) &&
-      !isNecroConsumed(card),
-  );
 
 const getCardHp = (card) =>
   Number(
@@ -588,6 +576,7 @@ onUnmounted(() => {
 
         <section
           class="pile-viewer-panel"
+          :class="{'arena-frame': arena}"
         >
           <header
             class="viewer-header"
@@ -736,10 +725,6 @@ onUnmounted(() => {
                       draggableCards &&
                       !readonly,
 
-                    'fusion-necro-ready':
-                      zone === 'graveyard' &&
-                      isNecroReadyAfterFusion(card),
-
                     'fusion-necro-spent':
                       zone === 'graveyard' &&
                       isNecroConsumed(card),
@@ -821,18 +806,10 @@ onUnmounted(() => {
                       "
                       class="fusion-lifecycle-badge spent"
                     >
-                      ☠ NECRO CONSUMED
+                      {{ revivalCardReason(card) }}
                     </span>
 
-                    <span
-                      v-else-if="
-                        zone === 'graveyard' &&
-                        isNecroReadyAfterFusion(card)
-                      "
-                      class="fusion-lifecycle-badge ready"
-                    >
-                      🧬 FUSION USED • ☠ NECRO READY
-                    </span>
+
 
                     <span
                       v-else-if="
@@ -840,7 +817,7 @@ onUnmounted(() => {
                       "
                       class="fusion-lifecycle-badge natural"
                     >
-                      ☠ NECRO READY
+                      Base KO • cek skill Revive
                     </span>
                   </div>
 
@@ -926,18 +903,19 @@ onUnmounted(() => {
                       "
                       class="bench-action-block"
                     >
-                      <span class="bench-return-count">
+                      <span v-if="!unlimitedBenchReturns" class="bench-return-count">
                         RETURN {{ getBenchReturnCount(card) }} / 1
                       </span>
-                      <p v-if="benchActionHint">
-                        {{ benchActionHint }}
+                      <p v-if="benchCardReason?.(card) || benchActionHint">
+                        {{ benchCardReason?.(card) || benchActionHint }}
                       </p>
                       <button
                         type="button"
                         class="bench-action-button"
                         :disabled="
                           !benchActionEnabled ||
-                          getBenchReturnCount(card) >= 1 ||
+                          (!unlimitedBenchReturns && getBenchReturnCount(card) >= 1) ||
+                          Boolean(benchCardReason?.(card)) ||
                           getCardHp(card) <= 0 ||
                           card.exhausted
                         "
@@ -948,7 +926,7 @@ onUnmounted(() => {
                     </div>
 
                     <div
-                      v-else-if="zone === 'bench'"
+                      v-else-if="zone === 'bench' && !unlimitedBenchReturns"
                       class="bench-return"
                     >
                       RETURN {{ getBenchReturnCount(card) }} / 1
@@ -970,10 +948,8 @@ onUnmounted(() => {
                     >
                       {{
                         isNecroConsumed(card)
-                          ? "NECRO CONSUMED"
-                          : isNecroReadyAfterFusion(card)
-                            ? "FUSION USED • NECRO READY"
-                            : `${card.graveyard_reason ?? "DESTROYED"} • NECRO READY`
+                          ? revivalCardReason(card)
+                          : "Base KO • gunakan skill Revive jika tersedia"
                       }}
                     </div>
                   </div>

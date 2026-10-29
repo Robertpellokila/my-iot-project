@@ -250,156 +250,27 @@ export function useBattleUiSync() {
   // READ PRESENCE SNAPSHOT
   // =======================================================
 
-  const syncPresence =
-    () => {
-      if (
-        !channel.value
-      ) {
-        return;
-      }
+  // Player presence/broadcast payloads are untrusted. Only server-verified rows
+  // may move cards, viewers or skill intentions on another screen.
+  const syncPresence=async()=>{
+    const current=battleId.value;if(!current)return;
+    const {data,error}=await supabase.from('battle_player_ui_state').select('player,state').eq('battle_id',current);
+    if(error||current!==battleId.value)return;
+    for(const side of ['p1','p2']){const row=(data??[]).find(item=>item.player===side);if(row)applyRemoteState(side,row.state);else resetState(players[side]);}
+  };
 
-      const state =
-        channel.value
-          .presenceState();
-
-      const newest = {
-        p1: null,
-        p2: null,
-      };
-
-      for (
-        const entries of
-        Object.values(
-          state ?? {},
-        )
-      ) {
-        for (
-          const meta of
-          entries ?? []
-        ) {
-          if (
-            meta?.role !==
-              "player" ||
-            ![
-              "p1",
-              "p2",
-            ].includes(
-              meta?.player,
-            )
-          ) {
-            continue;
-          }
-
-          const player =
-            meta.player;
-
-          if (
-            !newest[player] ||
-            Number(
-              meta.updatedAt ??
-              0,
-            ) >
-              Number(
-                newest[player]
-                  ?.updatedAt ??
-                0,
-              )
-          ) {
-            newest[player] =
-              meta;
-          }
-        }
-      }
-
-      for (
-        const player of
-        [
-          "p1",
-          "p2",
-        ]
-      ) {
-        if (
-          newest[player]
-        ) {
-          applyRemoteState(
-            player,
-            newest[player],
-          );
-        } else {
-          resetState(
-            players[player],
-          );
-        }
-      }
-
-      debug(
-        "presence sync",
-        {
-          p1:
-            cloneState(
-              players.p1,
-            ),
-
-          p2:
-            cloneState(
-              players.p2,
-            ),
-        },
-      );
-    };
-
-  // =======================================================
-  // BROADCAST
-  // =======================================================
-
-  const broadcastState =
-    async () => {
-      if (
-        !channel.value ||
-        !connected.value ||
-        role.value !==
-          "player" ||
-        !ownPlayer.value
-      ) {
-        return;
-      }
-
-      try {
-        await channel.value.send(
-          {
-            type:
-              "broadcast",
-
-            event:
-              "ui_state",
-
-            payload: {
-              battleId:
-                battleId.value,
-
-              player:
-                ownPlayer.value,
-
-              state:
-                cloneState(
-                  localState,
-                ),
-            },
-          },
-        );
-      } catch (
-        error
-      ) {
-        console.error(
-          "Battle UI Broadcast:",
-          error,
-        );
-      }
-    };
-
-  // =======================================================
-  // PRESENCE TRACK
-  // =======================================================
+  let privatePlayerAccess=null,uiPublishBusy=false,uiPublishPending=false,uiPublishTimer=null,lastUiPublish=0;
+  const broadcastState=async()=>{
+    if(!connected.value||role.value!=='player'||!ownPlayer.value||!privatePlayerAccess?.token)return;
+    if(uiPublishBusy){uiPublishPending=true;return;}
+    const wait=120-(Date.now()-lastUiPublish);
+    if(wait>0){if(!uiPublishTimer)uiPublishTimer=setTimeout(()=>{uiPublishTimer=null;void broadcastState();},wait);return;}
+    uiPublishBusy=true;uiPublishPending=false;lastUiPublish=Date.now();
+    const currentChannel=channel.value,access={...privatePlayerAccess},side=ownPlayer.value;
+    try{await supabase.rpc('publish_battle_player_ui',{p_code:access.code,p_player:side,p_token:access.token,p_state:cloneState(localState)});}
+    catch{console.warn('Sinkronisasi tampilan pemain belum tersedia.');}
+    finally{uiPublishBusy=false;if(uiPublishPending&&channel.value===currentChannel)void broadcastState();}
+  };
 
   const trackCurrentState =
     async () => {
@@ -513,6 +384,7 @@ export function useBattleUiSync() {
   // =======================================================
 
   async function disconnect() {
+    clearTimeout(uiPublishTimer);uiPublishTimer=null;uiPublishPending=false;privatePlayerAccess=null;lastUiPublish=0;
     clearReconnect();
     connected.value =
       false;
@@ -572,6 +444,7 @@ export function useBattleUiSync() {
           "spectator",
 
       player = null,
+      code = null, token = null,
       resumeState = null,
     }) => {
       if (
@@ -603,13 +476,14 @@ export function useBattleUiSync() {
           ? player
           : null;
 
-      const savedDisplay = readSaved('display');
+      const savedDisplay = null; // Only verified server rows restore another screen.
       spotlight.p1 = normalizeSpotlight(savedDisplay?.p1);
       spotlight.p2 = normalizeSpotlight(savedDisplay?.p2);
       if (role.value === 'player' && ownPlayer.value) {
         localState.focus = clonePlayerFocus(readSaved(`player:${ownPlayer.value}`));
         rememberFocus(ownPlayer.value, localState.focus);
       }
+      privatePlayerAccess={code,token};
       if (resumeState) Object.assign(localState, cloneState(resumeState));
 
       clientId.value =
@@ -672,55 +546,11 @@ export function useBattleUiSync() {
       // BROADCAST
       // ---------------------------------------------------
 
-      nextChannel.on(
-        "broadcast",
-        {
-          event:
-            "ui_state",
-        },
-        ({
-          payload,
-        }) => {
-          if (
-            !payload ||
-            String(
-              payload.battleId ??
-              "",
-            ) !==
-              String(
-                battleId.value ??
-                "",
-              )
-          ) {
-            return;
-          }
-
-          const player =
-            payload.player;
-
-          if (
-            ![
-              "p1",
-              "p2",
-            ].includes(
-              player,
-            )
-          ) {
-            return;
-          }
-
-          applyRemoteState(
-            player,
-            payload.state,
-          );
-
-          debug(
-            "broadcast received",
-            player,
-            payload.state,
-          );
-        },
-      );
+      nextChannel.on('postgres_changes',{event:'*',schema:'public',table:'battle_player_ui_state',filter:`battle_id=eq.${battleId.value}`},payload=>{
+        const row=payload.new;
+        if(payload.eventType==='DELETE'){void syncPresence();return;}
+        if(row?.battle_id===battleId.value&&['p1','p2'].includes(row.player))applyRemoteState(row.player,row.state);
+      });
 
       channel.value =
         nextChannel;
@@ -784,7 +614,7 @@ export function useBattleUiSync() {
               ) {
                 connected.value = false;
                 if (!reconnectTimer) {
-                  const retry = { battleId: battleId.value, role: role.value, player: ownPlayer.value };
+                  const retry = { battleId: battleId.value, role: role.value, player: ownPlayer.value, ...privatePlayerAccess };
                   reconnectTimer = setTimeout(() => {
                     reconnectTimer = null;
                     if (toRaw(channel.value) !== nextChannel || connected.value) return;

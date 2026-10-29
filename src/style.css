@@ -1584,50 +1584,50 @@ body .admin-theme .main-content .collection-page .collection-header :is(h1,p,.ey
 
 /* The light table palette belongs to the player controls only.
    PublicBattleArena and PublicActiveField own their spectator arena styles. */
-body .player-battle-ui {
+body .player-battle-ui:not(.arena-player) {
   --timedoor-green: #0caf25;
   --timedoor-green-dark: #087f1d;
   --timedoor-green-soft: #eaf7e9;
   color: #173623 !important;
   background: linear-gradient(180deg,#f7fcf6 0%,#edf8ec 58%,#e3f2e1 100%) !important;
 }
-body .player-battle-ui { --player-accent: #0caf25 !important; --player-accent-soft: #56c963 !important; }
-body .player-battle-ui.p2 { --player-accent: #087f1d !important; --player-accent-soft: #53a95d !important; }
-body .player-battle-ui .arena-background {
+body .player-battle-ui:not(.arena-player) { --player-accent: #0caf25 !important; --player-accent-soft: #56c963 !important; }
+body .player-battle-ui:not(.arena-player).p2 { --player-accent: #087f1d !important; --player-accent-soft: #53a95d !important; }
+body .player-battle-ui:not(.arena-player) .arena-background {
   background: radial-gradient(circle at 50% 45%,#fff 0%,#ffffff80 18%,transparent 42%),linear-gradient(180deg,#eff9ed 0%,#f7fcf6 28%,#e7f5e5 68%,#d9eed7 100%) !important;
 }
-body .player-battle-ui .top-hud,
-body .player-battle-ui .cyber-panel,
-body .player-battle-ui .notification-panel,
-body .player-battle-ui .skill-info-panel {
+body .player-battle-ui:not(.arena-player) .top-hud,
+body .player-battle-ui:not(.arena-player) .cyber-panel,
+body .player-battle-ui:not(.arena-player) .notification-panel,
+body .player-battle-ui:not(.arena-player) .skill-info-panel {
   border-color: #d5e8d3 !important;
   background-color: #ffffffed !important;
   color: #173623 !important;
   box-shadow: 0 14px 36px #174a200e !important;
 }
-body .player-battle-ui .battle-sound-toggle,
-body .player-battle-ui :is(.modal-primary,.special-use-button,.fusion-use-button) {
+body .player-battle-ui:not(.arena-player) .battle-sound-toggle,
+body .player-battle-ui:not(.arena-player) :is(.modal-primary,.special-use-button,.fusion-use-button) {
   border-color: #0caf25 !important;
   background: #0caf25 !important;
   color: #fff !important;
 }
-body .player-battle-ui .bonus-button.ready {
+body .player-battle-ui:not(.arena-player) .bonus-button.ready {
   border-color: #b8dcbc !important;
   background: linear-gradient(145deg,#fff 0%,#f1f9ef 100%) !important;
   color: #173623 !important;
   box-shadow: 0 8px 20px #174a200e !important;
 }
-body .player-battle-ui .bonus-button.ready :is(strong,small,.bonus-description) {
+body .player-battle-ui:not(.arena-player) .bonus-button.ready :is(strong,small,.bonus-description) {
   color: #174726 !important;
 }
-body .player-battle-ui .bonus-button.ready small {
+body .player-battle-ui:not(.arena-player) .bonus-button.ready small {
   color: #12812b !important;
 }
-body .player-battle-ui .bonus-button.ready .bonus-item-icon {
+body .player-battle-ui:not(.arena-player) .bonus-button.ready .bonus-item-icon {
   background: #e4f4e3 !important;
   color: #147d2b !important;
 }
-body .player-battle-ui .bonus-button.ready:hover {
+body .player-battle-ui:not(.arena-player) .bonus-button.ready:hover {
   border-color: #0caf25 !important;
   box-shadow: 0 12px 24px #0caf2520 !important;
 }

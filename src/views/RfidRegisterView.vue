@@ -1,4 +1,5 @@
 <script setup>
+import {useAdminFeedback} from '../composables/useAdminToast.js';
 import SearchableSelect from "../components/SearchableSelect.vue";
 import { onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
@@ -55,7 +56,7 @@ const setupRealtime = () => {
         uid.value = payload.new.uid;
         
         // Berikan feedback visual ke user
-        successMessage.value = "Kartu terdeteksi! UID telah diisi otomatis.";
+        successMessage.value="";successMessage.value = "Kartu terdeteksi! UID telah diisi otomatis.";
         errorMessage.value = "";
         
         // Hapus pesan sukses setelah 3 detik
@@ -109,6 +110,7 @@ const resetForm = () => {
   uid.value = "";
   errorMessage.value = "";
   successMessage.value = "";
+  adminToast.info('Formulir RFID direset.');
 };
 
 // ==========================================
@@ -124,6 +126,7 @@ onUnmounted(() => {
     supabase.removeChannel(realtimeChannel); // Matikan listener saat pindah halaman
   }
 });
+const adminToast=useAdminFeedback({error:errorMessage,message:successMessage,messageType:value=>value.includes('terdeteksi')?'info':'success',scope:'RfidRegisterView'});
 </script>
 
 

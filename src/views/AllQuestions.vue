@@ -1,4 +1,5 @@
 <script setup>
+import {useAdminFeedback} from '../composables/useAdminToast.js';
 import SearchableSelect from "../components/SearchableSelect.vue";
 import AdminTable from "../components/AdminTable.vue";
 import { ref, computed, onMounted, watch } from 'vue';
@@ -66,11 +67,13 @@ function editQuestion(id) {
 
 async function toggleActive(question) {
   if (question.deleted_at) return;
+  successMessage.value='';errorMessage.value='';
   const previous = question.is_active;
   question.is_active = !previous;
   try {
     const { error } = await supabase.from('coding_questions').update({ is_active: question.is_active }).eq('id', question.id);
     if (error) throw error;
+    successMessage.value=question.is_active?'Soal diaktifkan untuk quiz.':'Soal dinonaktifkan untuk quiz.';
   } catch (error) {
     question.is_active = previous;
     errorMessage.value = error.message || 'Gagal mengubah status.';
@@ -80,7 +83,7 @@ async function toggleActive(question) {
 async function deleteQuestion(question) {
   if (!window.confirm(`Hapus question ini? Jika sudah dipakai di riwayat battle, question akan diarsipkan agar data battle lama tetap utuh.\n\n${question.question}`)) return;
   deletingId.value = question.id;
-  errorMessage.value = '';
+  successMessage.value='';errorMessage.value = '';
   try {
     const { error } = await supabase.from('coding_questions').delete().eq('id', question.id);
     if (error?.code === '23503') {
@@ -106,7 +109,7 @@ async function deleteQuestion(question) {
 
 async function restoreQuestion(question) {
   deletingId.value = question.id;
-  errorMessage.value = '';
+  successMessage.value='';errorMessage.value = '';
   successMessage.value = '';
   try {
     const { error } = await supabase
@@ -137,6 +140,7 @@ onMounted(() => {
   if (route.query.notice) router.replace({ name: 'questions' });
   fetchQuestions();
 });
+const adminToast=useAdminFeedback({error:errorMessage,success:successMessage,scope:'AllQuestions'});
 </script>
 
 <template>

@@ -82,8 +82,8 @@ import EditQuestion
 import PublicBattleArena
   from "../views/PublicBattleArena.vue";
 
-import PlayerBattle
-  from "../views/PlayerBattle.vue";
+import PlayerBattleEntry
+  from "../views/PlayerBattleEntry.vue";
 import CardCollection from "../views/CardCollection.vue";
 import GameLanding from "../views/GameLanding.vue";
 import SkillCatalog from "../views/SkillCatalog.vue";
@@ -147,7 +147,7 @@ const router =
           "player-battle",
 
         component:
-          PlayerBattle,
+          PlayerBattleEntry,
 
         props:
           true,

@@ -37,28 +37,30 @@ export function useCardGenerator(dataset = PILOT) {
 
   const saveCloud = async entries => {
     if (!owner.value || cloudBusy.value) return;
-    cloudBusy.value = true; error.value = '';
+    cloudBusy.value = true; error.value = '';message.value='';
+    let savedResult=null;
     try {
       const { data,error: saveError } = await supabase.rpc('save_card_studio',{p_dataset:dataset.id,p_workspace:JSON.parse(JSON.stringify(workspace)),p_entries:entries});
       if (saveError) throw saveError;
+      savedResult=data;
+      for(const entry of data.entries??[])catalogLinks.value[entry.card_key]=entry.game_card_id;
+      cloudUpdatedAt.value=data.saved_at;
       const keys=(data.entries??[]).map(entry=>entry.card_key).filter(Boolean);
       const {data:sync,error:syncError}=await supabase.rpc('sync_card_studio_battle_skills',{p_dataset:dataset.id,p_card_keys:keys});
       // During a rolling deployment the save RPC may arrive before the battle
       // sync endpoint. Never report a successfully saved card as failed.
       const syncUnavailable = syncError && /sync_card_studio_battle_skills|PGRST202/i.test(`${syncError.code ?? ''} ${syncError.message ?? ''}`);
       if (syncError && !syncUnavailable) throw syncError;
-      for(const entry of data.entries??[])catalogLinks.value[entry.card_key]=entry.game_card_id;
-      cloudUpdatedAt.value=data.saved_at;
       message.value = syncUnavailable
         ? `${data.entries.length} kartu tersimpan ke akun. Sinkronisasi skill battle akan aktif setelah migrasi battle dipasang.`
         : `${data.entries.length} kartu tersimpan ke akun. ${sync?.synced_slots ?? 0} skill battle tersinkron untuk Album dan RFID.${sync?.pending_slots ? ` ${sync.pending_slots} skill perlu aturan efek yang didukung.` : ''}`;
       return true;
-    } catch (err) { error.value = `Kartu belum tersimpan ke akun. ${err.message || 'Periksa koneksi lalu coba lagi.'} Draft lokal tetap tersedia.`; return false; }
+    } catch (err) { if(savedResult){message.value=`${savedResult.entries?.length??0} kartu tersimpan, tetapi sinkronisasi skill battle belum selesai. Coba simpan kembali sebelum memakai kartu di battle.`;return false;}error.value = `Kartu belum tersimpan ke akun. ${err.message || 'Periksa koneksi lalu coba lagi.'} Draft lokal tetap tersedia.`; return false; }
     finally { cloudBusy.value = false; }
   };
   const loadCloud = async () => {
     if (!owner.value || cloudBusy.value) return;
-    cloudBusy.value = true; error.value = '';
+    cloudBusy.value = true; error.value = '';message.value='';
     try {
       const { data, error: loadError } = await supabase.from('card_generator_projects').select('workspace,updated_at').eq('owner_id', owner.value).eq('dataset_id', dataset.id).maybeSingle();
       if (loadError) throw loadError;

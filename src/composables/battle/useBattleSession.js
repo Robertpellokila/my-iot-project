@@ -18,7 +18,7 @@ import { playerErrorMessage } from "../../utils/playerErrorMessage.js";
 
 
 export const useBattleSession =
-  () => {
+  (access=null) => {
 
     // =======================================================
     // STATE
@@ -103,24 +103,10 @@ export const useBattleSession =
       };
 
 
-    const normalizeZone =
-      value => {
-
-        return (
-          String(
-            value ??
-            ""
-          )
-            .trim()
-            .toLowerCase() ===
-          "bench"
-
-            ? "bench"
-
-            : "active"
-        );
-
-      };
+    const normalizeZone = value => {
+      const zone=String(value??'').trim().toLowerCase();
+      return ['bench','graveyard'].includes(zone)?zone:'active';
+    };
 
 
     // =======================================================
@@ -883,6 +869,7 @@ export const useBattleSession =
         catch (
           err
         ) {
+          if(err?.code==='PLAYER_ACCESS_REQUIRED')access?.onAccessDenied?.(err.message);
 
           console.error(
             "Gagal reload battle cards:",
@@ -1462,6 +1449,7 @@ export const useBattleSession =
         catch (
           err
         ) {
+          if(err?.code==='PLAYER_ACCESS_REQUIRED')access?.onAccessDenied?.(err.message);
 
           console.error(
             "Realtime card reload gagal:",
@@ -1660,7 +1648,7 @@ export const useBattleSession =
 
           const result =
             await getBattleByCode(
-              battleCodeValue
+              battleCodeValue,access?{player:access.player.value,token:access.token.value}:null
             );
 
 
@@ -1720,6 +1708,7 @@ export const useBattleSession =
         catch (
           err
         ) {
+          if(err?.code==='PLAYER_ACCESS_REQUIRED')access?.onAccessDenied?.(err.message);
 
           console.error(
             "Load battle gagal:",
@@ -1786,7 +1775,7 @@ export const useBattleSession =
 
           const result =
             await getBattleByCode(
-              battle.value.code
+              battle.value.code,access?{player:access.player.value,token:access.token.value}:null
             );
 
           if (
@@ -1828,6 +1817,7 @@ export const useBattleSession =
         catch (
           err
         ) {
+          if(err?.code==='PLAYER_ACCESS_REQUIRED')access?.onAccessDenied?.(err.message);
 
           console.error(
             "Refresh battle gagal:",

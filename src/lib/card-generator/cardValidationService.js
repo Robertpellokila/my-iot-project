@@ -1,7 +1,7 @@
 import { RARITY_THEMES, TYPE_BADGES } from './cardRarityTheme.js';
 import { fusionsFor, eligibleCodes, materialCombinations } from './cardFusionResolver.js';
 import { textIssues, imageUrl, placement } from './cardRenderer.js';
-import { LAYOUT_VERSION, TEXT_BOXES } from './cardLayoutTokens.js';
+import { LAYOUT, LAYOUT_VERSION, TEXT_BOXES, EDITION_ARTWORK, cardPrintSettings, printGeometry } from './cardLayoutTokens.js';
 import { FIXED_BACK, fixedBackAvailable } from './cardBack.js';
 import { validateDraft } from './cardDrafts.js';
 import { referenceFrameFor } from './cardReferenceFrames.js';
@@ -67,7 +67,26 @@ export function renderSignature(card, artwork) {
     }), reference_frame: referenceFrameFor(card)?.sha256 ?? null, back: FIXED_BACK.sha256 || FIXED_BACK.id });
 }
 
-export function cardReadiness(card, dataset, artwork = {}, back = {}) {
+export function artworkPrintResolution(card, character, print = {}) {
+  const settings = printGeometry(cardPrintSettings(card, print));
+  const edition = EDITION_ARTWORK[card.design_template];
+  const widthMm = settings.width * (edition ? edition.w / 1024 : LAYOUT.artwork.width / LAYOUT.width);
+  const heightMm = settings.height * (edition ? edition.h / 1536 : LAYOUT.artwork.height / LAYOUT.height);
+  const dimensionsValid = [character?.width, character?.height].every(value => Number.isFinite(value) && value > 0);
+  // Cover crops the longer dimension; contain scales the entire image to fit.
+  const pixelsPerMm = dimensionsValid
+    ? (character.fit === 'contain' ? Math.max : Math.min)(character.width / widthMm, character.height / heightMm)
+    : 0;
+  const dpi = pixelsPerMm * 25.4 / placement(character).scale;
+  return { dpi, targetDpi: settings.dpi, sufficient: dpi + 1e-6 >= settings.dpi, widthMm, heightMm };
+}
+
+export function artworkResolutionIssue(card, character, print = {}) {
+  const resolution = artworkPrintResolution(card, character, print);
+  return resolution.sufficient ? null : `Resolusi artwork efektif ${Math.floor(resolution.dpi)} DPI; perlu ${resolution.targetDpi} DPI pada ukuran cetak dan zoom ini.`;
+}
+
+export function cardReadiness(card, dataset, artwork = {}, back = {}, print = {}) {
   const errors = [];
   const text = textIssues(card, dataset);
   const character = artwork.character;
@@ -75,7 +94,8 @@ export function cardReadiness(card, dataset, artwork = {}, back = {}) {
   else {
     if (artwork.approval_status !== 'approved') errors.push('Artwork Draft');
     if (!character.sha256 || !character.width || !character.height) errors.push('Artwork belum diverifikasi.');
-    if (character.width < 1200 || character.height < 800) errors.push('Resolusi artwork terlalu kecil (min. 1200 × 800 px).');
+    const resolutionIssue = artworkResolutionIssue(card, character, print);
+    if (resolutionIssue) errors.push(resolutionIssue);
     if (artwork.asset_status !== 'verified') errors.push('Asset perlu diperiksa ulang.');
   }
   if (!fixedBackAvailable()) errors.push('Gambar back referensi belum terpasang.');

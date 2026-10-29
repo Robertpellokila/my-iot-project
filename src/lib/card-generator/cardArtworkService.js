@@ -20,6 +20,11 @@ export function setArtworkAsset(art, layer, asset) {
 }
 export const artworkAssets = art => [art.background, art.character, art.foreground, ...(art.skill_icons ?? [])].filter(Boolean);
 
+export function duplicateArtworkCodes(artworks, code) {
+  const hash = artworks[code]?.character?.sha256;
+  return hash ? Object.keys(artworks).filter(other => other !== code && artworks[other]?.character?.sha256 === hash) : [];
+}
+
 export async function digestBlob(blob) {
   const bytes = await blob.arrayBuffer();
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('');

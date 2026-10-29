@@ -2,6 +2,8 @@
 
 Open **Admin → Card Studio → Desain & cetak** (`/admin/cards`, or the existing `/admin/card-generator` link). Card Studio groups design/printing and **Registrasi kartu** in one menu. The registration tab uses the existing `/admin/game/register` workflow. Both tabs retain their in-progress state while switching; the RFID listener is active only on registration. Leaving Card Studio clears the cached registration form, while generator drafts retain their existing workspace persistence. The selected design is remembered per account in the browser session.
 
+Latest skill/RFID verification: [2026-10-27 audit](skill-audit-2026-10-27.md) and [per-card findings](skill-audit-2026-10-27.csv). Migrations 050/051 are installed; all 84 saved pilot skills were exercised through the restored server dispatcher. The historical milestones below describe earlier stages.
+
 ## Repository audit and decisions
 
 - Vue 3.5, Vite 8, Vue Router, JavaScript composition API; no existing central state store.
@@ -63,14 +65,14 @@ Untouched version-1 legacy workspaces receive this example once. Uploaded/reposi
 ## Artwork and approval workflow
 
 1. Open a card and read its creative brief. Supply approved character references where missing.
-2. Upload PNG/WebP (up to 10 MB source). The existing compressor preserves alpha, limits dimensions to 2400 px and output to 1 MB. Final character art must be at least 1200 × 800 px.
+2. Upload PNG/WebP (up to 10 MB source). The existing compressor preserves alpha, limits dimensions to 2400 px and output to 1 MB. Character resolution is checked against the actual artwork area, cover/contain fit, zoom, physical print size and chosen DPI (300 by default). Standard and edition frames use their respective rendering geometry; there is no fixed 1200 × 800 px minimum.
 3. Use background, character/full composition and optional foreground layers. Move/scale each layer within the fixed clipped art window. All stats/text sit above the art layers.
 4. Review character identity, unique composition, framing and readability, then approve. A repeated character-file SHA across cards is rejected for approval and clean bulk export.
 5. The shared back always uses the exact supplied `public/images/tbc-back.png` (SHA-256 `bbb872f65117aa57bef346a4953d351c0762cb1ee6d425f16a55ac24a70fd79e`). It cannot be replaced by a card, workspace import or logo upload. The full original image fills the existing 63 × 88 mm print area, with no cropping; its original 2:3 aspect is fitted to that print ratio.
-6. Run **Periksa artwork & render**. This fetches the actual assets, checks hashes/dimensions, and measures SVG text bounds.
+6. Run **Periksa artwork & render** for one card, or open **Export / Cetak**, turn off proof, confirm the selected designs have been reviewed, then click **Setujui & periksa N kartu**. The batch checks actual asset bytes, hashes/dimensions and SVG text bounds, and commits approval/render receipts only for passing, unchanged designs. Failed cards are listed with a link to the editor. **Download N kartu yang lolos** explicitly exports only the passing cards; the normal download never silently skips failures.
 7. Print readiness requires valid canonical data, artwork resolution and verified bytes, human artwork approval, hash-verified fixed back image, no text overflow, and a render receipt matching the exact current data, placement, asset hashes and layout version.
 
-Uploads get new immutable storage paths. Changing artwork or placement resets its review and render receipt. Reloads/imports distrust cached asset/render verification, so assets must be checked again. Artwork quality, species identity and genuinely different poses require a human reviewer; code cannot certify artistic approval.
+Uploads get new immutable storage paths. Changing artwork or placement resets its review and render receipt. Reloads/imports distrust cached asset/render verification; clean export automatically rechecks approved designs before downloading. Asset fetches are shared within each batch. Duplicate artwork blocks the affected cards, while unrelated duplicates do not block another selection. Artwork quality, species identity and genuinely different poses require a human reviewer; code cannot certify artistic approval.
 
 ### Uploading skill icons
 

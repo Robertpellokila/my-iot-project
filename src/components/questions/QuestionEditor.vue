@@ -1,4 +1,5 @@
 <script setup>
+import {useAdminFeedback} from '../../composables/useAdminToast.js';
 import { defineAsyncComponent, computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { supabase } from '../../lib/supabase';
@@ -30,18 +31,20 @@ async function pickImage(file){
   try{
     const compressed=await compressImageFile(file,{maxSourceBytes:IMAGE_UPLOAD_LIMITS.sourceBytes,maxOutputBytes:IMAGE_UPLOAD_LIMITS.outputBytes,maxDimension:IMAGE_UPLOAD_LIMITS.maxDimension});
     if(request!==imageRequest)return;
-    revokePreview();imageFile.value=compressed;imagePreview.value=URL.createObjectURL(compressed);imageName.value=file.name;
+    revokePreview();imageFile.value=compressed;imagePreview.value=URL.createObjectURL(compressed);imageName.value=file.name;adminToast.success('Gambar soal siap. Simpan soal untuk mengunggahnya ke akun.');
   }catch(e){if(request===imageRequest)error.value=e.message||'Gambar tidak dapat dibaca.';}
   finally{if(request===imageRequest)compressing.value=false;}
 }
 function pasteImage(event){const file=[...(event.clipboardData?.files??[])].find(file=>file.type.startsWith('image/'));if(file){event.preventDefault();void pickImage(file);}}
+function removeQuestionImage(){clearImage();adminToast.info('Gambar soal dihapus dari formulir. Simpan soal untuk menerapkan perubahan.');}
+function resetEditor(){reset();adminToast.info('Formulir soal dikosongkan.');}
 function reset(){clearImage();draft.value=blankQuestion();preview.value=null;previewResult.value=null;showErrors.value=false;}
 function startPreview(){
-  showErrors.value=true;if(errors.value.length)return;
+  showErrors.value=true;if(errors.value.length){adminToast.warning(errors.value[0],{title:'Lengkapi data soal'});return;}
   preview.value={...questionPayload(draft.value,imagePreview.value),block_solutions:draft.value.block_solutions,block_grading:draft.value.block_grading};previewWorkspace.value=JSON.parse(JSON.stringify(draft.value.block_config.initial));previewResult.value=null;
   previewBlocks.value=shuffleItems(preview.value.blocks.map((text,originalIndex)=>({text,originalIndex})));
 }
-function answerPreview(answer){previewResult.value=checkPreviewAnswer(preview.value,answer);}
+function answerPreview(answer){previewResult.value=checkPreviewAnswer(preview.value,answer);if(previewResult.value===true)adminToast.success('Jawaban preview benar.');else adminToast.warning('Jawaban preview belum benar. Periksa blok atau pilihan jawaban.');}
 watch(draft,()=>{preview.value=null;previewResult.value=null;},{deep:true});
 watch(imagePreview,()=>{preview.value=null;});
 async function loadQuestion(){
@@ -53,7 +56,7 @@ async function loadQuestion(){
 onMounted(loadQuestion);
 onUnmounted(()=>{imageRequest++;revokePreview();});
 async function save(){
-  if(busy.value||!loaded.value)return;showErrors.value=true;if(errors.value.length)return;
+  if(busy.value||!loaded.value)return;showErrors.value=true;if(errors.value.length){adminToast.warning(errors.value[0],{title:'Lengkapi data soal'});return;}
   saving.value=true;error.value='';success.value='';let uploadedPath=null;
   try{
     let url=imageUrl.value;
@@ -75,9 +78,10 @@ async function save(){
 async function remove(){
   if(busy.value||!props.questionId||!window.confirm('Hapus soal ini? Soal yang sudah dipakai dalam battle akan diarsipkan.'))return;
   saving.value=true;error.value='';
-  try{const {error:deleteError}=await supabase.from('coding_questions').delete().eq('id',props.questionId);if(deleteError?.code==='23503'){const {error:archiveError}=await supabase.from('coding_questions').update({is_active:false,deleted_at:new Date().toISOString()}).eq('id',props.questionId);if(archiveError)throw archiveError;}else if(deleteError)throw deleteError;await router.push({name:'questions'});}
+  try{const {error:deleteError}=await supabase.from('coding_questions').delete().eq('id',props.questionId);if(deleteError?.code==='23503'){const {error:archiveError}=await supabase.from('coding_questions').update({is_active:false,deleted_at:new Date().toISOString()}).eq('id',props.questionId);if(archiveError)throw archiveError;}else if(deleteError)throw deleteError;adminToast.success(deleteError?.code==='23503'?'Soal diarsipkan karena sudah digunakan dalam battle.':'Soal berhasil dihapus.');await router.push({name:'questions'});}
   catch(e){error.value=e.message;}finally{saving.value=false;}
 }
+const adminToast=useAdminFeedback({error,success,scope:'questions/QuestionEditor'});
 </script>
 <template>
   <main class="question-studio">
@@ -91,7 +95,7 @@ async function remove(){
           <section class="editor-section"><h2>Pertanyaan & bahan quiz</h2><label class="field">Pertanyaan<textarea v-model="draft.question" rows="3" maxlength="3000" placeholder="Apa yang terjadi setelah bendera hijau diklik?"/></label>
             <div class="image-upload" @dragover.prevent @drop.prevent="pickImage($event.dataTransfer.files?.[0])" @paste="pasteImage" tabindex="0" aria-label="Upload gambar atau tempel screenshot">
               <strong>{{ draft.mode==='image_choice'?'Gambar kode Scratch':'Gambar pendukung (opsional)' }}</strong><p>Tarik gambar ke sini, pilih file, atau tempel screenshot dengan Ctrl/Cmd + V.</p><input type="file" accept="image/png,image/jpeg,image/webp" aria-label="Pilih gambar soal" @change="pickImage($event.target.files?.[0]); $event.target.value=''"/><small>{{ compressing?'Menyiapkan gambar…':'PNG, JPG, WebP · maksimal 10 MB · dikompres otomatis' }}</small>
-              <figure v-if="imagePreview"><img :src="imagePreview" alt="Potongan kode atau ilustrasi soal"/><figcaption>{{ imageName || 'Gambar soal' }}<button type="button" @click="clearImage">Hapus gambar</button></figcaption></figure>
+              <figure v-if="imagePreview"><img :src="imagePreview" alt="Potongan kode atau ilustrasi soal"/><figcaption>{{ imageName || 'Gambar soal' }}<button type="button" @click="removeQuestionImage">Hapus gambar</button></figcaption></figure>
             </div>
             <StructuredBlockQuestion v-if="draft.mode==='scratch_blocks'" v-model="draft" :disabled="busy"/>
             <div v-else-if="draft.mode==='block_order'" class="block-authoring"><ScratchBlockEditor v-model="draft.blocks" :disabled="busy"/></div>
@@ -109,7 +113,7 @@ async function remove(){
           <div v-else class="preview-answers"><button v-for="(letter,index) in ['a','b','c','d']" :key="letter" type="button" @click="answerPreview({answer_index:index})"><b>{{ letter.toUpperCase() }}</b> {{ preview[`option_${letter}`] }}</button></div>
           <p v-if="previewResult!==null" role="status" class="notice" :class="previewResult?'success':'error'">{{ previewResult?'Benar! Jawaban sesuai kunci.':'Belum benar. Coba periksa kembali.' }} {{ previewResult?preview.explanation:'' }}</p>
         </section>
-        <footer class="editor-actions"><button v-if="questionId" type="button" class="delete" @click="remove">Hapus / arsipkan</button><button v-else type="button" class="secondary" @click="reset">Kosongkan form</button><button type="submit" class="primary">{{ saving?'Menyimpan…':compressing?'Menyiapkan gambar…':questionId?'Simpan perubahan':'Simpan soal' }}</button></footer>
+        <footer class="editor-actions"><button v-if="questionId" type="button" class="delete" @click="remove">Hapus / arsipkan</button><button v-else type="button" class="secondary" @click="resetEditor">Kosongkan form</button><button type="submit" class="primary">{{ saving?'Menyimpan…':compressing?'Menyiapkan gambar…':questionId?'Simpan perubahan':'Simpan soal' }}</button></footer>
       </fieldset>
     </form>
   </main>

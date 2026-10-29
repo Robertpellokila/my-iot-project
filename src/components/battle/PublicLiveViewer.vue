@@ -11,7 +11,7 @@ const visibleCards = computed(() => {
 </script>
 
 <template>
-  <section class="public-live-viewer" :class="activity.side" aria-label="Aktivitas pemain secara live">
+  <section class="public-live-viewer arena-frame" :class="activity.side" aria-label="Aktivitas pemain secara live">
     <header>
       <div><span class="live-label"><i/> LIVE · {{ activity.playerName }}</span><h2>{{ activity.message }}</h2></div>
       <span class="pile-count">{{ activity.cards.length }} kartu</span>
@@ -46,4 +46,9 @@ h2 { margin:.3cqw 0 0; font-size:1.5cqw; }.pile-count { font-size:.9cqw; color:#
 .pile-cards { min-height:0; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.5cqw; flex:1; }.pile-card { min-height:0; display:grid; grid-template-rows:minmax(0,1fr) auto; gap:.4cqw; padding:.3cqw; border:.12cqw solid transparent; border-radius:.3cqw; }.pile-card>span { text-align:center; font-size:.62cqw; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }.is-inspected { border-color:var(--live-accent); background:#dfedf7; }.is-inspected>span { color:var(--live-accent); font-weight:800; }
 .empty-pile { flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:1cqw; }.empty-pile strong { font-size:1.5cqw; }.empty-pile span { font-size:1cqw; }
 footer { padding:.5cqw 1cqw; text-align:center; background:#e3eef5; border-top:1px solid #cadce7; color:#526b7d; font-size:.7cqw; }
+</style>
+
+<style scoped>
+.public-live-viewer{inset:24% 24% 14%;color:#193e6b}.public-live-viewer header{background:#edf8ff;color:#12366a;border-bottom-color:#c6e1ef}.public-live-viewer .live-label,.public-live-viewer .pile-count{color:#166da1}.public-live-viewer h2{font-weight:850}.public-live-viewer footer{background:#e9f6ff;color:#3e668c}.public-live-viewer .inspected-card :deep(.tbc-card){width:min(100cqw,67.02cqh);height:min(100cqh,149.21cqw)}
+@media(max-width:700px){.public-live-viewer{inset:18% 17% 10%}}
 </style>

@@ -3,6 +3,9 @@ export function createDemoSkills(battle, source) {
     {id:'30000000-0000-4000-8000-000000000001',battle_id:battle.id,battle_card_id:source.id,player:'p1',name:'Arc Rally',skill_code:'arc_rally',icon:'⚔',description:'Serangan normal +6 setelah Summon. CD 2.',priority:1,activation_timing:'main_phase',target_spec:{type:'enemy_active',required:true},cost_spec:{type:'none'},limits:{cooldown_turns:2,action_points:1},effects:[],consumes_turn:false,metadata:{master_metadata:{slot:1}}},
     {id:'30000000-0000-4000-8000-000000000002',battle_id:battle.id,battle_card_id:source.id,player:'p1',name:'Team Spirit',skill_code:'team_spirit',icon:'🛡',description:'Pulihkan 12 HP pada satu ally. CD 2.',priority:2,activation_timing:'main_phase',target_spec:{type:'ally_active',required:true},cost_spec:{type:'none'},limits:{cooldown_turns:2,action_points:2},effects:[],consumes_turn:false,metadata:{master_metadata:{slot:2}}},
   ];
+  // Demo readiness uses the same concrete mechanics as a saved battle skill.
+  skills[0].effects = [{type:'studio_skill',program:{version:2,target:'enemy_active',operations:[{type:'attack',amount:6,condition:'ally_summoned',multiplier:1}],choices:[],attacks:true,max_targets:1,exclusive:false}}];
+  skills[1].effects = [{type:'heal_card',target:'target_card',owner:'self',allowed_zones:['active'],amount:{mode:'fixed',value:12}}];
   return skills;
 }
 

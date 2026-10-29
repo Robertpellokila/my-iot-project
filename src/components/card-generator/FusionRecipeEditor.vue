@@ -1,4 +1,5 @@
 <script setup>
+import {useAdminFeedback} from '../../composables/useAdminToast.js';
 import {computed,onMounted,ref,watch} from 'vue';
 import {supabase} from '../../lib/supabase.js';
 import SearchableSelect from '../SearchableSelect.vue';
@@ -42,6 +43,7 @@ async function save(){
  }catch(e){error.value=e.message||'Resep belum dapat disimpan.';return false;}finally{saving.value=false;}
 }
 defineExpose({save});onMounted(()=>load());
+const adminToast=useAdminFeedback({error,info:()=>notice.value.startsWith('Resep Fusion tersimpan')?'':notice.value,scope:'card-generator/FusionRecipeEditor'});
 </script>
 <template>
  <section class="studio-fusion-editor" aria-labelledby="fusion-editor-heading">

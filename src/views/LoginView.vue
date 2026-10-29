@@ -1,4 +1,5 @@
 <script setup>
+import {useAdminFeedback} from '../composables/useAdminToast.js';
 import { ref } from "vue";
 import { useRouter } from "vue-router";
 
@@ -43,6 +44,7 @@ const handleLogin = async () => {
       password.value
     );
 
+    adminToast.success('Kamu berhasil masuk ke admin.');
     await router.replace({
       name: "dashboard",
     });
@@ -56,6 +58,7 @@ const handleLogin = async () => {
     loading.value = false;
   }
 };
+const adminToast=useAdminFeedback({error:errorMessage,scope:'LoginView'});
 </script>
 
 

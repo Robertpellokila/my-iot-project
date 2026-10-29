@@ -7,7 +7,7 @@ const project=new URL(endpoint).hostname.split('.')[0];
 const user={id:'00000000-0000-4000-8000-000000000001',aud:'authenticated',role:'authenticated',email:'studio@example.invalid',app_metadata:{provider:'email'},user_metadata:{}};
 const token=`${Buffer.from(JSON.stringify({alg:'HS256'})).toString('base64url')}.${Buffer.from(JSON.stringify({sub:user.id,role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})).toString('base64url')}.test`;
 async function mock(page){
- const state={workspace:null,entries:[],saved:[],skills:[],skillLinks:[],linked:[],recipes:[],materials:[],recipeSaves:[],fail:false,cards:Array.from({length:10},(_,i)=>({id:`00000000-0000-4000-8000-${String(100+i).padStart(12,'0')}`,name:`Coby ${String(i+1).padStart(2,'0')}`,card_code:`COB_${i+1}`,element:'Knight',rarity:'common',hp:120,attack:30,defense:14,metadata:{skills:[{name:'Guard',description:'Shield 8'},{name:'Step',description:'Attack 3'}]},uid:i===1?'RFID-123':null,physical_scan_enabled:i===1,fusion_only:false,featured_on_landing:false,landing_active:true,landing_display_order:0,landing_group:''}))};
+ const state={workspace:null,entries:[],saved:[],skills:[],skillLinks:[],linked:[],recipes:[],materials:[],recipeSaves:[],fail:false,cards:Array.from({length:10},(_,i)=>({id:`00000000-0000-4000-8000-${String(100+i).padStart(12,'0')}`,name:`Coby ${String(i+1).padStart(2,'0')}`,card_code:`COB_${i+1}`,element:'Knight',rarity:'common',hp:120,attack:30,defense:14,battle_enabled:true,archived_at:null,availability_version:1,metadata:{skills:[{name:'Guard',description:'Shield 8'},{name:'Step',description:'Attack 3'}]},uid:i===1?'RFID-123':null,physical_scan_enabled:i===1,fusion_only:false,featured_on_landing:false,landing_active:true,landing_display_order:0,landing_group:''}))};
  await page.addInitScript(({key,user,token})=>localStorage.setItem(key,JSON.stringify({access_token:token,refresh_token:'fake',expires_at:Math.floor(Date.now()/1000)+3600,user})),{key:`sb-${project}-auth-token`,user,token});
  await page.route(`${endpoint}/**`,async r=>{
   const q=r.request(),url=new URL(q.url()),resource=url.pathname.split('/').at(-1);
@@ -27,6 +27,7 @@ async function mock(page){
    return r.fulfill({json:state.skills});
   }
   if(resource==='game_card_special_skills'){
+   if(q.method()==='PATCH'){const card=url.searchParams.get('game_card_id')?.replace('eq.',''),skill=url.searchParams.get('special_skill_id')?.replace('eq.','');for(const link of state.skillLinks.filter(l=>l.game_card_id===card&&l.special_skill_id===skill))Object.assign(link,q.postDataJSON());return r.fulfill({json:null});}
    const id=url.searchParams.get('game_card_id')?.replace('eq.','');
    return r.fulfill({json:state.skillLinks.filter(link=>!id||link.game_card_id===id).map(link=>({...link,special_skills:state.skills.find(skill=>skill.id===link.special_skill_id)}))});
   }
@@ -34,9 +35,17 @@ async function mock(page){
   if(resource==='link_studio_card_rfid'){
    if(state.fail)return r.fulfill({status:503,json:{message:'Koneksi sedang terputus'}});
    const body=q.postDataJSON(),source=state.cards.find(card=>card.id===body.p_game_card_id),uid=body.p_uid,existing=state.cards.find(card=>card.uid===uid);
-   if(existing&&existing.id!==source.id&&existing.metadata?.catalog_source_id!==source.id)return r.fulfill({status:409,json:{message:'UID ini sudah terhubung ke kartu lain.'}});
+   if(existing&&existing.id!==source.id&&existing.metadata?.catalog_source_id!==source.id)return r.fulfill({json:{conflict:true,uid,previous_card:{id:existing.id,name:existing.name,card_code:existing.card_code},target_name:source.name}});
    const record=existing??{...structuredClone(source),id:crypto.randomUUID(),uid,physical_scan_enabled:true,featured_on_landing:false,metadata:{...source.metadata,catalog_source_id:source.id}};
    if(!existing)state.cards.push(record);state.linked.push(body);return r.fulfill({json:{id:record.id,uid,name:record.name,already_linked:!!existing}});
+  }
+  if(resource==='reassign_studio_card_rfid'){
+   if(state.fail)return r.fulfill({status:503,json:{message:'Pemindahan gagal; UID masih pada kartu lama.'}});
+   const body=q.postDataJSON(),old=state.cards.find(c=>c.uid===body.p_uid),source=state.cards.find(c=>c.id===body.p_game_card_id);
+   if(old?.id!==body.p_previous_card_id)return r.fulfill({status:409,json:{code:'40001',message:'Hubungan UID sudah berubah. Periksa ulang.'}});
+   const previous={id:old.id,name:old.name};old.uid=null;old.physical_scan_enabled=false;
+   const copy={...structuredClone(source),id:crypto.randomUUID(),uid:body.p_uid,physical_scan_enabled:true,metadata:{...source.metadata,catalog_source_id:source.id}};state.cards.push(copy);
+   return r.fulfill({json:{id:copy.id,uid:copy.uid,name:copy.name,transferred:true,previous_card:previous}});
   }
   if(resource==='save_card_studio'){
    if(state.fail)return r.fulfill({status:503,json:{message:'Koneksi sedang terputus'}});
@@ -48,6 +57,18 @@ async function mock(page){
     const index=state.cards.findIndex(c=>c.id===card.id);if(index<0)state.cards.push(card);else Object.assign(state.cards[index],card);
     e.card.skills.forEach((skill,i)=>{if(state.skillLinks.some(link=>link.game_card_id===card.id&&link.sort_order===i+1))return;const definition={...skill,...compileStudioSkill(skill),id:crypto.randomUUID(),code:`studio_${card.id}_${i}`,is_active:true,catalog_status:'active',skill_type:'active',metadata:{studio_generated:true,slot:i+1,studio_rule:compileStudioSkill(skill)}};state.skills.push(definition);state.skillLinks.push({game_card_id:card.id,special_skill_id:definition.id,sort_order:i+1,enabled:true});});return mapping;
    });return r.fulfill({json:{entries:rows,saved_at:new Date().toISOString()}});
+  }
+  if(resource==='manage_game_card'){
+   const body=q.postDataJSON();(state.lifecycleRequests??=[]).push(body);
+   if(state.fail)return r.fulfill({status:503,json:{message:'Status kartu belum tersimpan'}});
+   if(state.lifecycleDelay)await new Promise(resolve=>setTimeout(resolve,state.lifecycleDelay));
+   const card=state.cards.find(c=>c.id===body.p_game_card_id);
+   if(body.p_expected_version!==(card.availability_version??1))return r.fulfill({status:409,json:{message:'Status kartu sudah berubah. Refresh Album lalu coba lagi.',code:'40001'}});
+   Object.assign(card,{availability_version:(card.availability_version??1)+1});
+   if(body.p_action==='archive')Object.assign(card,{archived_at:new Date().toISOString(),battle_enabled:false,featured_on_landing:false,landing_active:false});
+   else if(body.p_action==='restore')Object.assign(card,{archived_at:null,battle_enabled:false,featured_on_landing:false,landing_active:false});
+   else card.battle_enabled=body.p_action==='enable';
+   return r.fulfill({json:{ok:true,card}});
   }
   if(resource==='game_cards'){
    const id=url.searchParams.get('id')?.replace('eq.','');
@@ -115,7 +136,7 @@ test('legacy registration link opens the same Studio and custom rule edits updat
  const editor=page.locator('.skill-catalog-embedded');await expect(editor.getByLabel('Nama skill',{exact:true})).toHaveValue('Tide Bump');await expect(editor.locator('.skill-item-icon img')).toHaveCount(2);
  await expect(editor.locator('.skill-item-copy').first()).not.toContainText('https://');
  await editor.getByLabel('Nama skill',{exact:true}).fill('Tide Bump Custom');
- await editor.getByLabel('Poin Giliran').fill('2');await editor.getByLabel('Cooldown',{exact:false}).filter({hasNot:page.locator('select')}).last().fill('4');
+ await editor.getByLabel('Biaya poin giliran',{exact:false}).selectOption('2');await editor.getByLabel('Jeda pemakaian',{exact:false}).fill('4');
  await editor.getByRole('button',{name:'Simpan skill · versi berikutnya'}).click();
  await expect.poll(()=>state.skills[0].limits?.cooldown_turns).toBe(4);
  await expect.poll(()=>state.saved.at(-1)?.p_entries[0].card.skills[0].name).toBe('Tide Bump Custom');
@@ -127,7 +148,7 @@ test('legacy registration link opens the same Studio and custom rule edits updat
 test('RFID collision and offline errors keep the same design and allow another UID on mobile',async({page})=>{
  const state=await mock(page);await page.setViewportSize({width:390,height:844});await page.goto(`/admin/card-generator?catalog=${state.cards[0].id}&rfid=1`);
  const dialog=page.getByRole('dialog');await expect(dialog).toBeVisible();
- await page.getByLabel('UID RFID',{exact:true}).fill('RFID-123');await page.getByRole('button',{name:'Hubungkan kartu',exact:true}).click();await expect(dialog.getByRole('alert')).toContainText('sudah terhubung');
+ await page.getByLabel('UID RFID',{exact:true}).fill('RFID-123');await page.getByRole('button',{name:'Hubungkan kartu',exact:true}).click();await expect(dialog.getByRole('region',{name:'Konfirmasi pemindahan UID'})).toContainText('UID ini sudah terhubung');
  state.fail=true;await page.getByLabel('UID RFID',{exact:true}).fill('RFID-NEW');await page.getByRole('button',{name:'Hubungkan kartu',exact:true}).click();await expect(dialog.getByRole('alert')).toContainText('Koneksi sedang terputus');
  state.fail=false;await page.getByRole('button',{name:'Hubungkan kartu',exact:true}).click();await expect(dialog).toContainText('RFID berhasil dihubungkan');await page.getByRole('button',{name:'Hubungkan UID lain'}).click();await page.getByLabel('UID RFID',{exact:true}).fill('RFID-NEW');await page.getByRole('button',{name:'Hubungkan kartu',exact:true}).click();await expect(dialog).toContainText('RFID sudah terhubung');
  expect(state.cards.filter(c=>c.uid==='RFID-NEW')).toHaveLength(1);expect(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
@@ -147,4 +168,81 @@ test('album is light, publishes safely, flips pages and edits the selected catal
 test('album reduced motion and narrow screen stay readable',async({page})=>{
  await mock(page);await page.setViewportSize({width:390,height:844});await page.goto('/admin/game/album-card');await page.getByRole('button',{name:'Berikutnya →'}).click();await expect(page.locator('.album-leaf')).toHaveCount(0);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await page.locator('.album-open').first().click();await expect(page.getByRole('dialog')).toBeVisible();expect(await page.getByRole('dialog').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).not.toBeVisible();
+});
+
+test('Album separates battle availability from public visibility and keeps both after reload',async({page})=>{
+ const state=await mock(page);await page.goto('/admin/game/album-card');
+ await page.locator('.battle-toggle').first().click();await expect(page.locator('.card-statuses').first()).toContainText('Nonaktif di battle');
+ expect(state.cards[0].battle_enabled).toBe(false);expect(state.cards[0].featured_on_landing).toBe(false);
+ await page.locator('.publish-toggle').first().click();expect(state.cards[0].featured_on_landing).toBe(true);expect(state.cards[0].battle_enabled).toBe(false);
+ await page.reload();await expect(page.locator('.battle-toggle').first()).toHaveText('Aktifkan battle');await expect(page.locator('.publish-toggle').first()).toHaveText('✓ Tampil di publik');
+ await page.getByLabel('Daftar kartu',{exact:true}).selectOption('disabled');await expect(page.locator('.album-open')).toHaveCount(1);
+ await page.locator('.battle-toggle').first().click();await expect(page.locator('.album-open')).toHaveCount(0);expect(state.cards[0].battle_enabled).toBe(true);expect(state.cards[0].featured_on_landing).toBe(true);
+});
+test('delete confirmation moves only the selected card to Trash and restore retains data without republishing',async({page})=>{
+ const state=await mock(page);state.cards[0].featured_on_landing=true;const snapshot=structuredClone(state.cards[0]);await page.goto('/admin/game/album-card');
+ await page.locator('.album-open').first().click();const dialog=page.getByRole('dialog');await dialog.getByRole('button',{name:'Hapus kartu…'}).click();await dialog.getByRole('button',{name:'Batal',exact:true}).click();expect(state.lifecycleRequests??[]).toHaveLength(0);
+ await dialog.getByRole('button',{name:'Hapus kartu…'}).click();await dialog.getByRole('button',{name:'Ya, pindahkan ke Sampah'}).click();await expect(dialog).not.toBeVisible();
+ expect(state.cards).toHaveLength(10);expect(state.cards[0].archived_at).toBeTruthy();expect(state.cards[0].featured_on_landing).toBe(false);expect(state.cards[0].battle_enabled).toBe(false);expect(state.cards[0].metadata).toEqual(snapshot.metadata);
+ await page.getByLabel('Daftar kartu',{exact:true}).selectOption('trash');await expect(page.locator('.album-open')).toHaveCount(1);await page.locator('.album-open').click();await expect(dialog).toContainText('Data, skill, resep, dan UID tetap tersimpan');await expect(dialog.getByRole('link',{name:'Edit di Studio'})).toHaveCount(0);
+ await dialog.getByRole('button',{name:'Pulihkan kartu',exact:true}).click();await expect(dialog).not.toBeVisible();await expect(page.locator('.album-open')).toHaveCount(0);
+ expect(state.cards[0].archived_at).toBeNull();expect(state.cards[0].battle_enabled).toBe(false);expect(state.cards[0].featured_on_landing).toBe(false);expect(state.cards[0].hp).toBe(snapshot.hp);
+});
+test('inactive source blocks a copy and links directly to the source controls',async({page})=>{
+ const state=await mock(page);state.cards[0].battle_enabled=false;state.cards[1].metadata.catalog_source_id=state.cards[0].id;await page.goto('/admin/game/album-card');await page.getByLabel('Daftar kartu',{exact:true}).selectOption('rfid');
+ await expect(page.locator('.card-statuses').first()).toContainText('Sumber nonaktif');await expect(page.locator('.battle-toggle').first()).toBeEnabled();await page.locator('.battle-toggle').first().click();await expect(page.locator('.card-statuses').first()).toContainText('Nonaktif di battle');await expect(page.locator('.battle-toggle').first()).toBeDisabled();await page.locator('.album-open').click();const dialog=page.getByRole('dialog');await dialog.getByRole('button',{name:'Buka kartu sumber →'}).click();await expect(dialog.getByRole('heading',{name:'Coby 01',exact:true})).toBeVisible();await dialog.getByRole('button',{name:'Aktifkan untuk battle',exact:true}).click();await expect(dialog.locator('.battle-availability')).toContainText('Aktif di battle');await dialog.getByRole('button',{name:'Tutup detail kartu'}).click();await expect(page.locator('.card-statuses').first()).toContainText('Nonaktif di battle');await page.locator('.battle-toggle').first().click();await expect(page.locator('.card-statuses').first()).toContainText('Aktif di battle');
+});
+test('battle controls preserve state on errors, reject stale edits, and avoid duplicate requests',async({page})=>{
+ const state=await mock(page);await page.goto('/admin/game/album-card');await page.locator('.album-open').first().click();const dialog=page.getByRole('dialog');state.fail=true;await dialog.getByRole('button',{name:'Nonaktifkan untuk battle'}).click();await expect(dialog.getByRole('alert')).toContainText('Status kartu belum tersimpan');expect(state.cards[0].battle_enabled).toBe(true);
+ state.fail=false;state.cards[0].availability_version=2;await dialog.getByRole('button',{name:'Nonaktifkan untuk battle'}).click();await expect(dialog.getByRole('alert')).toContainText('Status kartu sudah berubah');await dialog.getByRole('button',{name:'Refresh data'}).click();await expect(dialog.getByRole('button',{name:'Nonaktifkan untuk battle'})).toBeEnabled();
+ state.lifecycleDelay=500;const count=state.lifecycleRequests.length;await dialog.getByRole('button',{name:'Nonaktifkan untuk battle'}).evaluate(button=>{button.click();button.click();});await expect(dialog.locator('.battle-availability')).toContainText('Nonaktif di battle');expect(state.lifecycleRequests.length-count).toBe(1);
+});
+test('mobile Album management keeps controls and delete confirmation within the modal',async({page})=>{
+ await mock(page);await page.setViewportSize({width:390,height:844});await page.goto('/admin/game/album-card');await page.locator('.album-open').first().click();const dialog=page.getByRole('dialog');await dialog.getByRole('button',{name:'Hapus kartu…'}).click();await expect(dialog.getByRole('group',{name:'Konfirmasi hapus kartu'})).toBeVisible();expect(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:'test-results/album-card-management-mobile.png'});
+});
+
+
+test('guided skill editor activates shortened Necro, preserves mechanics on copy edits and audits bindings',async({page})=>{
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));const state=await mock(page);
+ const source=state.cards[0],description='Bangkitkan Base ke Bench dengan 40% HP. 2 AP, sekali per battle.';
+ source.metadata={studio_card:{skills:[{name:'Void Claw',description:'Serangan normal.'},{name:'Necro Recall',description}]} };
+ state.skills=[{id:'necro-editor',code:'necro_test',name:'Necro Recall',description,skill_type:'active',activation_timing:'main_phase',target_spec:{},cost_spec:{type:'none'},limits:{},effects:[],is_active:false,catalog_status:'draft',skill_version:2,metadata:{studio_generated:true,slot:2}}];
+ state.skillLinks=[{game_card_id:source.id,special_skill_id:'necro-editor',sort_order:2,enabled:false}];
+ await page.goto('/admin/game/catalog?skill=necro-editor');
+ const editor=page.locator('.rule-editor');await expect(editor.getByRole('button',{name:'Simpan & aktifkan'})).toBeDisabled();
+ await expect(page.locator('.editor-heading .status-chip')).toHaveText('Draft');
+ await editor.getByRole('button',{name:'Gunakan pola ini'}).click();
+ await expect(editor.getByLabel('Deskripsi kartu',{exact:true})).toHaveValue(description);
+ await expect(editor.getByLabel('Biaya poin giliran',{exact:false})).toHaveValue('2');
+ await expect(editor.getByLabel('Hanya sekali per battle')).toBeChecked();
+ await expect(editor.getByRole('button',{name:'Simpan & aktifkan'})).toBeEnabled();
+ await expect(page.locator('.editor-heading .status-chip')).toHaveText('Draft');
+ await editor.getByRole('button',{name:'Simpan & aktifkan'}).click();
+ await expect.poll(()=>state.skills[0].is_active).toBe(true);await expect.poll(()=>state.skillLinks[0].enabled).toBe(true);
+ expect(state.skills[0].metadata.studio_customized).toBe(true);expect(state.skills[0].effects[0].program.operations).toEqual([{type:'revive',amount:.4}]);
+ const before=structuredClone(state.skills[0].effects);await expect(page.locator('.editor-heading .status-chip')).toHaveText('Aktif');
+ await editor.getByLabel('Deskripsi kartu',{exact:true}).fill('Revive 40% HP.');await editor.getByRole('button',{name:'Simpan skill · versi berikutnya'}).click();
+ await expect.poll(()=>state.skills[0].description).toBe('Revive 40% HP.');expect(state.skills[0].effects).toEqual(before);
+ await page.screenshot({path:'test-results/skill-editor-desktop.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});await editor.getByText('Ganti pola efek',{exact:true}).click();
+ await editor.getByRole('combobox',{name:'Pola skill',exact:true}).click();
+ await expect(page.getByRole('listbox')).toBeVisible();await page.keyboard.press('Escape');
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await editor.screenshot({path:'test-results/skill-editor-mobile.png'});
+ await page.getByRole('button',{name:'Pemeriksaan katalog'}).click();await expect(page.locator('.audit-view')).toContainText('BUKTI UJI BATTLE');
+ expect(errors).toEqual([]);
+});
+
+test('RFID reassignment previews both cards, preserves the old card and handles retry safely',async({page})=>{
+ const state=await mock(page);const old=state.cards[1],before=structuredClone(old);
+ await page.goto(`/admin/card-generator?catalog=${state.cards[0].id}&rfid=1`);const dialog=page.getByRole('dialog');
+ await dialog.getByLabel('UID RFID',{exact:true}).fill('RFID-123');await dialog.getByRole('button',{name:'Hubungkan kartu',exact:true}).click();
+ const transfer=dialog.getByRole('region',{name:'Konfirmasi pemindahan UID'});await expect(transfer).toContainText(old.name);await expect(transfer).toContainText(state.cards[0].name);
+ expect(old).toEqual(before);await transfer.getByRole('button',{name:'Batal',exact:true}).click();expect(old).toEqual(before);
+ await dialog.getByLabel('UID RFID',{exact:true}).fill('RFID-123');await dialog.getByRole('button',{name:'Hubungkan kartu',exact:true}).click();
+ state.fail=true;await transfer.getByRole('button',{name:'Pindahkan UID ke kartu ini'}).click();await expect(dialog.getByRole('alert')).toContainText('Pemindahan gagal');expect(old).toEqual(before);
+ state.fail=false;await transfer.getByRole('button',{name:'Pindahkan UID ke kartu ini'}).click();await expect(dialog).toContainText('UID berhasil dipindahkan');
+ expect(old).toEqual({...before,uid:null,physical_scan_enabled:false});expect(state.cards.filter(c=>c.uid==='RFID-123')).toHaveLength(1);
+ await expect(dialog).toContainText('tetap tersimpan tanpa UID');await page.setViewportSize({width:390,height:844});expect(await dialog.evaluate(e=>e.scrollWidth<=e.clientWidth)).toBe(true);
+ await dialog.screenshot({path:'test-results/rfid-transfer-mobile.png'});
 });

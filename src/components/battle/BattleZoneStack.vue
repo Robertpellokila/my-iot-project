@@ -1,4 +1,5 @@
 <script setup>
+import { revivalCardReason } from "../../lib/battle/pilotRules.js";
 
 import {
 
@@ -11,6 +12,7 @@ watch,
 } from "vue";
 
 import BattlePileViewer from "./BattlePileViewer.vue";
+import ArenaCardFace from "./ArenaCardFace.vue";
 
 // =========================================================
 
@@ -19,6 +21,7 @@ import BattlePileViewer from "./BattlePileViewer.vue";
 // =========================================================
 
 const props = defineProps({
+arena: Boolean,
 
 zone: {
 
@@ -103,6 +106,9 @@ type: Boolean,
 default: false,
 
 },
+
+unlimitedBenchReturns: Boolean,
+benchCardReason: Function,
 
 benchActionEnabled: {
 
@@ -408,25 +414,9 @@ card?.battleId ??
 
   null;
 
-const isFieldFusionUsed = (card) =>
-Boolean(
-  card?.field_fusion_used ??
-  card?.fieldFusionUsed ??
-  false,
-);
 
-const isNecroConsumed = (card) =>
-Boolean(
-  card?.necro_consumed ??
-  card?.necroConsumed ??
-  false,
-);
+const isNecroConsumed = card => Boolean(revivalCardReason(card));
 
-const isNecroReadyAfterFusion = (card) =>
-Boolean(
-  isFieldFusionUsed(card) &&
-  !isNecroConsumed(card),
-);
 
 const visibleCards =
 
@@ -1382,9 +1372,6 @@ index
 class="pile-card"
 
   :class="{
-    'fusion-necro-ready-card':
-      zone === 'graveyard' &&
-      isNecroReadyAfterFusion(card),
 
     'fusion-necro-spent-card':
       zone === 'graveyard' &&
@@ -1403,9 +1390,8 @@ index,
 
   >
 
-  <img
-
-v-if="
+  <ArenaCardFace v-if="arena" :card="card" compact />
+  <img v-else-if="
 
 card.image_url
 
@@ -1480,19 +1466,10 @@ card.name
     "
     class="fusion-lifecycle-mini spent"
   >
-    ☠ SPENT
+    Tidak bisa Revive
   </span>
 
-  <span
-    v-else-if="
-      zone === 'graveyard' &&
-      index === visibleCards.length - 1 &&
-      isNecroReadyAfterFusion(card)
-    "
-    class="fusion-lifecycle-mini ready"
-  >
-    🧬→☠ READY
-  </span>
+
 
   </article>
 
@@ -1639,6 +1616,7 @@ class="drop-glow"
   ================================================ -->
 
   <BattlePileViewer
+    :arena="arena"
 
   :open="
 
@@ -1689,6 +1667,8 @@ draggableCards
   :bench-action-label="benchActionLabel"
 
   :bench-action-hint="benchActionHint"
+  :unlimited-bench-returns="unlimitedBenchReturns"
+  :bench-card-reason="benchCardReason"
 
   :interactive="
 

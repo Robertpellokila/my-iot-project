@@ -1,4 +1,5 @@
 <script setup>
+import {useAdminFeedback} from '../composables/useAdminToast.js';
 import SearchableSelect from "../components/SearchableSelect.vue";
 import { ref, computed } from "vue";
 import { useRouter } from "vue-router";
@@ -21,7 +22,7 @@ const router = useRouter();
 
 const player1Name = ref("Player 1");
 const player2Name = ref("Player 2");
-const { photos, processingPhotos, selectPhoto, clearPhoto, clearPhotos, uploadPhotos } = usePlayerSetupPhotos();
+const { photos, processingPhotos, selectPhoto, clearPhoto, clearPhotos, uploadPhotos, setRemoveBackground, retryBackground } = usePlayerSetupPhotos();
 
 // =========================================================
 // GAME RULES
@@ -161,47 +162,9 @@ const publicUrl = computed(() => {
   return `${window.location.origin}/battle/${createdBattle.value.code}?layout=${normalizePublicBattleLayout(createdBattle.value.public_layout)}`;
 });
 
-const player1Url = computed(() => {
-  if (
-    !createdBattle.value?.code ||
-    !createdBattle.value?.player1_token
-  ) {
-    return "";
-  }
-
-  return (
-    `${window.location.origin}` +
-    `/play/${createdBattle.value.code}/p1` +
-    `?token=${encodeURIComponent(
-      createdBattle.value.player1_token,
-    )}`
-  );
-});
-
-const player2Url = computed(() => {
-  if (
-    !createdBattle.value?.code ||
-    !createdBattle.value?.player2_token
-  ) {
-    return "";
-  }
-
-  return (
-    `${window.location.origin}` +
-    `/play/${createdBattle.value.code}/p2` +
-    `?token=${encodeURIComponent(
-      createdBattle.value.player2_token,
-    )}`
-  );
-});
-
-// =========================================================
-// GENERATE PLAYER QR CODE LOCALLY
-//
-// QR dibuat di browser agar URL player yang berisi token
-// tidak dikirim ke layanan QR pihak ketiga.
-// =========================================================
-
+const player1Url = computed(() => createdBattle.value?.code ? `${window.location.origin}/play/${encodeURIComponent(createdBattle.value.code)}/p1` : '');
+const player2Url = computed(() => createdBattle.value?.code ? `${window.location.origin}/play/${encodeURIComponent(createdBattle.value.code)}/p2` : '');
+// QR contains only the page address. Each player enters their private code.
 const generatePlayerQrs = async () => {
   qrError.value = null;
   player1QrDataUrl.value = "";
@@ -286,13 +249,6 @@ const generateBattleCode = () => {
   }
 
   return result;
-};
-
-const generatePlayerAccessCode = () => {
-  const characters = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const random = new Uint8Array(10);
-  crypto.getRandomValues(random);
-  return [...random].map((value) => characters[value % characters.length]).join("");
 };
 
 // =========================================================
@@ -619,8 +575,6 @@ const createBattle = async () => {
 
         code,
         public_layout: selectedPublicLayout,
-        player1_access_code: generatePlayerAccessCode(),
-        player2_access_code: generatePlayerAccessCode(),
 
         // =================================================
         // PLAYER
@@ -645,7 +599,7 @@ const createBattle = async () => {
         action_costs: Object.fromEntries(
           Object.entries(actionCosts.value).map(([key, value]) => [key, Number(value)]),
         ),
-        max_attacks_per_card: Number(maxAttacksPerCard.value),
+        max_attacks_per_card: ruleset.value === 'tcg_v1' ? 1 : Number(maxAttacksPerCard.value),
         player1_action_points: resolvedStartingPlayer === "p1" ? Number(actionPointsPerTurn.value) : 0,
         player2_action_points: resolvedStartingPlayer === "p2" ? Number(actionPointsPerTurn.value) : 0,
         turn_index: 1,
@@ -905,8 +859,8 @@ const createBattle = async () => {
       }
       const { data, error: insertError } = insertResult;
       if (['PGRST204', '42703'].includes(insertError?.code) &&
-          /player[12]_avatar_url/.test(String(insertError?.message ?? ''))) {
-        throw new Error("Penyimpanan avatar belum aktif. Jalankan migrasi 025_player_battle_avatar_selection.sql di Supabase, lalu coba lagi.");
+          /player[12]_(avatar|setup_photo)_url/.test(String(insertError?.message ?? ''))) {
+        throw new Error("Penyimpanan foto pemain belum tersedia pada server ini. Minta administrator memperbarui server, lalu coba lagi.");
       }
 
       // ===================================================
@@ -980,10 +934,13 @@ const createBattle = async () => {
       );
     }
 
-    createdBattle.value =
-      created;
+    createdBattle.value=created;
+    const {data:privateCodes,error:accessError}=await supabase.rpc('admin_battle_access',{p_code:created.code});
+    if(accessError)throw new Error('Battle dibuat, tetapi kode pribadi belum dapat dimuat. Buka Riwayat Battle untuk mencoba kembali.');
+    createdBattle.value={...created,...privateCodes};
 
     await generatePlayerQrs();
+    adminToast.success('Battle berhasil dibuat. Bagikan kode pribadi kepada masing-masing pemain.');
   } catch (err) {
     console.error(
       "Create Battle:",
@@ -1011,11 +968,13 @@ const copyText = async (text) => {
     await navigator.clipboard.writeText(
       text,
     );
+    adminToast.success('Kode atau link berhasil disalin.');
   } catch (err) {
     console.error(
       "Copy gagal:",
       err,
     );
+    adminToast.danger('Belum dapat menyalin. Izinkan akses clipboard atau salin secara manual.');
   }
 };
 
@@ -1048,38 +1007,8 @@ const openPublicBattle = () => {
   });
 };
 
-const openPlayer = (
-  playerValue,
-) => {
-  if (
-    !createdBattle.value?.code
-  ) {
-    return;
-  }
-
-  const playerToken =
-    playerValue === "p1"
-      ? createdBattle.value
-          .player1_token
-      : createdBattle.value
-          .player2_token;
-
-  router.push({
-    name: "player-battle",
-
-    params: {
-      code:
-        createdBattle.value
-          .code,
-
-      player:
-        playerValue,
-    },
-
-    query: {
-      token: playerToken,
-    },
-  });
+const openPlayer = player => {
+ if(createdBattle.value?.code)router.push({name:'player-battle',params:{code:createdBattle.value.code,player}});
 };
 
 // =========================================================
@@ -1087,6 +1016,7 @@ const openPlayer = (
 // =========================================================
 
 const createAnother = () => {
+  adminToast.info('Pengaturan siap untuk membuat battle berikutnya.');
   clearPhotos();
   createdBattle.value =
     null;
@@ -1098,6 +1028,7 @@ const createAnother = () => {
 
   error.value = null;
 };
+const adminToast=useAdminFeedback({error,warning:qrError,scope:'GameSetup'});
 </script>
 
 <template>
@@ -1253,6 +1184,8 @@ const createAnother = () => {
               :preview="photos[side].preview"
               :processing="photos[side].processing"
               :error="photos[side].error"
+              :warning="photos[side].warning" :stage="photos[side].stage" :remove-background="photos[side].removeBackground" :background-removed="photos[side].backgroundRemoved"
+              @background="enabled=>setRemoveBackground(side,enabled)" @retry-background="retryBackground(side)"
               :disabled="loading"
               @select="file => selectPhoto(side, file)"
               @remove="clearPhoto(side)"
@@ -1994,8 +1927,8 @@ const createAnother = () => {
             </label>
             <label class="field">
               <span>Serangan per Active Card</span>
-              <input v-model.number="maxAttacksPerCard" type="number" min="1" max="5" />
-              <small>Jumlah kesempatan menyerang tiap kartu selama satu giliran.</small>
+              <input v-model.number="maxAttacksPerCard" type="number" min="1" max="5" :disabled="ruleset === 'tcg_v1'" />
+              <small>Aturan pilot: 1 kesempatan per kartu, dibagi antara Attack, skill damage, Combo, Ultimate, dan Synergy damage. Setelah aksi ofensif, kartu tetap di Active hingga giliran pemiliknya berikutnya.</small>
             </label>
           </div>
 
@@ -2796,7 +2729,7 @@ const createAnother = () => {
             >
               {{ player1Url }}
             </div>
-            <div class="player-access-code"><span>KODE PEMAIN</span><code>{{ createdBattle.player1_access_code || createdBattle.player1_token }}</code><button type="button" @click="copyText(createdBattle.player1_access_code || createdBattle.player1_token)">SALIN</button></div>
+            <div class="player-access-code"><span>KODE PRIBADI · SCAN QR LALU MASUKKAN KODE</span><code>{{ createdBattle.player1_access_code }}</code><button type="button" @click="copyText(createdBattle.player1_access_code)">SALIN</button></div>
           </div>
 
           <div
@@ -2873,7 +2806,7 @@ const createAnother = () => {
             >
               {{ player2Url }}
             </div>
-            <div class="player-access-code"><span>KODE PEMAIN</span><code>{{ createdBattle.player2_access_code || createdBattle.player2_token }}</code><button type="button" @click="copyText(createdBattle.player2_access_code || createdBattle.player2_token)">SALIN</button></div>
+            <div class="player-access-code"><span>KODE PRIBADI · SCAN QR LALU MASUKKAN KODE</span><code>{{ createdBattle.player2_access_code }}</code><button type="button" @click="copyText(createdBattle.player2_access_code)">SALIN</button></div>
           </div>
 
           <div

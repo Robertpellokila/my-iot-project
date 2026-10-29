@@ -102,5 +102,36 @@ try {
  const originalRules=(await skills(legacy))[0].effects;
  await db.query('UPDATE game_cards SET metadata=metadata||$2 WHERE id=$1',[legacy,unified]);
  assert.equal((await skills(legacy))[0].name,'Unified name');assert.equal((await skills(legacy))[0].icon,'https://example.test/unified.webp');assert.deepEqual((await skills(legacy))[0].effects,originalRules);
+ // Reassign a testing UID without deleting/replacing either card's data.
+ await db.exec("ALTER TABLE game_cards ADD COLUMN battle_enabled boolean NOT NULL DEFAULT true, ADD COLUMN archived_at timestamptz;");
+ await db.exec(await readFile('supabase/migrations/050_reassign_studio_rfid.sql','utf8'));
+ const cardRow=async id=>(await db.query('SELECT * FROM game_cards WHERE id=$1',[id])).rows[0];
+ const oldCard=await cardRow(instance),oldBindings=await skills(instance);
+ const preview=(await db.query("SELECT link_studio_card_rfid($1,'legacy-uid') r",[source])).rows[0].r;
+ assert.equal(preview.conflict,true);assert.equal(preview.previous_card.id,instance);
+ assert.deepEqual(await cardRow(instance),oldCard);
+ const move=async(previous=instance,target=source,uid='LEGACY-UID')=>(await db.query('SELECT reassign_studio_card_rfid($1,$2,$3) r',[target,uid,previous])).rows[0].r;
+ await assert.rejects(move(legacy),/sekarang terhubung/);assert.deepEqual(await cardRow(instance),oldCard);
+ const moved=await move();assert.equal(moved.transferred,true);assert.notEqual(moved.id,instance);
+ assert.deepEqual(await cardRow(instance),{...oldCard,uid:null,physical_scan_enabled:false});
+ assert.deepEqual(await skills(instance),oldBindings);assert.equal((await cardRow(moved.id)).uid,'LEGACY-UID');
+ assert.equal((await skills(moved.id)).length,2);assert.equal((await move()).already_linked,true);
+ assert.equal((await db.query("SELECT count(*)::int n FROM game_cards WHERE upper(uid)='LEGACY-UID'")).rows[0].n,1);
+ // Archived destinations and failures during insert leave the old UID intact.
+ await db.query('UPDATE game_cards SET archived_at=now() WHERE id=$1',[legacy]);
+ await assert.rejects(move(moved.id,legacy),/Sampah/);assert.equal((await cardRow(moved.id)).uid,'LEGACY-UID');
+ await db.query('UPDATE game_cards SET archived_at=NULL WHERE id=$1',[legacy]);
+ await db.exec(`CREATE FUNCTION test_fail_rfid_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.uid='LEGACY-UID' THEN RAISE EXCEPTION 'Injected insert failure';END IF;RETURN NEW;END $$;
+ CREATE TRIGGER test_fail_rfid BEFORE INSERT ON game_cards FOR EACH ROW EXECUTE FUNCTION test_fail_rfid_insert();`);
+ await assert.rejects(move(moved.id,legacy),/Injected insert failure/);assert.equal((await cardRow(moved.id)).uid,'LEGACY-UID');
+ await db.exec('DROP TRIGGER test_fail_rfid ON game_cards;');
+ await db.query('UPDATE game_cards SET uid=NULL WHERE id=$1',[moved.id]);
+ const countBefore=(await db.query('SELECT count(*)::int n FROM game_cards')).rows[0].n;
+ await assert.rejects(move(moved.id,legacy),/Hubungan UID sudah berubah/);
+ assert.equal((await db.query('SELECT count(*)::int n FROM game_cards')).rows[0].n,countBefore);
+ assert.equal((await db.query("SELECT has_function_privilege('anon','reassign_studio_card_rfid(uuid,text,uuid)','execute') ok")).rows[0].ok,false);
+ await db.exec('CREATE OR REPLACE FUNCTION is_admin() RETURNS boolean LANGUAGE sql AS $$ SELECT false $$;');
+ await assert.rejects(move(),/Admin login/);
+ console.log('PASS: RFID reassignment preserves card data/bindings, case-insensitive collision, replay, stale confirmation, archive guard, insert-failure rollback and admin-only access.');
  console.log('PASS: legacy edits, automatic templates, repeated saves, renamed codes, image/rule/AP/CD preservation, RFID inheritance, draft safety, existing copy isolation, active validation, atomic rollback, migration idempotency and authenticated helper isolation.');
 } finally {await db.close();}

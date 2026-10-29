@@ -1,7 +1,17 @@
 <script setup>
+import BattleOpponentInspector from '../components/battle/BattleOpponentInspector.vue';
+import {playerBattleAvatar,playerSetupPhoto} from '../utils/playerBattleAvatar.js';
+import {inject} from 'vue';
+import {BATTLE_PLAYER_ACCESS} from '../lib/battle/playerAccess.js';
 import SkillIcon from '../components/battle/SkillIcon.vue';
 import PlayerActionPanel from '../components/battle/PlayerActionPanel.vue';
+import ArenaCardFace from '../components/battle/ArenaCardFace.vue';
+import {displayCardCode} from '../utils/displayCardCode.js';
+import '../components/battle/arena-theme.css';
+import { availableSkillTargets, skillFieldBlockReason, cardActionStatusReason } from '../lib/battle/actionAvailability.js';
+import { pilotAttackUsed, pilotOffenseReason, fusionEntryReason, FUSION_CAP, isFusionCard } from '../lib/battle/pilotRules.js';
 import { useActionDialogFocus } from '../composables/battle/useActionDialogFocus.js';
+import BattlePauseNotice from '../components/battle/BattlePauseNotice.vue';
 import QuizBonusChoices from '../components/battle/QuizBonusChoices.vue';
 import {effectSummary,synergyRuleState} from '../lib/battle/battleRuleCatalog.js';
 import { skillCooldown, skillApCost } from '../lib/battle/skillState.js';
@@ -49,26 +59,28 @@ const player = computed(() =>
     : "p1",
 );
 
-const token = computed(() => String(route.query.token ?? "").trim());
+const privateAccess=inject(BATTLE_PLAYER_ACCESS);
+const token=privateAccess.token;
 
 const playerAvatarOptions = [
   "🐻", "🐼", "🐸", "🐱", "🐶", "🐰", "🦊", "🐵",
   "🐨", "🐯", "🐧", "🐙", "🦄", "🐲", "🐤", "🐢",
 ];
 
+const opponentInspectorOpen=ref(false);
 const avatarPickerOpen = ref(false);
 const avatarDraft = ref("");
 const avatarSaving = ref(false);
 const avatarSaveError = ref("");
 
-const ownAvatar = computed(() => {
-  const key = player.value === "p1" ? "player1_avatar_url" : "player2_avatar_url";
-  return String(battle.value?.[key] ?? "").trim();
-});
-
-const ownAvatarImage = computed(() =>
-  /^(https?:\/\/|\/|data:image\/)/i.test(ownAvatar.value) ? ownAvatar.value : "",
-);
+const ownAvatar=computed(()=>playerBattleAvatar(battle.value,player.value));
+const ownAvatarImage=computed(()=>playerSetupPhoto(battle.value,player.value));
+const failedAvatarImage=ref('');
+const enemySide=computed(()=>player.value==='p1'?'p2':'p1');
+const enemyAvatarImage=computed(()=>playerSetupPhoto(battle.value,enemySide.value));
+const enemyAvatar=computed(()=>playerBattleAvatar(battle.value,enemySide.value));
+const failedEnemyAvatarImage=ref('');
+const enemyUltimate=computed(()=>Number(battle.value?.[enemySide.value==='p1'?'player1_skill':'player2_skill']??0));
 const avatarSelectionRequired = computed(() =>
   Boolean(battle.value) &&
   !ownAvatarImage.value &&
@@ -76,6 +88,7 @@ const avatarSelectionRequired = computed(() =>
 );
 
 const openAvatarPicker = () => {
+  if(ownAvatarImage.value)return;
   avatarSaveError.value = "";
   avatarDraft.value = playerAvatarOptions.includes(ownAvatar.value)
     ? ownAvatar.value
@@ -98,7 +111,7 @@ const savePlayerAvatar = async () => {
     if (!data?.ok) throw new Error(data?.message || "Avatar belum berhasil disimpan.");
 
     const key = player.value === "p1" ? "player1_avatar_url" : "player2_avatar_url";
-    if (battle.value) battle.value[key] = avatarDraft.value;
+    if (battle.value) battle.value[key] = data.avatar ?? avatarDraft.value;
     avatarPickerOpen.value = false;
   } catch (saveError) {
     avatarSaveError.value = playerErrorMessage(saveError, "Avatar belum berhasil disimpan. Coba lagi.");
@@ -138,7 +151,8 @@ const {
   latestBattleEvent,
 
   loadBattle,
-} = useBattleSession();
+} = useBattleSession({player,token,onAccessDenied:privateAccess.revoked});
+watch(ownAvatarImage,()=>{failedAvatarImage.value='';});
 
 // =========================================================
 // LOADING UX
@@ -177,6 +191,7 @@ const activeActionInfo = ref(null);
 const specialSkillModalOpen = ref(false);
 const runtimeSpecialSkills = ref([]);
 const specialSkillLoading = ref(false);
+const specialSkillLoadError = ref('');
 const selectedSpecialSkillId = ref(null);
 const selectedSpecialTargetId = ref(null);
 const selectedSpecialOption = ref('');
@@ -927,6 +942,7 @@ const startNecroRebirthCinematic = ({ source, target } = {}) => {
 
 const canUseBenchMoveAction = () =>
   isMyTurn.value &&
+  !teacherPaused.value &&
   !actionLoading.value &&
   !battleWaiting.value &&
   !waitingForRfid.value &&
@@ -934,10 +950,16 @@ const canUseBenchMoveAction = () =>
   !battleFinished.value &&
   canSpendActionPoints(configuredActionPointCost("switch", 1));
 
+const cardRuleReason = (card, action) => cardActionStatusReason(card, activeStatusEffects.value, action, battle.value);
+const benchCardReason = card => cardRuleReason(card, 'return_from_bench')
+  || (isTcgV1.value ? fusionEntryReason(card, activeCards.value, activeCards.value.length >= maxActive.value ? getCardId(selectedCard.value) : null) : '')
+  || (activeCards.value.length >= maxActive.value ? cardRuleReason(selectedCard.value, 'move_to_bench') : '');
+
 const canMoveActiveCardToBench = (card) =>
   Boolean(
     card &&
       !card.exhausted &&
+      !cardRuleReason(card, 'move_to_bench') &&
       benchCards.value.length < maxBench.value &&
       canUseBenchMoveAction(),
   );
@@ -952,7 +974,8 @@ const canReturnBenchCard = (card) => {
     !card ||
     card.exhausted ||
     Number(card.currentHp ?? card.current_hp ?? card.hp ?? 0) <= 0 ||
-    getBenchReturnCount(card) >= 1 ||
+    (!actionPointsEnabled.value && getBenchReturnCount(card) >= 1) ||
+    benchCardReason(card) ||
     !canUseBenchMoveAction()
   ) {
     return false;
@@ -1005,6 +1028,7 @@ const benchReturnActionLabel = computed(() => {
 
 const benchReturnActionHint = computed(() => {
   const cost = configuredActionPointCost("switch", 1);
+  if (activeCards.value.length >= maxActive.value && cardRuleReason(selectedCard.value, 'move_to_bench')) return cardRuleReason(selectedCard.value, 'move_to_bench');
   if (activeCards.value.length < maxActive.value) {
     return `Masuk ke slot Active yang kosong • biaya ${cost} poin giliran.`;
   }
@@ -1020,6 +1044,7 @@ const benchReturnActionEnabled = computed(() => {
 
   return Boolean(
     selectedCard.value &&
+      !cardRuleReason(selectedCard.value, 'move_to_bench') &&
       !selectedCard.value.exhausted &&
       Number(selectedCard.value.currentHp ?? selectedCard.value.current_hp ?? selectedCard.value.hp ?? 0) > 0,
   );
@@ -2010,7 +2035,7 @@ const actionPointsPerTurn = computed(() =>
 );
 
 const maxAttacksPerCard = computed(() =>
-  Math.max(1, Number(battle.value?.max_attacks_per_card ?? 1) || 1),
+  isTcgV1.value ? 1 : Math.max(1, Number(battle.value?.max_attacks_per_card ?? 1) || 1),
 );
 
 const tripleComboEnabled = computed(() => Boolean(battle.value?.triple_combo_enabled));
@@ -2018,6 +2043,7 @@ const formationEnabled = computed(() => Boolean(battle.value?.formation_enabled)
 const comboEnabled = computed(() => battle.value?.combo_enabled !== false);
 
 const cardAttacksUsedThisTurn = (card) => {
+  if (pilotAttackUsed(card, battle.value)) return 1;
   const currentTurn = Number(battle.value?.turn_index ?? 1);
   if (Number(card?.attack_turn_index ?? -1) === currentTurn) {
     return Math.max(0, Number(card?.attacks_this_turn ?? 0));
@@ -2031,6 +2057,7 @@ const comboEligibleActiveCards = computed(() =>
   activeCards.value.filter((card) =>
     Number(card?.current_hp ?? card?.hp ?? 0) > 0 &&
     !card?.exhausted &&
+    !cardRuleReason(card, 'combo_attack') &&
     cardAttacksUsedThisTurn(card) < maxAttacksPerCard.value,
   ),
 );
@@ -2471,6 +2498,7 @@ const enemyWaitingForRfid =
 // TURN
 // =========================================================
 
+const teacherPaused = computed(()=>Boolean(battle.value?.teacher_paused));
 const isMyTurn =
   computed(() => {
     if (!battle.value) {
@@ -2483,7 +2511,7 @@ const isMyTurn =
       battle.value.current_turn ===
         player.value &&
       !questionActive.value &&
-      !battleFinished.value
+      !battleFinished.value && !teacherPaused.value
     );
   });
 
@@ -2503,7 +2531,7 @@ const turnSecondsRemaining = computed(() => {
   if (!turnTimerVisible.value) return null;
   const deadline = Date.parse(battle.value?.turn_deadline_at ?? "");
   if (!Number.isFinite(deadline)) return null;
-  return Math.max(0, Math.ceil((deadline - (turnClockNow.value + turnClockServerOffsetMs.value)) / 1000));
+  return Math.max(0, Math.ceil((deadline - (teacherPaused.value ? Date.parse(battle.value.teacher_paused_at) : turnClockNow.value + turnClockServerOffsetMs.value)) / 1000));
 });
 const turnClockUrgent = computed(() => (turnSecondsRemaining.value ?? 99) <= 10);
 
@@ -2524,7 +2552,11 @@ const syncBattleTurnClock = async () => {
     });
 
     if (syncError) throw syncError;
-    if (!data?.ok) return;
+    // Check credentials even while paused; a teacher can revoke a lost device.
+    const {data:access}=await supabase.rpc('get_battle_player_state',{p_code:code.value,p_player:player.value,p_token:token.value});
+    if(access?.code==='PLAYER_ACCESS_REQUIRED'){privateAccess.revoked(access.message);return;}
+    if(access?.ok&&access.battle)battle.value={...battle.value,...access.battle};
+    if (!data?.ok){if(data?.code==='PLAYER_ACCESS_REQUIRED')privateAccess.revoked(data.message);return;}
 
     if (data.server_now) {
       turnClockServerOffsetMs.value = Date.parse(data.server_now) - Date.now();
@@ -2728,6 +2760,12 @@ const readyFusions = computed(() =>
   ),
 );
 
+const fusionUnavailableReason = computed(() => {
+  if (activeCards.value.some(isFusionCard)) return FUSION_CAP;
+  return runtimeFusions.value.find(recipe => recipe.message?.includes('ofensif'))?.message
+    || 'Material Fusion belum lengkap. Bahan harus belum menyerang atau memberi debuff pada giliran ini.';
+});
+
 const canFusionUi = computed(() =>
   Boolean(
     fusionFeatureEnabled.value &&
@@ -2876,7 +2914,7 @@ const fusionRequirementLabel = (requirement) => {
   const type = String(requirement?.type ?? requirement?.material_type ?? "").toLowerCase();
 
   if (type === "exact_card") {
-    return requirement?.card_code || "EXACT CARD";
+    return displayCardCode(requirement) || "EXACT CARD";
   }
 
   if (type === "one_of") {
@@ -2884,7 +2922,7 @@ const fusionRequirementLabel = (requirement) => {
       ? requirement.card_codes
       : [];
 
-    return codes.length ? codes.join(" / ") : "ONE OF";
+    return codes.length ? codes.map(card_code => displayCardCode({card_code})).join(" / ") : "ONE OF";
   }
 
   if (type === "tag") {
@@ -3079,23 +3117,62 @@ const skillLimits = (skill) => normalizeJsonObject(skill?.limits);
 const skillEffects = (skill) => normalizeJsonArray(skill?.effects);
 
 let skillLoadVersion = 0;
+let skillLoadScope = '';
+// Read-only card faces share the immutable runtime skill snapshots. Executing
+// skills continues through the existing selected-card loader and action flow.
+const arenaSkillPreviews=ref({});
+let arenaPreviewVersion=0;
+let arenaPreviewScope='';
+let arenaPreviewPending=null;
+watch(() => [battle.value?.id,player.value,specialSkillFeatureEnabled.value,activeCards.value.map(getCardId).join(',')], async () => {
+  const session=battle.value?.id, side=player.value;
+  const scope=JSON.stringify([session,side]);
+  const key=JSON.stringify([scope,specialSkillFeatureEnabled.value,activeCards.value.map(getCardId)]);
+  // A slow request (including server retries) must be allowed to finish before
+  // polling starts another request for the same roster.
+  if(arenaPreviewPending?.key===key)return;
+  const request={key};
+  arenaPreviewPending=request;
+  const version=++arenaPreviewVersion;
+  if(scope!==arenaPreviewScope||!session||!specialSkillFeatureEnabled.value){
+    arenaSkillPreviews.value={};
+    arenaPreviewScope=scope;
+  }
+  if(!session||!specialSkillFeatureEnabled.value){arenaPreviewPending=null;return;}
+  // Battle polling replaces its snapshot even when the roster is unchanged.
+  // Keep mounted icons through that refresh; only remove cards that left Active.
+  const activeIds=new Set(activeCards.value.map(getCardId));
+  arenaSkillPreviews.value=Object.fromEntries(Object.entries(arenaSkillPreviews.value).filter(([id])=>activeIds.has(id)));
+  const result=await Promise.all(activeCards.value.map(async card=>{
+    const id=getCardId(card);
+    try {const {data,error}=await supabase.from('battle_card_skills').select('*').eq('battle_id',session).eq('battle_card_id',id).eq('player',side).order('priority');
+      return [id,error?null:(data??[]).filter(skill=>skill.battle_id===session&&skill.player===side&&skill.battle_card_id===id)];
+    } catch {return [id,null];}
+  }));
+  if(version===arenaPreviewVersion)arenaSkillPreviews.value={...arenaSkillPreviews.value,...Object.fromEntries(result.filter(([,rows])=>rows!==null))};
+  if(arenaPreviewPending===request)arenaPreviewPending=null;
+},{immediate:true});
+const arenaSkillsFor=card=>getCardId(card)===selectedCardId.value&&runtimeSpecialSkills.value.length?runtimeSpecialSkills.value:arenaSkillPreviews.value[getCardId(card)]??[];
 const loadSelectedCardSpecialSkills = async () => {
   const version = ++skillLoadVersion;
-  runtimeSpecialSkills.value = [];
-  selectedSpecialSkillId.value = null;
-  selectedSpecialTargetId.value = null;
+  const session = battle.value?.id;
+  const side = player.value;
+  const cardId = getCardId(selectedCard.value);
+  const scope = JSON.stringify([session, side, cardId, specialSkillFeatureEnabled.value]);
+  if (scope !== skillLoadScope) {
+    runtimeSpecialSkills.value = [];
+    selectedSpecialSkillId.value = null;
+    selectedSpecialTargetId.value = null;
+    skillLoadScope = scope;
+  }
+  specialSkillLoadError.value = '';
 
   if (
-    !battle.value?.id ||
-    !selectedCard.value ||
+    !session ||
+    !cardId ||
     !specialSkillFeatureEnabled.value
   ) {
-    return;
-  }
-
-  const cardId = getCardId(selectedCard.value);
-
-  if (!cardId) {
+    specialSkillLoading.value = false;
     return;
   }
 
@@ -3105,9 +3182,9 @@ const loadSelectedCardSpecialSkills = async () => {
     const { data: skills, error: skillError } = await supabase
       .from("battle_card_skills")
       .select("*")
-      .eq("battle_id", battle.value.id)
+      .eq("battle_id", session)
       .eq("battle_card_id", cardId)
-      .eq("player", player.value)
+      .eq("player", side)
       .order("priority", { ascending: true })
       .order("skill_code", { ascending: true });
 
@@ -3115,7 +3192,8 @@ const loadSelectedCardSpecialSkills = async () => {
       throw skillError;
     }
 
-    const rows = skills ?? [];
+    if (version !== skillLoadVersion) return;
+    const rows = (skills ?? []).filter(skill => skill.battle_id === session && skill.battle_card_id === cardId && skill.player === side);
     const ids = rows.map((skill) => skill.id).filter(Boolean);
     const usageCount = new Map();
 
@@ -3123,7 +3201,7 @@ const loadSelectedCardSpecialSkills = async () => {
       const { data: uses, error: useError } = await supabase
         .from("battle_special_skill_uses")
         .select("battle_card_skill_id, usage_number")
-        .eq("battle_id", battle.value.id)
+        .eq("battle_id", session)
         .in("battle_card_skill_id", ids);
 
       if (useError) {
@@ -3143,9 +3221,13 @@ const loadSelectedCardSpecialSkills = async () => {
       ...skill,
       usage_count: usageCount.get(skill.id) ?? 0,
     }));
+    if (!rows.some(skill => skill.id === selectedSpecialSkillId.value)) {
+      selectedSpecialSkillId.value = null;
+      selectedSpecialTargetId.value = null;
+    }
   } catch (err) {
     console.error("Load Special Skills:", err);
-    if (version === skillLoadVersion) runtimeSpecialSkills.value = [];
+    if (version === skillLoadVersion) specialSkillLoadError.value = 'Skill belum berhasil diperbarui. Coba muat ulang sebelum menggunakannya.';
   } finally {
     if (version === skillLoadVersion) specialSkillLoading.value = false;
   }
@@ -3178,9 +3260,24 @@ const specialSkillReadyState = (skill) => {
     };
   }
 
+  if (specialSkillLoading.value || specialSkillLoadError.value) {
+    return { ready: false, status: 'SYNC', reason: specialSkillLoadError.value || 'Memperbarui status skill…' };
+  }
+
+  const globalReason = teacherPaused.value ? 'Pertandingan dijeda guru.'
+    : battleFinished.value ? 'Pertandingan sudah selesai.'
+    : questionActive.value ? 'Selesaikan kuis terlebih dahulu.'
+    : !isMyTurn.value ? 'Tunggu giliranmu.'
+    : turnSecondsRemaining.value === 0 ? 'Waktu giliran habis.'
+    : waitingForRfid.value ? 'Selesaikan atau batalkan Summon terlebih dahulu.'
+    : actionLoading.value ? 'Aksi sebelumnya sedang diproses.' : '';
+  if (globalReason) return { ready: false, status: 'TUNGGU', reason: globalReason };
+  if (!skillEffects(skill).length) return { ready: false, status: 'BELUM DIATUR', reason: 'Skill belum memiliki efek battle. Minta guru memeriksa katalog.' };
+  const fieldReason = skillFieldBlockReason({ ...skill, effects: skillEffects(skill), target_spec: skillTargetSpec(skill) }, { ...currentSkillField(), option: skill.id === selectedSpecialSkillId.value ? selectedSpecialOption.value : '' });
+  if (fieldReason) return { ready: false, status: 'BELUM TERSEDIA', reason: fieldReason };
   const limits = skillLimits(skill);
   const cost = skillCostSpec(skill);
-  const uses = Number(skill.usage_count ?? 0) || 0;
+  const uses = Math.max(Number(skill.usage_count ?? 0) || 0, Number(skill.uses_count ?? 0) || 0);
   const oncePerBattle = Boolean(limits.once_per_battle);
   const configuredMax = Number(limits.max_uses ?? 0) || 0;
   const maxUses = oncePerBattle ? 1 : configuredMax > 0 ? configuredMax : null;
@@ -3277,29 +3374,20 @@ const selectedSpecialTargetRequired = computed(() => {
   ].includes(selectedSpecialTargetType.value);
 });
 
-const specialTargetCards = computed(() => {
-  const type = selectedSpecialTargetType.value;
-
-  if (type === "enemy_active") {
-    return enemyActiveCards.value;
-  }
-
-  if (type === "ally_active" || type === "any_active") {
-    return activeCards.value;
-  }
-  if (type === 'ally_field') return [...activeCards.value, ...benchCards.value];
-
-  if (type === "ally_graveyard") {
-    const recall = skillEffects(selectedSpecialSkill.value).some(effect => effect.program?.operations?.some(item => item.type === 'revive'));
-    return recall ? graveyardCards.value.filter(card => !card.is_fusion_result && !card.fusion_consumed && card.origin_type !== 'fusion' && card.card_kind !== 'fusion') : graveyardCards.value;
-  }
-
-  if (["self", "self_card", "source_card"].includes(type)) {
-    return selectedCard.value ? [selectedCard.value] : [];
-  }
-
-  return [];
+function currentSkillField() {
+  return { source: selectedCard.value, active: activeCards.value, enemyActive: enemyActiveCards.value, bench: benchCards.value, graveyard: graveyardCards.value,
+    statuses: activeStatusEffects.value, attackUsed: selectedCardAlreadyAttacked.value, maxBench: maxBench.value,
+    skills: runtimeSpecialSkills.value, round: battle.value?.round, player: player.value, battle: battle.value, option: selectedSpecialOption.value };
+}
+const skillBenchReason = card => cardRuleReason(card, 'return_from_bench')
+  || (card.exhausted || getCardCurrentHp(card) <= 0 ? 'Kartu Bench belum siap.' : '')
+  || (isTcgV1.value ? fusionEntryReason(card, activeCards.value, selectedSpecialTargetId.value) : '');
+const selectedSkillBenchReason = computed(() => {
+  if (!selectedSpecialBenchId.value) return '';
+  const card = benchCards.value.find(c => getCardId(c) === selectedSpecialBenchId.value);
+  return card ? skillBenchReason(card) : 'Kartu Bench sudah tidak tersedia.';
 });
+const specialTargetCards = computed(() => availableSkillTargets({ ...selectedSpecialSkill.value, effects: skillEffects(selectedSpecialSkill.value), target_spec: skillTargetSpec(selectedSpecialSkill.value) }, currentSkillField()));
 
 const selectedSpecialTarget = computed(() =>
   specialTargetCards.value.find(
@@ -3764,6 +3852,7 @@ const canAttackUi =
         selectedCard.value,
       ) &&
       !selectedCardAlreadyAttacked.value &&
+      !cardRuleReason(selectedCard.value, 'attack') &&
       canSpendActionPoints(configuredActionPointCost("attack", 1)),
   );
 
@@ -3783,6 +3872,7 @@ const canUltimateUi =
         selectedCard.value,
       ) &&
       enemyActiveCards.value.length > 0 &&
+      !cardRuleReason(selectedCard.value, 'ultimate') &&
       ownSkill.value >=
         100 &&
       canSpendActionPoints(configuredActionPointCost("ultimate", 2)),
@@ -3802,6 +3892,13 @@ const canHealUi =
       canSpendActionPoints(configuredActionPointCost("heal", 1)),
   );
 
+const synergyRuleReason = computed(() => {
+  const source = selectedCard.value;
+  const effect = battle.value?.synergy_rules_snapshot?.find(rule => rule.element === selectedSynergyInfo.value?.element)?.effect_type;
+  const attack = ['burst','piercing_burst'].includes(effect);
+  return cardRuleReason(source, 'synergy') || (attack || effect === 'attack_debuff_percent'
+    ? pilotOffenseReason(source, battle.value, attack) || (attack ? cardRuleReason(source, 'attack') : '') : '');
+});
 const canSynergyUi =
   computed(
     () =>
@@ -3810,6 +3907,7 @@ const canSynergyUi =
           .value
           ?.ready,
       ) &&
+      !synergyRuleReason.value &&
       canSpendActionPoints(configuredActionPointCost("synergy", 1)),
   );
 
@@ -4299,7 +4397,7 @@ const closeActionInfoModal = () => {
 
 let skillChoiceId = null;
 const publishSkillChoice = () => {
-  if (!specialSkillModalOpen.value || !isMyTurn.value || questionActive.value || !selectedCard.value) { void syncSkillIntent(null); return; }
+  if (!specialSkillModalOpen.value || !isMyTurn.value || teacherPaused.value || questionActive.value || !selectedCard.value) { void syncSkillIntent(null); return; }
   void syncSkillIntent({id:skillChoiceId,cardId:getCardId(selectedCard.value),skillId:selectedSpecialSkillId.value,phase:selectedSpecialSkillId.value?'selected':'choosing',turn:spotlightTurn(battle.value),at:Date.now()});
 };
 const openSpecialSkillModal = (skill = null) => {
@@ -4376,6 +4474,7 @@ const submitSpecialSkill = async () => {
   const spec = skillTargetSpec(skill);
   if (spec.choices?.length && !spec.choices.some(option => option.id === selectedSpecialOption.value)) { warningToast('PILIH EFEK', 'Pilih satu efek skill terlebih dahulu.'); return; }
   if (spec.needs_bench && !selectedSpecialBenchId.value) { warningToast('PILIH BENCH', 'Pilih kartu Bench untuk ditukar.'); return; }
+  if (spec.needs_bench && selectedSkillBenchReason.value) { warningToast('SWITCH TERKUNCI', selectedSkillBenchReason.value); return; }
 
   if (!readiness.ready) {
     warningToast("SPECIAL SKILL LOCKED", readiness.reason);
@@ -5641,7 +5740,7 @@ const questionReady =
 const questionInteractionLocked =
   computed(
     () =>
-      questionSubmitting.value ||
+      teacherPaused.value || questionSubmitting.value ||
       Boolean(
         questionResult.value,
       ) ||
@@ -5684,7 +5783,7 @@ const updateQuestionClock = () => {
     return;
   }
   questionSecondsRemaining.value = quizClockState(currentQuestionRound.value, limit).remaining;
-  if (questionSecondsRemaining.value === 0) void expireQuestionRound();
+  if (!teacherPaused.value && questionSecondsRemaining.value === 0) void expireQuestionRound();
 };
 
 const expireQuestionRound = async () => {
@@ -6989,6 +7088,7 @@ const cancelSummon = async () => {
   }
 };
 const panelBlockReason = computed(() => {
+  if(teacherPaused.value)return 'Pertandingan dijeda guru.';
   if (questionActive.value) return 'Selesaikan kuis terlebih dahulu.';
   if (battleFinished.value) return 'Pertandingan sudah selesai.';
   if (waitingForRfid.value) return 'Tempelkan kartu ke pembaca RFID untuk menyelesaikan Summon.';
@@ -6999,28 +7099,29 @@ const panelBlockReason = computed(() => {
 });
 const actionPanelContext = computed(() => ({
   card: selectedCard.value, myTurn: isMyTurn.value,
+  pilotRules: isTcgV1.value, roundLimit: battle.value?.total_rounds ?? 10,
   apEnabled: actionPointsEnabled.value, ap: ownActionPoints.value, maxAp: actionPointsPerTurn.value,
   seconds: turnTimerVisible.value ? turnSecondsRemaining.value : null,
   scanning: waitingForRfid.value,
-  canCancelSummon:Boolean(battle.value?.pending_summon_request_id && isMyTurn.value && turnSecondsRemaining.value!==0),
+  canCancelSummon:Boolean(battle.value?.pending_summon_request_id && isMyTurn.value && !teacherPaused.value && turnSecondsRemaining.value!==0),
   cancelSummonHint:!Object.hasOwn(battle.value??{},'pending_summon_request_id') ? 'Pembatalan belum tersedia pada server battle ini.'
     : turnSecondsRemaining.value===0 ? 'Waktu giliran habis. Menunggu pembaruan battle.' : 'Menyinkronkan status scan…',
   scope: `${spotlightTurn(battle.value)}:${selectedCardId.value ?? ''}`,
-  interrupted: questionActive.value || waitingForRfid.value || battleFinished.value || !isMyTurn.value,
+  interrupted: teacherPaused.value || questionActive.value || waitingForRfid.value || battleFinished.value || !isMyTurn.value,
   hint: (waitingForRfid.value ? 'Belum ada kartu baru yang masuk.' : panelBlockReason.value) || (selectedCard.value
     ? `ATK ${selectedCard.value.attack ?? 0} · DEF ${selectedCard.value.defense ?? 0} — pilih aksi untuk kartu ini.`
-    : 'Pilih kartu di lapangan atau panggil kartu baru.'),
+    : 'Pilih kartu di lapangan atau gunakan Summon.'),
 }));
 const panelActions = computed(() => {
   const needCard = selectedCard.value ? '' : 'Pilih kartu Active terlebih dahulu.';
   const noAp = (key, fallback) => canSpendActionPoints(configuredActionPointCost(key, fallback))
     ? '' : `Butuh ${configuredActionPointCost(key, fallback)} AP; kamu memiliki ${ownActionPoints.value} AP.`;
   const make = (key, label, icon, fallback, enabled, reason, description, primary = false) => {
-    const blocked = panelBlockReason.value || reason;
+    const blocked = panelBlockReason.value || cardRuleReason(selectedCard.value, key === 'special' ? 'special_skill' : key) || reason;
     const cost = configuredActionPointCost(key === 'combo' ? 'combo_attack' : key, fallback);
     return {key, label, icon, primary, description, cost,
       ready: Boolean(enabled && !blocked), reason: blocked,
-      shortReason: blocked === needCard && needCard ? 'Pilih kartu dulu' : blocked?.startsWith('Butuh ') ? 'AP belum cukup' : blocked?.startsWith('Tunggu giliran') ? 'Giliran lawan' : blocked ? 'Lihat syarat' : '',
+      shortReason: blocked === needCard && needCard ? 'Pilih kartu dulu' : blocked?.startsWith('Butuh ') ? 'AP belum cukup' : blocked?.startsWith('Tunggu giliran') ? 'Giliran lawan' : blocked?.includes('dijeda') ? 'Dijeda guru' : blocked?.includes('cooldown') || blocked?.includes('Tersedia setelah') ? 'Cooldown' : blocked?.includes('target') ? 'Perlu target' : blocked ? 'Belum tersedia' : '',
       costLabel: actionPointsEnabled.value ? `${cost} AP` : 'Satu aksi',
     };
   };
@@ -7031,27 +7132,29 @@ const panelActions = computed(() => {
   const skillsReason = needCard || (!specialSkillFeatureEnabled.value ? 'Skill kartu tidak diaktifkan pada pertandingan ini.' : '')
     || (specialSkillLoading.value ? 'Sedang memuat skill kartu.' : '') || (!runtimeSpecialSkills.value.length ? 'Kartu ini tidak memiliki skill yang tersedia pada battle ini.' : '');
   const actions = [
-    make('summon', 'Panggil kartu', '◉', 1, canSummonUi.value, summonReason, 'Mulai Summon, lalu scan UID kartu fisik terdaftar ke slot Active yang kosong.', true),
+    make('summon', 'Summon', '▣', 1, canSummonUi.value, summonReason, 'Mulai Summon, lalu scan UID kartu fisik terdaftar ke slot Active yang kosong.', true),
     make('attack', 'Serang', '⚔', 1, canAttackUi.value, attackReason, 'Pilih target lawan dan periksa serangan sebelum mengonfirmasi.', true),
-    make('special', 'Skill kartu', readySpecialSkills.value[0]?.icon || runtimeSpecialSkills.value[0]?.icon, 1, Boolean(selectedCard.value && runtimeSpecialSkills.value.length), skillsReason, 'Lihat kedua skill, biaya, target, cooldown dan alasan terkuncinya. Memilih skill belum menjalankan aksi.', true),
+    make('special', 'Skill kartu', readySpecialSkills.value[0]?.icon || runtimeSpecialSkills.value[0]?.icon, 1, Boolean(selectedCard.value && readySpecialSkills.value.length), skillsReason || (!readySpecialSkills.value.length ? specialSkillReadyState(runtimeSpecialSkills.value[0]).reason : ''), 'Lihat kedua skill, biaya, target, cooldown dan alasan terkuncinya. Memilih skill belum menjalankan aksi.', true),
   ];
-  // Skill inspection remains available even when both skills are cooling down.
+  // Readiness drives use; a separate information control keeps locked skills inspectable.
   actions[2].costLabel = `${runtimeSpecialSkills.value.length} skill · ${readySpecialSkills.value.length} siap`;
+  actions[2].inspectSkills = Boolean(selectedCard.value && runtimeSpecialSkills.value.length);
+  actions[2].readyHint = readySpecialSkills.value.length === 1 ? `${readySpecialSkills.value[0].name} siap!` : `${readySpecialSkills.value.length} skill siap!`;
   if (isTcgV1.value && comboEnabled.value) actions.push(make('combo', 'Combo', '⚒', 2, canComboAttackUi.value,
     comboEligibleActiveCards.value.length < 2 ? 'Perlu sedikitnya dua kartu Active yang masih boleh menyerang.' : !actionPointsEnabled.value ? 'Combo memerlukan aturan AP yang aktif.' : noAp('combo_attack', 2),
     'Serangan bersama dari kartu Active. Pilih peserta, kartu utama, lalu target lawan.'));
-  if (fusionFeatureEnabled.value) actions.push(make('fusion', 'Fusion', '◇', 2,
-    !fusionLoading.value && canSpendActionPoints(configuredActionPointCost('fusion', 2)),
-    fusionLoading.value ? 'Sedang memeriksa resep Fusion.' : noAp('fusion', 2),
-    'Lihat resep, material, dan kartu hasil. Material baru dikonsumsi setelah kamu mengonfirmasi.'));
-  actions.push(make('ultimate', 'Ultimate', 'ϟ', 2, canUltimateUi.value,
+  if (fusionFeatureEnabled.value) actions.push(make('fusion', 'Fusion', '🧬', 2,
+    !fusionLoading.value && canFusionUi.value,
+    fusionLoading.value ? 'Sedang memeriksa resep Fusion.' : !readyFusions.value.length ? fusionUnavailableReason.value : noAp('fusion', 2),
+    'Bahan belum boleh menyerang/memberi debuff. Maksimal 1 Fusion di Active; Fusion baru bisa menyerang pada giliranmu berikutnya. Skill bantuan boleh langsung digunakan.'));
+  actions.push(make('ultimate', 'Ultimate', '⚡', 2, canUltimateUi.value,
     needCard || (!enemyActiveCards.value.length ? 'Tidak ada kartu Active lawan untuk terkena Ultimate.' : '') || (ownSkill.value < 100 ? `Gauge Ultimate ${ownSkill.value}%; perlu 100%.` : '') || noAp('ultimate', 2),
     'Serangan Ultimate ke kartu-kartu Active lawan. Periksa sasaran dan biaya; gauge terpakai setelah berhasil.'));
   actions.push(make('heal', 'Pulihkan HP', '✚', 1, canHealUi.value,
     needCard || (ownHealUsed.value ? 'Jatah Heal pada pertandingan ini sudah dipakai.' : '') || (ownHp.value > ownMaxHp.value * .5 ? 'HP pemain harus 50% atau lebih rendah untuk memakai Heal.' : '') || noAp('heal', 1),
     'Memulihkan HP pemain sesuai aturan battle. Pemulihan HP kartu menggunakan skill kartu.'));
   actions.push(make('synergy', 'Synergy', '✧', 1, canSynergyUi.value,
-    needCard || (!selectedSynergyInfo.value?.ready ? selectedSynergyInfo.value?.effect || 'Kombinasi kartu belum memenuhi syarat Synergy.' : '') || noAp('synergy', 1),
+    needCard || synergyRuleReason.value || (!selectedSynergyInfo.value?.ready ? selectedSynergyInfo.value?.effect || 'Kombinasi kartu belum memenuhi syarat Synergy.' : '') || noAp('synergy', 1),
     selectedSynergyInfo.value?.effect || 'Aktifkan efek dari kombinasi tipe kartu yang memenuhi syarat.'));
   if (!actionPointsEnabled.value) actions.push(make('defense', 'Bertahan', '🛡', 1, canDefenseUi.value, needCard,
     'Memakai aksi bertahan sesuai aturan Classic. Periksa efek sebelum mengonfirmasi.'));
@@ -7099,6 +7202,8 @@ async function confirmPanelAction() {
   else await submitAction(pending.key);
   pendingPanelAction.value = null;
 }
+watch(questionActive,active=>{if(active)opponentInspectorOpen.value=false;});
+watch(() => battle.value?.id,()=>{opponentInspectorOpen.value=false;});
 watch([() => spotlightTurn(battle.value), selectedCardId, () => selectedCard.value ? getCardId(selectedCard.value) : null, isMyTurn, questionActive, waitingForRfid, battleFinished], () => {
   pendingPanelAction.value = null;
   if (panelBlockReason.value && !actionLoading.value) closeComboAttackModal();
@@ -7162,6 +7267,7 @@ onMounted(
 
       try {
         await connectBattleUi({
+          code:code.value,token:token.value,
           battleId:
             battle.value.id,
 
@@ -7201,6 +7307,8 @@ onMounted(
 
 onUnmounted(
   async () => {
+    skillLoadVersion++;
+    arenaPreviewVersion++;
     document.body.classList.remove("tcg-card-dragging");
 
     if (turnClockTickInterval) {
@@ -7281,8 +7389,9 @@ onUnmounted(
 </script>
 
 <template>
+  <BattlePauseNotice :battle="battle"/>
   <main
-    class="player-battle-ui"
+    class="player-battle-ui arena-player"
     :class="[
       player,
       {
@@ -7568,17 +7677,17 @@ onUnmounted(
       <!-- TOP HUD -->
 
       <header class="top-hud">
+        <div class="arena-hud-own">
         <section class="player-identity">
-          <button
-            type="button"
-            class="player-avatar"
-            :aria-label="`Avatar ${playerName}. Klik untuk mengganti avatar.`"
-            title="Ganti avatar"
+          <component
+            :is="ownAvatarImage ? 'span' : 'button'" class="player-avatar"
+            :aria-label="ownAvatarImage ? `Foto ${playerName} dari Game Setup` : `Avatar ${playerName}. Klik untuk mengganti avatar.`"
+            :title="ownAvatarImage ? 'Foto dari Game Setup' : 'Ganti avatar'"
             @click="openAvatarPicker"
           >
-            <img v-if="ownAvatarImage" :src="ownAvatarImage" :alt="`Avatar ${playerName}`" />
-            <span v-else>{{ ownAvatar || (player === "p1" ? "👦🏻" : "🧑🏽‍🦱") }}</span>
-          </button>
+            <img v-if="ownAvatarImage && failedAvatarImage!==ownAvatarImage" :src="ownAvatarImage" :alt="`Foto ${playerName}`" @error="failedAvatarImage=ownAvatarImage" />
+            <span v-else>{{ ownAvatarImage ? playerName.slice(0,1).toUpperCase() : ownAvatar || (player === "p1" ? "👦🏻" : "🧑🏽‍🦱") }}</span>
+          </component>
 
           <div class="identity-copy">
             <span class="hud-label">
@@ -7662,6 +7771,8 @@ onUnmounted(
           </div>
         </section>
 
+        </div>
+
         <!-- DECK -->
 
         <section class="deck-mini-status">
@@ -7702,7 +7813,7 @@ onUnmounted(
 
           <div>
             <strong>
-              {{ turnText }}
+              {{ battleFinished ? 'SELESAI' : teacherPaused ? 'DIJEDA' : waitingForRfid || battleWaiting ? turnText : isMyTurn ? 'GILIRANMU' : 'GILIRAN LAWAN' }}
             </strong>
 
             <span>
@@ -7741,44 +7852,16 @@ onUnmounted(
 
         <!-- ENEMY -->
 
-        <section class="enemy-mini-status">
-          <span>VS</span>
-
-          <strong>
-            {{ enemyName }}
-          </strong>
-
-          <small>
-            HP {{ enemyHp }} /
-            {{ enemyMaxHp }}
-          </small>
-
-          <div class="enemy-mini-track">
-            <div
-              class="enemy-mini-fill"
-              :class="enemyHpState"
-              :style="{
-                width:
-                  `${enemyHpPercent}%`,
-              }"
-            />
+        <section class="enemy-mini-status arena-hud-enemy">
+          <div class="enemy-combat-stats">
+            <div class="hp-title"><span>HP</span><strong>{{enemyHp}} / {{enemyMaxHp}}</strong></div>
+            <div class="enemy-mini-track"><div class="enemy-mini-fill" :class="enemyHpState" :style="{width:`${enemyHpPercent}%`}" /></div>
+            <div class="gauge-title"><span>Ultimate</span><strong>{{enemyUltimate}}%</strong></div>
+            <div class="hud-skill-track"><div class="hud-skill-fill" :style="{width:`${Math.min(100,enemyUltimate)}%`}" /></div>
+            <div v-if="enemyStatusEffects.length" class="enemy-status-strip"><span v-for="status in enemyStatusEffects.slice(0,3)" :key="`enemy-${status.key}`" class="battle-status-chip compact" :class="status.tone" :title="statusTooltip(status)"><b>{{status.icon}}</b><small>{{status.valueText||status.label}}</small></span><span v-if="enemyStatusEffects.length>3" class="status-more">+{{enemyStatusEffects.length-3}}</span></div>
           </div>
-
-          <div v-if="enemyStatusEffects.length" class="enemy-status-strip">
-            <span
-              v-for="status in enemyStatusEffects.slice(0, 3)"
-              :key="`enemy-${status.key}`"
-              class="battle-status-chip compact"
-              :class="status.tone"
-              :title="statusTooltip(status)"
-            >
-              <b>{{ status.icon }}</b>
-              <small>{{ status.valueText || status.label }}</small>
-            </span>
-            <span v-if="enemyStatusEffects.length > 3" class="status-more">
-              +{{ enemyStatusEffects.length - 3 }}
-            </span>
-          </div>
+          <div class="enemy-identity"><div><span class="hud-label">{{enemySide==='p1'?'PLAYER 1':'PLAYER 2'}}</span><strong>{{enemyName}}</strong></div><span class="enemy-avatar"><img v-if="enemyAvatarImage && failedEnemyAvatarImage!==enemyAvatarImage" :src="enemyAvatarImage" :alt="`Foto ${enemyName}`" @error="failedEnemyAvatarImage=enemyAvatarImage"/><span v-else>{{enemyAvatarImage ? enemyName.slice(0,1).toUpperCase() : enemyAvatar || '👤'}}</span></span></div>
+          <button type="button" class="opponent-inspect-button" :disabled="questionActive" :title="questionActive ? 'Selesaikan kuis terlebih dahulu' : 'Periksa kartu tanpa memakai AP'" @click="opponentInspectorOpen=true">◎ Lihat kartu lawan <b>{{enemyActiveCards.length}}</b></button>
         </section>
       </header>
 
@@ -7935,6 +8018,7 @@ onUnmounted(
             side-zone
             bench-side-zone
           "
+          :arena="true"
           zone="bench"
           side="left"
           :cards="benchCards"
@@ -7949,6 +8033,8 @@ onUnmounted(
           :bench-action-enabled="benchReturnActionEnabled"
           :bench-action-label="benchReturnActionLabel"
           :bench-action-hint="benchReturnActionHint"
+          :unlimited-bench-returns="actionPointsEnabled"
+          :bench-card-reason="benchCardReason"
           @viewer-open="
             handleZoneViewerOpen
           "
@@ -8008,7 +8094,11 @@ onUnmounted(
             :style="{ '--active-slot-count': maxActive }"
           >
             <article
-              v-for="card in activeCards"
+              v-for="(card,cardIndex) in activeCards"
+              :tabindex="0"
+              @keydown.enter.self.prevent="selectCard(card)"
+              @keydown.space.self.prevent="selectCard(card)"
+              :aria-label="`Pilih kartu ${card.name}`"
               :key="
                 card.battleId ??
                 card.id
@@ -8016,6 +8106,7 @@ onUnmounted(
               class="
                 cyber-card
               "
+              :style="{'--card-tilt': `${activeCards.length===1 ? 0 : (cardIndex-(activeCards.length-1)/2)*3}deg`, '--float-delay': `${cardIndex*-.8}s`}"
               :class="[
                 {
                   selected:
@@ -8062,128 +8153,20 @@ onUnmounted(
               />
 
               <div class="cyber-card-inner">
-                <header>
-                  <strong>
-                    {{ card.name }}
-                  </strong>
-
-                  <span>
-                    {{
-                      card.element ||
-                      "neutral"
-                    }}
-                  </span>
-                </header>
-
-                <div
-                  v-if="visibleCardStatuses(card).length"
-                  class="card-status-row"
-                >
-                  <span
-                    v-for="status in visibleCardStatuses(card).slice(0, 3)"
-                    :key="`${getCardId(card)}-${status.key}`"
-                    class="card-status-badge"
-                    :class="status.tone"
-                    :title="statusTooltip(status)"
-                  >
-                    <b>{{ status.icon }}</b>
-                    <em>{{ status.label }}</em>
-                    <small v-if="status.valueText">{{ status.valueText }}</small>
-                    <small v-if="status.durationText">{{ status.durationText }}</small>
-                  </span>
-                  <span
-                    v-if="visibleCardStatuses(card).length > 3"
-                    class="card-status-badge more"
-                  >
-                    +{{ visibleCardStatuses(card).length - 3 }}
-                  </span>
-                </div>
-
-                <div class="card-hp-block">
-                  <div class="card-hp-copy">
-                    <span>CARD HP</span>
-
-                    <strong>
-                      {{ getCardCurrentHp(card) }}
-                      /
-                      {{ getCardMaxHp(card) }}
-                    </strong>
-                  </div>
-
-                  <div class="card-hp-track">
-                    <div
-                      class="card-hp-fill"
-                      :class="getCardHpState(card)"
-                      :style="{
-                        width: `${getCardHpPercent(card)}%`,
-                      }"
-                    >
-                      <span class="card-hp-shine" />
-                    </div>
-                  </div>
-                </div>
-
-                <div class="cyber-card-image">
-                  <img
-                    v-if="
-                      card.image_url
-                    "
-                    draggable="false"
-                    :src="
-                      card.image_url
-                    "
-                    :alt="
-                      card.name
-                    "
-                  />
-
-                  <div
-                    v-else
-                    class="image-placeholder"
-                  >
-                    ◉
-                  </div>
-                </div>
-
-                <footer class="card-combat-stats">
-                  <div>
-                    <span>
-                      ATTACK
-                    </span>
-
-                    <strong>
-                      {{
-                        card.attack ??
-                        0
-                      }}
-                    </strong>
-                  </div>
-
-                  <div>
-                    <span>
-                      DEFENSE
-                    </span>
-
-                    <strong>
-                      {{
-                        card.defense ??
-                        0
-                      }}
-                    </strong>
-                  </div>
-                </footer>
-
+                <div v-if="visibleCardStatuses(card).length" class="card-status-row"><span v-for="status in visibleCardStatuses(card).slice(0,3)" :key="`${getCardId(card)}-${status.key}`" class="card-status-badge" :class="status.tone" :title="statusTooltip(status)"><b>{{status.icon}}</b><em>{{status.label}}</em><small v-if="status.valueText">{{status.valueText}}</small><small v-if="status.durationText">{{status.durationText}}</small></span><span v-if="visibleCardStatuses(card).length>3" class="card-status-badge more">+{{visibleCardStatuses(card).length-3}}</span></div>
+                <ArenaCardFace :card="card" :skills="arenaSkillsFor(card)" />
                 <button
                   type="button"
                   class="card-zone-action"
                   :disabled="!canMoveActiveCardToBench(card)"
+                  :title="cardRuleReason(card, 'move_to_bench') || 'Pindah ke Bench sebelum melakukan aksi ofensif.'"
                   @click.stop="moveActiveCardToBench(card)"
                 >
                   <span aria-hidden="true">↓</span>
                   <span class="card-zone-action-copy">
-                    Pindahkan ke Bench
+                    {{ cardRuleReason(card, 'move_to_bench') ? '🔒 Belum bisa mundur' : 'Pindahkan ke Bench' }}
                     <small>
-                      {{ configuredActionPointCost("switch", 1) }} poin giliran
+                      {{ cardRuleReason(card, 'move_to_bench') ? (cardRuleReason(card, 'move_to_bench').includes('ofensif') ? 'Tunggu giliranmu berikutnya' : 'Perpindahan terkunci oleh status') : `${configuredActionPointCost('switch', 1)} poin giliran` }}
                     </small>
                   </span>
                 </button>
@@ -8230,6 +8213,7 @@ onUnmounted(
             side-zone
             graveyard-side-zone
           "
+          :arena="true"
           zone="graveyard"
           side="right"
           :cards="
@@ -8273,7 +8257,7 @@ onUnmounted(
             "
           />
 
-          <section class="target-picker-panel" role="dialog" aria-modal="true" aria-labelledby="attack-picker-title" tabindex="-1">
+          <section class="target-picker-panel arena-frame" role="dialog" aria-modal="true" aria-labelledby="attack-picker-title" tabindex="-1">
             <header class="target-picker-header">
               <div>
                 <span class="eyebrow">
@@ -8629,6 +8613,8 @@ onUnmounted(
         </div>
       </Transition>
 
+      <BattleOpponentInspector v-if="opponentInspectorOpen && !questionActive && battle" :battle="battle" :cards="enemyActiveCards" :enemy-side="player==='p1'?'p2':'p1'" :enemy-name="enemyName" :revision="latestBattleEvent?.id" :statuses="activeStatusEffects" @close="opponentInspectorOpen=false"/>
+
       <!-- BONUS SKILLS -->
 
       <section
@@ -8724,7 +8710,7 @@ onUnmounted(
         <div v-if="specialSkillModalOpen" class="action-detail-overlay special-overlay">
           <div class="action-detail-backdrop" @click="closeSpecialSkillModal" />
 
-          <section class="special-skill-modal" role="dialog" aria-modal="true" aria-labelledby="special-picker-title" tabindex="-1" @click.stop>
+          <section class="special-skill-modal arena-frame" role="dialog" aria-modal="true" aria-labelledby="special-picker-title" tabindex="-1" @click.stop>
             <header class="special-modal-header">
               <div>
                 <span class="eyebrow">SKILL KARTU • PILIH SKILL → TARGET → KONFIRMASI</span>
@@ -8737,7 +8723,8 @@ onUnmounted(
               </button>
             </header>
 
-            <div v-if="specialSkillLoading" class="special-empty-state">
+            <p v-if="specialSkillLoadError" class="special-empty-state" role="alert">{{ specialSkillLoadError }} <button type="button" :disabled="specialSkillLoading" @click="loadSelectedCardSpecialSkills">Muat ulang skill</button></p>
+            <div v-if="specialSkillLoading && !runtimeSpecialSkills.length" class="special-empty-state">
               Loading Special Skill...
             </div>
 
@@ -8842,7 +8829,7 @@ onUnmounted(
                     <select v-model="selectedSpecialOption" aria-label="Pilih efek skill"><option disabled value="">Pilih satu efek…</option><option v-for="option in skillTargetSpec(selectedSpecialSkill).choices" :key="option.id" :value="option.id">{{ option.label }}</option></select>
                   </label>
                   <label v-if="skillTargetSpec(selectedSpecialSkill).needs_bench" class="studio-skill-choice">Kartu Bench untuk Switch
-                    <select v-model="selectedSpecialBenchId" aria-label="Kartu Bench untuk Switch"><option disabled value="">Pilih kartu Bench…</option><option v-for="card in benchCards" :key="getCardId(card)" :value="getCardId(card)">{{ card.name }}</option></select>
+                    <select v-model="selectedSpecialBenchId" aria-label="Kartu Bench untuk Switch"><option disabled value="">Pilih kartu Bench…</option><option v-for="card in benchCards" :key="getCardId(card)" :value="getCardId(card)" :disabled="Boolean(skillBenchReason(card))">{{ card.name }}{{ skillBenchReason(card) ? " · terkunci" : "" }}</option></select>
                   </label>
                   <p v-if="skillTargetSpec(selectedSpecialSkill).max_targets > 1">Pilih 1–{{ skillTargetSpec(selectedSpecialSkill).max_targets }} target yang berbeda.</p>
 
@@ -8900,7 +8887,7 @@ onUnmounted(
                     !selectedSpecialSkill ||
                     !specialSkillReadyState(selectedSpecialSkill).ready ||
                     (skillTargetSpec(selectedSpecialSkill).choices?.length && !selectedSpecialOption) ||
-                    (skillTargetSpec(selectedSpecialSkill).needs_bench && !selectedSpecialBenchId) ||
+                    (skillTargetSpec(selectedSpecialSkill).needs_bench && (!selectedSpecialBenchId || selectedSkillBenchReason)) ||
                     (selectedSpecialTargetRequired && !selectedSpecialTarget)
                   "
                   @click="submitSpecialSkill"
@@ -8922,7 +8909,7 @@ onUnmounted(
           @click.self="closeComboAttackModal"
         >
           <div class="action-detail-backdrop" @click="closeComboAttackModal" />
-          <section class="combo-attack-modal" role="dialog" aria-modal="true" aria-labelledby="combo-picker-title" tabindex="-1" @click.stop>
+          <section class="combo-attack-modal arena-frame" role="dialog" aria-modal="true" aria-labelledby="combo-picker-title" tabindex="-1" @click.stop>
             <header class="combo-attack-header">
               <div>
                 <span class="eyebrow">COMBO ATTACK • {{ comboActionPointCost }} POIN GILIRAN</span>
@@ -9009,7 +8996,7 @@ onUnmounted(
         >
           <div class="action-detail-backdrop" @click="closeFusionModal" />
 
-          <section class="fusion-modal" role="dialog" aria-modal="true" aria-labelledby="fusion-picker-title" tabindex="-1" @click.stop>
+          <section class="fusion-modal arena-frame" role="dialog" aria-modal="true" aria-labelledby="fusion-picker-title" tabindex="-1" @click.stop>
             <header class="fusion-modal-header">
               <div>
                 <span class="eyebrow">FUSION • PILIH RESEP → PERIKSA MATERIAL → KONFIRMASI</span>
@@ -9039,7 +9026,7 @@ onUnmounted(
 
             <div v-else-if="!readyFusions.length" class="fusion-empty-state">
               <strong>Belum ada Fusion yang siap.</strong>
-              <span>Fusion hanya akan muncul ketika seluruh material requirement sudah terpenuhi.</span>
+              <span>{{ fusionUnavailableReason }}</span>
               <button type="button" class="fusion-retry-btn" @click="loadPlayerFusions">
                 CEK MATERIAL LAGI
               </button>
@@ -9167,7 +9154,7 @@ onUnmounted(
                       >
                         <span>{{ String(material.zone || "").toUpperCase() }}</span>
                         <strong>{{ material.name }}</strong>
-                        <small>{{ material.card_code }}</small>
+                        <small>{{ displayCardCode(material) }}</small>
                         <em>
                           HP {{ material.base_hp }} • ATK {{ material.attack }} • DEF {{ material.defense }}
                         </em>
@@ -9398,7 +9385,7 @@ onUnmounted(
                         <strong>
                           {{
                             material.name ||
-                            material.card_code ||
+                            displayCardCode(material) ||
                             "Material"
                           }}
                         </strong>
@@ -9481,6 +9468,7 @@ onUnmounted(
         :review="panelReview"
         :busy="actionLoading"
         @choose="choosePanelAction"
+        @inspect-skill="openSpecialSkillModal()"
         @confirm="confirmPanelAction"
         @cancel="pendingPanelAction = null"
         @cancel-summon="cancelSummon"
@@ -9506,7 +9494,7 @@ onUnmounted(
 
           <section
             class="
-              question-card
+              question-card arena-frame
             "
             @click.stop
             @pointerdown.stop
@@ -9701,7 +9689,7 @@ onUnmounted(
 
       <!-- WINNER -->
       <QuizBonusChoices v-if="questionResult === 'correct' && questionRewardChoices.length && bonusChoiceRoundId && !battleFinished"
-        :options="bonusChoiceOptions" :busy="bonusChoiceSubmitting" :selected-code="bonusChoiceSelectedCode" :player-name="playerName"
+        :options="bonusChoiceOptions" :paused="teacherPaused" :busy="bonusChoiceSubmitting" :selected-code="bonusChoiceSelectedCode" :player-name="playerName"
         :explanation="questionLearningEnabled ? currentQuestion?.explanation : ''" @choose="chooseQuestionBonus"/>
 
       <Transition name="question">
@@ -10519,6 +10507,7 @@ button {
   gap: 16px;
 }
 
+.opponent-inspect-button{display:flex;align-items:center;gap:7px;padding:9px 11px;margin:0 0 8px;border:1px solid #bad6c2;border-radius:9px;background:#f0f8e8;color:#24653d;font:700 11px Inter,Arial,sans-serif;cursor:pointer;white-space:nowrap}.opponent-inspect-button b{background:#dceccf;padding:2px 5px;border-radius:4px}.opponent-inspect-button:focus-visible{outline:3px solid #2c8798;outline-offset:3px}.opponent-inspect-button:disabled{opacity:.55;cursor:default}
 .player-avatar {
   width: 74px;
   height: 74px;
@@ -18083,3 +18072,5 @@ h2 {
 @media(max-width:760px){.deck-slots{grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible}.battle-stage{grid-template-columns:repeat(2,minmax(0,1fr))}.special-skill-tabs{grid-template-columns:1fr}.special-skill-tab{padding:14px}.special-skill-tab strong{font-size:15px}.special-modal-actions{grid-template-columns:minmax(65px,.4fr) minmax(0,1fr)}.battle-action-receipt{font-size:11px;padding:12px}.fusion-history-fab{right:12px}}
 @media(prefers-reduced-motion:reduce){.target-picker-enter-active,.target-picker-leave-active{transition:none}}
 </style>
+
+<style src="../components/battle/player-arena.css" scoped></style>

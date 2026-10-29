@@ -1,7 +1,8 @@
 <script setup>
+defineOptions({inheritAttrs:false});
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 import { supabase } from "../lib/supabase";
 
@@ -10,14 +11,18 @@ import { useBattleSession } from "../composables/battle/useBattleSession";
 import { useBattleUiSync } from "../composables/battle/useBattleUiSync";
 import { usePublicBattleToasts } from '../composables/battle/usePublicBattleToasts.js';
 
+import { usePublicCardSkills } from "../composables/battle/usePublicCardSkills.js";
+import "../components/battle/arena-theme.css";
 import PublicActiveField from "../components/battle/PublicActiveField.vue";
 import PublicBattleMusic from '../components/battle/PublicBattleMusic.vue';
+import BattlePauseNotice from '../components/battle/BattlePauseNotice.vue';
 import PublicSkillCinematic from '../components/battle/PublicSkillCinematic.vue';
 import PublicQuizDisplay from '../components/battle/PublicQuizDisplay.vue';
-import { isPublicBattleLayout, normalizePublicBattleLayout } from "../utils/publicBattleLayouts";
+import { PUBLIC_BATTLE_VIEWS, isPublicBattleView, normalizePublicBattleLayout } from "../utils/publicBattleLayouts";
 
 
 const route = useRoute();
+const router = useRouter();
 
 const routeCode = computed(() =>
   String(route.params.code ?? "")
@@ -64,9 +69,8 @@ const latestQuizEvent = ref(null);
 const latestSkillEvent = ref(null);
 let refreshingPublicBattle = false;
 // The shared link also carries the choice for installations awaiting migration 026.
-const publicLayout = computed(() => isPublicBattleLayout(route.query.layout)
-  ? route.query.layout
-  : normalizePublicBattleLayout(battle.value?.public_layout));
+const publicLayout = computed(() => isPublicBattleView(route.query.layout)
+  ? route.query.layout : normalizePublicBattleLayout(battle.value?.public_layout));
 const publicPageRef = ref(null);
 const fullscreenActive = ref(false);
 let statusPollTimer = null;
@@ -751,6 +755,8 @@ const allP2Cards = computed(() => [
 
   ...player2Graveyard.value,
 ]);
+
+usePublicCardSkills(battle, computed(() => [...allP1Cards.value, ...allP2Cards.value]));
 
 const findLiveDraggingCard = (playerKey) => {
   const state = liveUi[playerKey];
@@ -1530,22 +1536,10 @@ const startCombatAnimation = async (event) => {
 
   activeFieldRef.value?.captureCardRects?.();
 
-  const [attackerCard, targetCard, rects] = await Promise.all([
+  const [attackerCard, targetCard] = await Promise.all([
     fetchBattleCardById(attackerCardId),
 
     targetCardId ? fetchBattleCardById(targetCardId) : Promise.resolve(null),
-
-    resolveCombatRects({
-      sourcePlayer,
-
-      targetPlayer,
-
-      attackerCardId,
-
-      targetCardId,
-
-      attackMode,
-    }),
   ]);
 
   resetCombatAnimation();
@@ -1589,9 +1583,9 @@ const startCombatAnimation = async (event) => {
 
     phase: "avatar",
 
-    fromRect: rects.fromRect,
+    fromRect: null,
 
-    toRect: rects.toRect,
+    toRect: null,
 
     baseAttack: Number(payload.base_attack ?? 0) || 0,
 
@@ -1629,6 +1623,13 @@ const startCombatAnimation = async (event) => {
     waterShieldPercent:
       Number(payload.water_shield_reduction_percent ?? 0) || 0,
   };
+
+  // Promote the accepted source/target to the duel before measuring. Otherwise
+  // an unselected target's roster thumbnail becomes the animation destination.
+  const animation = combatAnimation.value;
+  const rects = await resolveCombatRects({ sourcePlayer, targetPlayer, attackerCardId, targetCardId, attackMode });
+  if (combatAnimation.value !== animation) return;
+  Object.assign(animation, rects);
 
   // Attack cue dimulai bersamaan dengan cinematic.
   void playSound("attack", combatAnimation.value.powerStrikeApplied ? 1 : 0.82);
@@ -1985,6 +1986,7 @@ onUnmounted(async () => {
 
 <template>
   <main ref="publicPageRef" class="public-battle-page">
+    <BattlePauseNotice :battle="battle"/>
     <div v-if="loading" class="public-state">Loading Battle...</div>
 
     <div v-else-if="error" class="public-state error">
@@ -2027,6 +2029,8 @@ onUnmounted(async () => {
         </strong>
       </button>
 
+      <label class="public-layout-control"><span>Layout penonton</span><select :value="publicLayout" @change="router.replace({query:{...route.query,layout:$event.target.value}})" aria-label="Layout penonton"><option v-for="view in PUBLIC_BATTLE_VIEWS" :key="view.id" :value="view.id">{{view.name}}</option></select></label>
+
       <PublicBattleMusic :ducked="combatAnimation.active || ultimateAnimation.active || showQuestion" />
 
       <button
@@ -2066,7 +2070,7 @@ onUnmounted(async () => {
         <div v-if="fusionHistoryOpen" class="fusion-history-overlay">
           <div class="fusion-history-backdrop" @click="closeFusionHistory" />
 
-          <section class="fusion-history-modal" @click.stop>
+          <section class="fusion-history-modal arena-frame" role="dialog" aria-modal="true" aria-label="Fusion Timeline" @click.stop>
             <header class="fusion-history-header">
               <div>
                 <span> NEXUS • BATTLE HISTORY </span>
@@ -2076,7 +2080,7 @@ onUnmounted(async () => {
                 <p>Live record semua Fusion, Necro Fusion, dan Fusion Chain.</p>
               </div>
 
-              <button type="button" @click="closeFusionHistory">✕</button>
+              <button type="button" class="modal-close" aria-label="Tutup Fusion Timeline" @click="closeFusionHistory">✕</button>
             </header>
 
             <div v-if="fusionHistoryLoading" class="fusion-history-state">
@@ -2197,7 +2201,7 @@ onUnmounted(async () => {
 
       <div class="tbc-public-frame">
         <PublicQuizDisplay :battle="battle" :question="currentQuestion" :round="currentQuestionRound" :active="showQuestion" :loading="questionLoading" :error="questionError || ''" :event="latestQuizEvent" />
-        <PublicSkillCinematic :battle="battle" :live-ui="liveUi" :event="latestSkillEvent" :paused="showQuestion" :cards="[...player1Active, ...player2Active, ...player1Bench, ...player2Bench]" />
+        <PublicSkillCinematic :battle="battle" :live-ui="liveUi" :event="latestSkillEvent" :paused="showQuestion || battle.teacher_paused" :cards="[...player1Active, ...player2Active, ...player1Bench, ...player2Bench]" />
         <PublicActiveField
           :layout="publicLayout"
           ref="activeFieldRef"
@@ -2482,20 +2486,21 @@ onUnmounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding-bottom:44px;
   width: 100vw;
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
   overscroll-behavior: none;
   color: #fff9e7;
-  background: #030d22;
+  background: #e7f4fc url('/images/battle-arena/stadium-v1.webp') center / cover;
   font-family: Inter, system-ui, sans-serif;
 }
 
 .tbc-public-frame {
   position: relative;
-  width: min(100vw, calc(100dvh * 1540 / 810));
-  aspect-ratio: 1540 / 810;
+  width: min(100vw, calc((100dvh - 44px) * 16 / 9));
+  aspect-ratio: 16 / 9;
   container-type: size;
   flex: none;
   overflow: hidden;
@@ -3894,4 +3899,15 @@ onUnmounted(async () => {
 
   .fusion-history-trigger { bottom: 31px; }
 }
+</style>
+
+<style scoped>
+.public-battle-page{isolation:isolate;background:#c0e2ef}.public-battle-page::before{content:'';position:absolute;inset:-25px;z-index:-1;background:url('/images/battle-arena/stadium-v1.webp') center/cover;filter:blur(14px) brightness(.65)}.public-battle-page::after{content:'';position:fixed;inset:auto 0 0;height:44px;background:#f0f9fff5;border-top:1px solid #abcfe3;z-index:9400;pointer-events:none}.tbc-orientation-hint{color:#fff;background:#143d67e6;padding:10px 16px;border-radius:8px}.public-battle-page :deep(.battle-pause-notice){top:auto;bottom:50px;width:min(620px,calc(100% - 24px));padding:8px 16px}
+.public-layout-control{position:fixed;z-index:9500;bottom:5px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:3px 8px;border:1px solid #b9d9ea;border-radius:8px;background:#f4fbfff5;color:#204c79;font-size:10px;font-weight:700}
+.public-layout-control select{max-width:170px;background:transparent;border:0;color:#103568;font:700 11px Inter,Arial,sans-serif;padding:4px;cursor:pointer}.public-layout-control select:focus-visible{outline:2px solid #147ead;border-radius:3px}
+.public-sound-control,.public-fullscreen-control,.fusion-history-trigger{color:#21567e;background:#f4fbfff5;border-color:#bbdceb;box-shadow:0 2px 8px #10386b22;bottom:8px;min-height:28px;border-radius:8px}
+.public-sound-control:hover,.public-fullscreen-control:hover,.fusion-history-trigger:hover{background:#e2f5ff;border-color:#2888b8}.public-sound-control:focus-visible,.public-fullscreen-control:focus-visible,.fusion-history-trigger:focus-visible{outline-color:#087ed0}
+.fusion-history-trigger{left:235px}.fusion-history-trigger>b{background:#e8dcfc;color:#6536a8}.public-battle-page :deep(.public-music){bottom:8px}.public-battle-page :deep(.public-music summary){background:#f4fbfff5;color:#21567e;border-color:#bbdceb;min-height:28px;border-radius:8px}
+.fusion-history-overlay{background:#0b315b55;backdrop-filter:blur(5px)}.fusion-history-modal{color:#173b68}.fusion-history-header{background:transparent;border-bottom-color:#c8dfef}.fusion-history-header h2{color:#143e74}.fusion-history-header span{color:#1678ac}.fusion-history-header p{color:#537796}.fusion-history-entry{background:#f1f8ff;border-color:#c7def0;color:#244775}.fusion-history-entry h3{color:#143e74}.fusion-history-state{color:#42688b}
+@media(max-width:1000px){.fusion-history-trigger{left:80px}.public-battle-page :deep(.public-music){left:40px}.public-battle-page :deep(.public-music summary strong),.public-sound-control strong,.fusion-history-trigger strong,.public-fullscreen-control strong{display:none}.public-layout-control>span{display:none}}
 </style>
