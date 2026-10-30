@@ -4,7 +4,7 @@ import { defineAsyncComponent, computed, onMounted, onUnmounted, ref, watch } fr
 import { useRouter } from 'vue-router';
 import { supabase } from '../../lib/supabase';
 import { compressImageFile, IMAGE_UPLOAD_LIMITS } from '../../lib/compressImage';
-import { QUIZ_MODES, blankQuestion, validateQuestion, questionPayload, questionDraft, checkPreviewAnswer, codeLines, shuffleItems } from '../../lib/questions/questionModel.js';
+import { QUESTION_CATEGORIES, QUIZ_MODES, blankQuestion, validateQuestion, questionPayload, questionDraft, checkPreviewAnswer, codeLines, shuffleItems } from '../../lib/questions/questionModel.js';
 import StructuredBlockQuestion from './StructuredBlockQuestion.vue';
 const BlockWorkspace = defineAsyncComponent(() => import('./BlockWorkspace.vue')); 
 import {EMPTY_WORKSPACE} from '../../lib/questions/scratchBlocks.js';
@@ -22,7 +22,7 @@ const preview=ref(null), previewBlocks=ref([]), previewResult=ref(null);
 let imageRequest=0;
 const busy=computed(()=>loading.value||saving.value||compressing.value);
 const errors=computed(()=>validateQuestion(draft.value,imagePreview.value));
-const categories=['scratch','block_coding','programming_basics','programming','javascript','html','css','database','algorithm','general'];
+const categories=QUESTION_CATEGORIES;
 function revokePreview(){if(imagePreview.value.startsWith('blob:'))URL.revokeObjectURL(imagePreview.value);}
 function clearImage(){imageRequest++;revokePreview();imageFile.value=null;imagePreview.value='';imageUrl.value='';imageName.value='';}
 async function pickImage(file){

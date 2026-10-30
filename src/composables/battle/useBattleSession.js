@@ -1144,6 +1144,14 @@ export const useBattleSession =
 
 
           if (version !== questionRoundVersion || battle.value?.id !== sessionId || !questionActive.value) return null;
+          // A filtered-out RLS row is a successful HTTP response with null data.
+          // Never invent a local start time or let a question silently run untimed.
+          if (!questionRound || !Number.isFinite(Date.parse(questionRound.timer_started_at ?? questionRound.created_at ?? ''))) {
+            currentQuestionRound.value = null;
+            const missingClock = new Error('Waktu kuis belum dapat dimuat. Coba muat ulang soal.');
+            missingClock.code = 'QUIZ_CLOCK_UNAVAILABLE';
+            throw missingClock;
+          }
           currentQuestionRound.value =
             questionRound;
 
@@ -1191,7 +1199,7 @@ export const useBattleSession =
           );
 
 
-          questionError.value = playerErrorMessage(
+          questionError.value = err?.code === 'QUIZ_CLOCK_UNAVAILABLE' ? err.message : playerErrorMessage(
             err,
             "Coding challenge belum dapat dimuat. Coba lagi sebentar.",
           );

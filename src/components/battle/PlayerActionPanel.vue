@@ -9,7 +9,7 @@ const props = defineProps({
   review: { type: Object, default: null },
   busy: Boolean,
 });
-const emit = defineEmits(['choose', 'confirm', 'cancel', 'cancel-summon', 'inspect-skill']);
+const emit = defineEmits(['choose', 'confirm', 'cancel', 'cancel-summon', 'inspect-skill','select-source']);
 const drawer = ref(null);
 const confirmation = ref(null);
 const drawerOpen = ref(false);
@@ -49,6 +49,8 @@ function inspect(action) {
   inspected.value = action.key; drawerOpen.value = true;
 }
 function openMore() { inspected.value = null; drawerOpen.value = true; }
+let requestedSource = null;
+function selectSource(id) { requestedSource=id;emit('select-source',id); }
 function closeDrawer() { drawerOpen.value = false; }
 watch(drawerOpen, async open => {
   await nextTick();
@@ -60,7 +62,11 @@ watch(() => props.review, async review => {
   if (review && !confirmation.value?.open) confirmation.value?.showModal();
   else if (!review) confirmation.value?.close();
 });
-watch(() => props.context.scope, closeDrawer);
+watch(() => props.context.scope, (next,previous) => {
+  const keepOpen=requestedSource&&props.context.cardId===requestedSource&&String(next).split(':')[0]===String(previous).split(':')[0]&&!props.context.interrupted;
+  requestedSource=null;
+  if(!keepOpen)closeDrawer();
+});
 watch(() => props.context.interrupted, interrupted => { if (interrupted) closeDrawer(); });
 watch(panel, element => {
   sizeObserver?.disconnect();
@@ -122,6 +128,7 @@ onBeforeUnmount(() => { sizeObserver?.disconnect(); clearTimeout(noticeTimer); }
       </template>
       <template v-else>
         <p class="command-description">Pilih aksi sesuai rencanamu. Tanda hijau berarti siap; aksi yang redup menampilkan syarat yang belum terpenuhi.</p>
+        <label v-if="context.sources?.length" class="command-source-picker">Kartu sumber aksi<select :value="context.cardId || ''" :disabled="busy || context.interrupted" @change="selectSource($event.target.value)"><option value="" disabled>Pilih satu kartu Active…</option><option v-for="card in context.sources" :key="card.id" :value="card.id" :disabled="card.disabled">{{ card.name }} · {{ card.element }}{{ card.disabled?' · tidak siap':'' }}</option></select><small>Untuk Synergy, pilih satu sumber. Kartu Active lain dengan tipe yang sama dihitung otomatis.</small></label>
         <details v-if="context.pilotRules" class="command-pilot-rules">
           <summary>Aturan giliran, Bench, dan Fusion</summary>
           <ul>
@@ -154,6 +161,7 @@ onBeforeUnmount(() => { sizeObserver?.disconnect(); clearTimeout(noticeTimer); }
 </template>
 
 <style scoped>
+.command-source-picker{display:grid;gap:8px;margin:14px 0 18px;padding:16px 18px;background:#eef8ff;border:1px solid #bed9ed;border-radius:12px;color:#173c6a;font-size:13px;font-weight:750}.command-source-picker select{width:100%;min-width:0;padding:11px 12px;border:1px solid #aac7de;border-radius:8px;background:white;color:#173c6a;font:inherit}.command-source-picker small{font-size:11px;line-height:1.6;font-weight:500;color:#58738b}.command-source-picker select:focus-visible{outline:3px solid #e6b74d;outline-offset:2px}
 
 .player-action-panel, .battle-command-dialog {
   --command-ink: #203d36;

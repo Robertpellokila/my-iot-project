@@ -42,7 +42,7 @@ BEGIN
  RESET ROLE;
  PERFORM set_config('request.jwt.claim.sub',admin_id::text,true);
  r:=admin_battle_access(code);c1:=r->>'player1_access_code';c2:=r->>'player2_access_code';
- IF length(c1)<>12 OR length(c2)<>12 OR c1=c2 OR r ?| ARRAY['token','player1_token','player2_token'] THEN RAISE EXCEPTION 'Teacher codes invalid';END IF;
+ IF length(c1)<>6 OR length(c2)<>6 OR c1=c2 OR r ?| ARRAY['token','player1_token','player2_token'] THEN RAISE EXCEPTION 'Teacher codes invalid';END IF;
  IF NOT (redeem_battle_player_code(c1,code,'p1')->>'ok')::boolean OR (redeem_battle_player_code(c1,code,'p2')->>'ok')::boolean OR (redeem_battle_player_code(c1,'another-battle','p1')->>'ok')::boolean THEN RAISE EXCEPTION 'Private code side/battle isolation failed';END IF;
  FOR n IN 1..16 LOOP r:=redeem_battle_player_code('000000000000',code,'p1');END LOOP;
  IF r->>'code' IS DISTINCT FROM 'RATE_LIMIT' THEN RAISE EXCEPTION 'Private code rate limit missing';END IF;

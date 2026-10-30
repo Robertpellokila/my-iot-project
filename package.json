@@ -10,7 +10,10 @@
     "test:cards": "node --test tests/card-generator/*.test.js",
     "test:cards:visual": "playwright test -c playwright.card-generator.config.js",
     "audit:cards": "node scripts/card-generator/audit.mjs",
-    "card:masters": "node scripts/card-generator/export-masters.mjs"
+    "card:masters": "node scripts/card-generator/export-masters.mjs",
+    "seed:questions": "node scripts/questions/build-question-seed.mjs",
+    "seed:questions:images": "node scripts/questions/render-question-images.mjs",
+    "test:question-seed": "node --test tests/questions/pilotQuestionSeed.test.js && node tests/questions/pilotQuestionSeedDatabase.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "1.1.1",

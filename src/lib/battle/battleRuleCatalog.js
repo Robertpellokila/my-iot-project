@@ -15,15 +15,18 @@ export const EFFECTS={
 export const normalizeSynergyType=value=>String(value??'').trim().toLowerCase()==='ice'?'ice':normalizeTcgType(value);
 export const effectSummary=(rule,tier=rule?.kind==='synergy'?2:1)=>EFFECTS[rule?.effect_type]?.describe(Number(rule?.effect_values?.[tier]??0))||'Aturan efek belum tersedia.';
 export function synergyRuleState(rules,selected,cards=[],used={}){
- const element=normalizeSynergyType(selected?.element),rule=rules.find(item=>item.element===element);
+ const element=normalizeSynergyType(selected?.element),rule=rules.find(item=>normalizeSynergyType(item.element)===element&&item.enabled!==false);
  const eligible=card=>card&&(!card.zone||card.zone==='active')&&!card.exhausted&&Number(card.current_hp??card.currentHp??card.hp??card.base_hp??0)>0;
  const points=cards.filter(card=>eligible(card)&&normalizeSynergyType(card.element)===element).length;
  const alreadyUsed=Object.entries(used).some(([key,value])=>normalizeSynergyType(key)===element&&value===true);
  const threshold=Number(rule?.min_cards??2),ready=Boolean(eligible(selected)&&rule&&points>=threshold&&!alreadyUsed);
- return {icon:rule?.icon||'✧',name:rule?.name||'Synergy',element,points,supported:!!rule,used:alreadyUsed,ready,
+ const label=element?element.charAt(0).toUpperCase()+element.slice(1):'';
+ const reason=!selected?'Pilih satu kartu Active sebagai sumber Synergy.':!eligible(selected)?'Pilih kartu Active yang belum exhausted dan belum KO.':!rule?`Synergy ${label} belum diaktifkan pada aturan battle ini.`:alreadyUsed?`Synergy ${label} sudah dipakai pada match ini. Jatahnya sekali per tipe.`:points<threshold?`Baru ${points} dari ${threshold} kartu Active ${label} yang siap. Kartu Bench dan Graveyard tidak dihitung.`:'';
+ return {icon:rule?.icon||'✧',name:rule?.name||'Synergy',element,points,threshold,reason,supported:!!rule,used:alreadyUsed,ready,
+  summary:selected?`${points} kartu Active ${label} · minimal ${threshold}`:'Pilih kartu sumber untuk melihat jumlah dan efeknya.',
   status:!selected?'Pilih kartu':!eligible(selected)?'Kartu tidak siap':!rule?'Tidak diaktifkan':alreadyUsed?'Sudah dipakai':points<threshold?`${points}/${threshold} kartu`:'Siap',
   effect:!selected?'Pilih kartu Active untuk melihat Synergy.':!eligible(selected)?'Pilih kartu Active yang belum exhausted dan belum KO.':!rule?'Synergy tipe ini tidak diaktifkan pada battle ini.':effectSummary(rule,Math.max(2,Math.min(4,points))),
-  detail:rule?`Perlu ${threshold} kartu Active bertipe sama. Sekali per tipe dalam satu match. ${rule.description||''}`:'',
+  detail:rule?`Hanya kartu Active yang hidup dan belum exhausted. Sekali per tipe dalam satu match. ${rule.description||''}`:'',
  };
 }
 export const ruleCode=name=>String(name??'').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,64);

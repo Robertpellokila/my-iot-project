@@ -2,15 +2,17 @@
 import SearchableSelect from "../components/SearchableSelect.vue";
 import SkillIcon from "../components/battle/SkillIcon.vue";
 import BattleGuide from "../components/BattleGuide.vue";
+import PublicComboCatalog from "../components/PublicComboCatalog.vue";
 import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { savePlayerAccess } from "../lib/battle/playerAccess.js";
+import { savePlayerAccess, normalizePlayerCode, isPlayerCodeValid, PLAYER_CODE_HELP } from "../lib/battle/playerAccess.js";
 import { supabase } from "../lib/supabase";
 import { normalizeTcgType } from "../utils/tcgTypes";
 
 const route = useRoute();
 const router = useRouter();
-const page = computed(() => ({ "/": "home", "/cards": "cards", "/fusion": "fusion", "/skills": "skills", "/play": "play" }[route.path] ?? "home"));
+const page = computed(() => ({ "/": "home", "/cards": "cards", "/fusion": "fusion", "/skills": "skills", "/combo": "combo", "/play": "play" }[route.path] ?? "home"));
+const comboRecipeCount = ref(null);
 const cards = ref([]);
 const featuredCards = ref([]);
 const featuredLoading = ref(true);
@@ -317,7 +319,8 @@ const joinGame = async () => {
       if(error)throw error;if(!data?.ok)throw new Error(data?.message||'Battle tidak tersedia.');
       await router.push(`/battle/${encodeURIComponent(data.battle.code)}`);return;
     }
-    const {data,error}=await supabase.rpc('redeem_battle_player_code',{p_access_code:entered});
+    if(!isPlayerCodeValid(entered)) { joinError.value=PLAYER_CODE_HELP; return; }
+    const {data,error}=await supabase.rpc('redeem_battle_player_code',{p_access_code:normalizePlayerCode(entered)});
     if(error)throw error;if(!data?.ok)throw new Error(data?.message||'Kode pribadi tidak valid.');
     savePlayerAccess(data.code,data.player,data.token);
     await router.push({name:'player-battle',params:{code:data.code,player:data.player}});
@@ -330,12 +333,12 @@ const joinGame = async () => {
   <main class="timedoor-site">
     <header class="site-nav">
       <RouterLink class="wordmark" to="/"><span class="td-symbol">t</span><span>timedoor<small>BATTLE CARD</small></span></RouterLink>
-      <nav aria-label="Navigasi utama"><RouterLink to="/" :class="{ active: page === 'home' }">Home</RouterLink><RouterLink to="/cards" :class="{ active: page === 'cards' }">Kartu</RouterLink><RouterLink to="/fusion" :class="{ active: page === 'fusion' }">Fusion</RouterLink><RouterLink to="/skills" :class="{ active: page === 'skills' }">Skill</RouterLink></nav>
+      <nav aria-label="Navigasi utama"><RouterLink to="/" :class="{ active: page === 'home' }">Home</RouterLink><RouterLink to="/cards" :class="{ active: page === 'cards' }">Kartu</RouterLink><RouterLink to="/fusion" :class="{ active: page === 'fusion' }">Fusion</RouterLink><RouterLink to="/skills" :class="{ active: page === 'skills' }">Skill</RouterLink><RouterLink to="/combo" :class="{ active: page === 'combo' }">Combo</RouterLink></nav>
       <RouterLink class="nav-play" to="/play">Masuk battle <span>↗</span></RouterLink>
     </header>
 
     <section v-if="page === 'home'" class="hero">
-      <div class="hero-copy"><span class="eyebrow">TIMEDOOR ACADEMY · CARD BATTLE</span><h1>Belajar strategi.<br><em>Menangkan battle.</em></h1><p>Kumpulkan kartu, temukan resep fusion, dan susun langkahmu. Pilih kartu favorit sebelum masuk arena.</p><div class="hero-actions"><button @click="playNow">Mainkan battle <span>→</span></button><button type="button" class="guide-link" @click="showGuide">Panduan bermain ↓</button><RouterLink to="/cards">Lihat semua kartu <b>↗</b></RouterLink></div><div class="hero-counts"><span><b>{{ normalCards.length }}</b> kartu</span><i></i><span><b>{{ recipes.length }}</b> fusion</span><i></i><span><b>{{ activeSkills.length }}</b> skill battle</span></div></div>
+      <div class="hero-copy"><span class="eyebrow">TIMEDOOR ACADEMY · CARD BATTLE</span><h1>Belajar strategi.<br><em>Menangkan battle.</em></h1><p>Kumpulkan kartu, temukan resep fusion, dan susun Combo timmu. Pilih kartu favorit sebelum masuk arena.</p><div class="hero-actions"><button @click="playNow">Mainkan battle <span>→</span></button><button type="button" class="guide-link" @click="showGuide">Panduan bermain ↓</button><RouterLink to="/cards">Lihat semua kartu <b>↗</b></RouterLink></div><div class="hero-counts"><span><b>{{ normalCards.length }}</b> kartu</span><i></i><span><b>{{ recipes.length }}</b> fusion</span><i></i><span><b>{{ activeSkills.length }}</b> skill battle</span><i></i><RouterLink class="hero-combo-count" to="/combo"><b>{{ comboRecipeCount ?? '—' }}</b> resep Combo ↗</RouterLink></div></div>
       <div class="hero-scene" aria-hidden="true"><div class="scene-shape shape-star">✦</div><div class="scene-shape shape-code">‹ ›</div><div class="scene-card card-shadow">TD</div><div class="scene-card card-main"><span>✦</span><b>TIMEDOOR<br>CHAMPION</b><small>STRATEGY STARTS HERE</small></div><div class="scene-chip chip-yellow">PLAY SMART</div><div class="scene-chip chip-blue">FUSION READY</div></div>
       <div class="hero-bottom">ONE-STOP EDUTECH CENTER FOR KIDS AND TEENS <span>✦</span></div>
     </section>
@@ -354,9 +357,10 @@ const joinGame = async () => {
       </div></section>
     </section>
 
+    <PublicComboCatalog v-if="page === 'home' || page === 'combo'" :key="page" :compact="page === 'home'" :cards="cards" @catalog-count="comboRecipeCount = $event" />
     <BattleGuide v-if="page === 'home'" />
 
-    <section v-if="page === 'play'" class="play-page"><div class="play-aside"><span class="eyebrow">READY PLAYER?</span><h1>Masuk ke<br><em>battle-mu.</em></h1><p>Gunakan kode pribadi dari guru untuk bermain. Kode battle hanya membuka layar penonton.</p><div class="play-mark">T<span>×</span>D</div></div><div id="join-game" class="join-card"><span class="eyebrow">PLAYER ACCESS</span><h2>Masukkan kode</h2><p>Kode pemain pribadi langsung memilih akun Player 1 atau Player 2.</p><form @submit.prevent="joinGame"><div class="mode-tabs"><button type="button" :class="{ active: joinMode === 'battle' }" @click="joinMode = 'battle'">Tonton battle</button><button type="button" :class="{ active: joinMode === 'player' }" @click="joinMode = 'player'">Kode pribadi pemain</button></div><label class="form-field"><span>{{ joinMode === 'battle' ? 'KODE BATTLE' : 'KODE PEMAIN' }}</span><input v-model="accessCode" :placeholder="joinMode === 'battle' ? 'Contoh: A7K9Q2' : 'Masukkan kode akses pemain'" autocomplete="off" required></label><button class="submit-play" :disabled="joining">{{ joining ? 'Membuka battle…' : joinMode === 'battle' ? 'Tonton pertandingan →' : 'Masuk ke game →' }}</button><p v-if="joinError" class="form-error" role="alert">{{ joinError }}</p></form><small class="privacy-note">Kode pemain bersifat pribadi. Minta kode Player 1 atau Player 2 dari penyelenggara.</small></div></section>
+    <section v-if="page === 'play'" class="play-page"><div class="play-aside"><span class="eyebrow">READY PLAYER?</span><h1>Masuk ke<br><em>battle-mu.</em></h1><p>Gunakan kode pribadi dari guru untuk bermain. Kode battle hanya membuka layar penonton.</p><div class="play-mark">T<span>×</span>D</div></div><div id="join-game" class="join-card"><span class="eyebrow">PLAYER ACCESS</span><h2>Masukkan kode</h2><p>Kode pemain pribadi langsung memilih akun Player 1 atau Player 2.</p><form @submit.prevent="joinGame"><div class="mode-tabs"><button type="button" :class="{ active: joinMode === 'battle' }" @click="joinMode = 'battle'">Tonton battle</button><button type="button" :class="{ active: joinMode === 'player' }" @click="joinMode = 'player'">Kode pribadi pemain</button></div><label class="form-field"><span>{{ joinMode === 'battle' ? 'KODE BATTLE' : 'KODE PEMAIN' }}</span><input v-model="accessCode" :placeholder="joinMode === 'battle' ? 'Contoh: A7K9Q2' : '6 karakter · contoh K7M4Q9'" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="20" required></label><button class="submit-play" :disabled="joining">{{ joining ? 'Membuka battle…' : joinMode === 'battle' ? 'Tonton pertandingan →' : 'Masuk ke game →' }}</button><p v-if="joinError" class="form-error" role="alert">{{ joinError }}</p></form><small class="privacy-note">Kode pemain bersifat pribadi. Minta kode Player 1 atau Player 2 dari penyelenggara.</small></div></section>
 
     <section v-if="page === 'cards'" class="catalog-page"><div class="page-intro"><span class="eyebrow">KATALOG KARTU · {{ filteredCards.length }} KARTU</span><h1>Kenali timmu.</h1><p>Pilih kartu untuk melihat statistik, skill, elemen, dan cerita lengkapnya. Kartu hasil fusion ada di halaman Fusion.</p></div><label class="search"><span>⌕</span><input v-model="search" placeholder="Cari nama, kode, atau elemen"></label><div class="type-filters" aria-label="Filter tipe kartu"><button v-for="type in typeFilters" :key="type" type="button" :class="[{ active: selectedType === type }, type !== 'All' ? elementClass(type) : '']" @click="selectedType = type">{{ type === 'All' ? 'Semua tipe' : `${elementIcon(type)} ${type}` }}</button></div><div class="catalog-select-filters" aria-label="Filter katalog kartu"><label><span>RARITY</span><SearchableSelect v-model="selectedRarity"><option v-for="rarity in rarityFilters" :key="rarity" :value="rarity">{{ rarity === 'All' ? 'Semua rarity' : rarity }}</option></SearchableSelect></label><label><span>SKILL</span><SearchableSelect v-model="selectedSkill"><option v-for="skill in skillFilters" :key="skill" :value="skill">{{ skill === 'All' ? 'Semua skill' : skill }}</option></SearchableSelect></label><label><span>LEARNING ARC</span><SearchableSelect v-model="selectedLearningArc"><option v-for="arc in learningArcFilters" :key="arc" :value="arc">{{ arc === 'All' ? 'Semua arc' : arc }}</option></SearchableSelect></label></div><div v-if="!loading && !loadError" class="catalog-legend" aria-label="Panduan warna tipe dan rarity"><div class="legend-group"><b>TIPE</b><span v-for="type in typeFilters.slice(1)" :key="type" class="legend-chip" :class="elementClass(type)"><i>{{ elementIcon(type) }}</i>{{ type }}</span></div><div class="legend-group rarity-legend"><b>RARITY</b><span v-for="rarity in rarityFilters.slice(1)" :key="rarity" class="legend-chip" :class="rarityClass(rarity)"><i>{{ rarityIcon(rarity) }}</i>{{ rarity }}</span></div></div><div v-if="loading" class="empty-state">Memuat kartu…</div><div v-else-if="loadError" class="empty-state" role="alert">{{ loadError }} <button @click="loadFeatured">Coba lagi</button></div><div v-else class="unit-grid"><button v-for="card in visibleCards" :key="card.id" class="unit-card" :class="physicalCardImageUrl(card) ? 'physical-only' : [rarityClass(card.rarity), elementClass(card.element)]" type="button" :aria-label="physicalCardImageUrl(card) ? `Lihat kartu fisik ${card.name}` : `Lihat detail ${card.name}`" @click="openCard(card)"><img v-if="physicalCardImageUrl(card)" class="physical-card-image" :src="physicalCardImageUrl(card)" :alt="`Kartu fisik ${card.name}`" loading="lazy"><template v-else><div class="unit-art"><img v-if="card.image_url && /^https?:|^\//.test(card.image_url)" :src="card.image_url" :alt="card.name" loading="lazy"><span v-else>{{ card.image_url || card.avatar_url || '✦' }}</span><b :class="elementClass(card.element)"><i>{{ elementIcon(card.element) }}</i>{{ card.element || 'NEUTRAL' }}</b><i class="rarity-chip" :class="rarityClass(card.rarity)"><span>{{ rarityIcon(card.rarity) }}</span>{{ card.rarity || 'CARD' }}</i></div><div class="unit-info"><small>{{ card.card_code || 'TIMEDOOR CARD' }}</small><h2>{{ card.name }}</h2><div class="unit-stats"><span>HP <b>{{ card.hp ?? '—' }}</b></span><span>ATK <b>{{ card.attack ?? '—' }}</b></span><span>DEF <b>{{ card.defense ?? '—' }}</b></span></div><div class="unit-skills-preview"><span v-for="(skill, skillIndex) in skillsForCard(card).slice(0, 2)" :key="skill.id || skillIndex" :title="skill.description || skill.effect || skill.name">✦ {{ skill.name }}</span><span v-if="!skillsForCard(card).length">Kartu strategi</span></div></div></template></button><div v-if="!visibleCards.length && !loading" class="empty-state">Kartu tidak ditemukan.</div></div><nav v-if="pageCount > 1" class="catalog-pagination" aria-label="Halaman kartu"><button type="button" :disabled="currentPage === 1" @click="setPage(currentPage - 1)">← Sebelumnya</button><span>Halaman <b>{{ currentPage }}</b> dari {{ pageCount }}</span><button type="button" :disabled="currentPage === pageCount" @click="setPage(currentPage + 1)">Berikutnya →</button></nav></section>
 
@@ -605,4 +609,18 @@ const joinGame = async () => {
 @media(max-width:760px){.fusion-grid{grid-template-columns:1fr}.fusion-flow{grid-template-columns:minmax(0,1fr) 34px minmax(116px,.8fr)}.fusion-recipe{padding:16px}.recipe-title{font-size:18px}}
 @media(max-width:520px){.fusion-flow{grid-template-columns:1fr;gap:10px}.fusion-transform{grid-template-columns:auto auto auto;gap:7px;justify-content:center}.fusion-transform b{margin:0}.fusion-transform em{transform:rotate(90deg)}.fusion-result-card{height:240px;min-height:240px}.fusion-ingredients{min-height:110px}.recipe-title{font-size:19px}}
 @media(max-width:620px){.unit-card.physical-only{border-radius:11px}.fusion-result-card.physical-result-only{width:min(100%,190px)}}
+/* Keep all public catalogs reachable with the expanded navigation. */
+.hero-counts{flex-wrap:wrap}.hero-counts .hero-combo-count{color:inherit;text-decoration:none;font-size:inherit}.hero-combo-count:hover{text-decoration:underline}
+@media(max-width:900px) and (min-width:621px){.site-nav{padding-left:24px;padding-right:24px;gap:20px}.site-nav nav{gap:20px}}
+@media(max-width:620px){.timedoor-site{padding-top:108px}.site-nav{height:108px;display:grid;grid-template-columns:1fr auto;grid-template-rows:60px 48px;gap:0 14px;padding:0 16px}.site-nav .wordmark{grid-column:1;grid-row:1}.site-nav .nav-play{grid-column:2;grid-row:1}.site-nav nav{grid-column:1/-1;grid-row:2;display:flex;justify-content:space-between;gap:12px;border-top:1px solid #e0eadc;height:100%;align-items:center}.site-nav nav a{display:flex;align-items:center;justify-content:center;min-height:44px;font-size:12px;flex:1}.hero-counts{gap:8px}.hero-counts,.hero-counts .hero-combo-count{font-size:10px}.timedoor-site :deep(.battle-guide),.timedoor-site :deep(.guide-explanation){scroll-margin-top:124px}}
+@media(max-width:620px){
+  .hero{min-height:0;padding:44px 23px 58px}
+  .hero h1{font-size:clamp(39px,12vw,49px)}
+  .hero-scene{position:relative;top:auto;right:auto;width:100%;height:300px;margin:18px auto 0}
+  .hero-actions{gap:18px}
+  .hero-counts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px;margin-top:30px}
+  .hero-counts>i{display:none}
+  .hero-counts>span,.hero-counts .hero-combo-count{display:flex;align-items:baseline;font-size:12px}
+  .hero-counts b{font-size:22px;margin-right:7px}
+}
 </style>

@@ -1,4 +1,10 @@
-# Timedoor card catalog seed
+# Seeds
+
+## Coding questions — pilot v2
+
+`coding_questions_pilot_v2.sql` adds 60 questions across Easy, Medium, Hard and all five quiz authoring modes. Includes Scratch/code illustrations, private workspace keys, hints and explanations. Reruns preserve teacher edits and archives. See [the question seeder guide](../../docs/question-seeder.md) for installation, durations, authoring and validation.
+
+## Timedoor card catalog seed
 
 `timedoor_card_catalog.sql` is the catalog seed generated from the supplied
 Timedoor Battle Cards Master Plan v2.2. It contains 110 base card templates,

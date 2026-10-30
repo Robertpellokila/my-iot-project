@@ -5,6 +5,7 @@ import AdminTable from "../components/AdminTable.vue";
 import { ref, computed, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { supabase } from '../lib/supabase';
+import { QUESTION_CATEGORIES } from '../lib/questions/questionModel.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -22,7 +23,7 @@ const perPage = ref(10);
 const totalItems = ref(0);
 let searchTimer;
 
-const categories = ['programming','javascript','html','css','database','algorithm','general'];
+const categories = QUESTION_CATEGORIES;
 const difficulties = ['easy','medium','hard'];
 const totalPages = computed(() => Math.max(1, Math.ceil(totalItems.value / perPage.value)));
 const startItem = computed(() => totalItems.value ? ((page.value - 1) * perPage.value) + 1 : 0);

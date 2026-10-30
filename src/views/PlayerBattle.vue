@@ -14,6 +14,7 @@ import { useActionDialogFocus } from '../composables/battle/useActionDialogFocus
 import BattlePauseNotice from '../components/battle/BattlePauseNotice.vue';
 import QuizBonusChoices from '../components/battle/QuizBonusChoices.vue';
 import {effectSummary,synergyRuleState} from '../lib/battle/battleRuleCatalog.js';
+import {findComboRule, comboCooldown, comboRecipeRequirement, comboPower} from '../lib/battle/comboRules.js';
 import { skillCooldown, skillApCost } from '../lib/battle/skillState.js';
 import {defineAsyncComponent} from 'vue';
 import {EMPTY_WORKSPACE} from '../lib/questions/scratchBlocks.js';
@@ -37,7 +38,7 @@ import BattleZoneStack from "../components/battle/BattleZoneStack.vue";
 import CardStatusVfx from "../components/battle/CardStatusVfx.vue";
 import { normalizeBattleStatusKey } from "../composables/battle/elementalStatus.js";
 import { playerErrorMessage, safePlayerMessage } from "../utils/playerErrorMessage.js";
-import { formatTcgType, getTcgComboTypeKey } from "../utils/tcgTypes.js";
+import { formatTcgType } from "../utils/tcgTypes.js";
 
 // =========================================================
 // ROUTE
@@ -151,7 +152,14 @@ const {
   latestBattleEvent,
 
   loadBattle,
+  loadQuestionRound,
 } = useBattleSession({player,token,onAccessDenied:privateAccess.revoked});
+const retryingQuestion = ref(false);
+async function retryQuestion() {
+  if (retryingQuestion.value) return;
+  retryingQuestion.value = true;
+  try { await loadQuestionRound(); } finally { retryingQuestion.value = false; }
+}
 watch(ownAvatarImage,()=>{failedAvatarImage.value='';});
 
 // =========================================================
@@ -214,6 +222,8 @@ const comboParticipantIds = ref([]);
 const comboPrimaryCardId = ref(null);
 const comboTargetCardId = ref(null);
 const comboRuleCatalog = ref([]);
+const comboRuleLoading = ref(false);
+const comboRuleError = ref("");
 
 // =========================================================
 // PHASE 3D.13 - FUSION BATTLE HISTORY
@@ -2041,6 +2051,7 @@ const maxAttacksPerCard = computed(() =>
 const tripleComboEnabled = computed(() => Boolean(battle.value?.triple_combo_enabled));
 const formationEnabled = computed(() => Boolean(battle.value?.formation_enabled));
 const comboEnabled = computed(() => battle.value?.combo_enabled !== false);
+const comboCooldownState = computed(() => comboCooldown(battle.value, player.value));
 
 const cardAttacksUsedThisTurn = (card) => {
   if (pilotAttackUsed(card, battle.value)) return 1;
@@ -2057,6 +2068,7 @@ const comboEligibleActiveCards = computed(() =>
   activeCards.value.filter((card) =>
     Number(card?.current_hp ?? card?.hp ?? 0) > 0 &&
     !card?.exhausted &&
+    (!battle.value?.combo_policy?.base_only || !isFusionCard(card)) &&
     !cardRuleReason(card, 'combo_attack') &&
     cardAttacksUsedThisTurn(card) < maxAttacksPerCard.value,
   ),
@@ -2075,16 +2087,35 @@ const comboActionPointCost = computed(() =>
     ? configuredActionPointCost("triple_combo", 3)
     : configuredActionPointCost("combo_attack", 2),
 );
+const comboEntryCost = computed(() => Math.min(
+  configuredActionPointCost('combo_attack', 2),
+  tripleComboEnabled.value && comboEligibleActiveCards.value.length >= 3 ? configuredActionPointCost('triple_combo', 3) : Infinity,
+  formationEnabled.value && comboEligibleActiveCards.value.length >= 4 ? configuredActionPointCost('ultimate_combo', 3) : Infinity,
+));
 
-const comboTypeKey = computed(() =>
-  selectedComboParticipants.value.length >= 2
-    ? getTcgComboTypeKey(selectedComboParticipants.value.map((card) => card.element))
-    : null,
-);
+const selectedComboRule = computed(() => findComboRule(comboRuleCatalog.value, selectedComboParticipants.value));
+const selectedComboPower = computed(() => comboPower(selectedComboParticipants.value, comboPrimaryCardId.value, selectedComboRule.value));
 
-const selectedComboRule = computed(() =>
-  comboRuleCatalog.value.find((rule) => rule.type_keys?.join("+") === comboTypeKey.value) ?? null,
-);
+const selectedComboBlockReason = computed(() => {
+  const count = selectedComboParticipants.value.length;
+  if (comboCooldownState.value.reason) return comboCooldownState.value.reason;
+  if (!enemyActiveCards.value.length && battle.value?.direct_attack_enabled === false) return 'Tidak ada kartu Active lawan dan serangan langsung dinonaktifkan.';
+  if (count < 2) return "Pilih sedikitnya 2 kartu Active yang siap menyerang.";
+  if (!selectedComboParticipants.value.some(card => String(getCardId(card)) === String(comboPrimaryCardId.value))) return "Kartu utama sudah tidak siap. Pilih kartu utama yang masih dapat menyerang.";
+  if (count === 3 && !tripleComboEnabled.value) return "Triple Combo tidak diaktifkan untuk battle ini.";
+  if (count === 4 && !formationEnabled.value) return "Formation tidak diaktifkan untuk battle ini.";
+  if (comboRuleLoading.value) return "Memeriksa resep Combo…";
+  if (comboRuleError.value) return comboRuleError.value;
+  if (selectedComboRule.value || (count === 2 && battle.value?.generic_combo_enabled)) return "";
+  return count === 4 ? "Peserta belum cocok dengan resep Formation. Periksa tipe, kode kartu, dan tag yang diminta."
+    : count === 3 ? "Peserta belum cocok dengan resep Triple Combo. Periksa tipe, kode kartu, dan tag yang diminta."
+    : "Pasangan ini belum memiliki resep Combo dan Generic Combo tidak aktif.";
+});
+
+const availableGroupComboRules = computed(() => comboRuleCatalog.value.filter((rule) =>
+  (["pair", "same"].includes(rule.rule_kind)) || (tripleComboEnabled.value && rule.rule_kind === "triple") ||
+  (formationEnabled.value && ["formation", "ultimate"].includes(rule.rule_kind)),
+));
 
 const ownActionPoints = computed(() =>
   Math.max(
@@ -3930,8 +3961,9 @@ const canSummonUi =
 const canComboAttackUi = computed(() =>
   actionPointsEnabled.value &&
     comboEnabled.value &&
+    !comboCooldownState.value.reason &&
     comboEligibleActiveCards.value.length >= 2 &&
-    canSpendActionPoints(configuredActionPointCost("combo_attack", 2)),
+    canSpendActionPoints(comboEntryCost.value),
 );
 
 const skillLockText =
@@ -5248,10 +5280,32 @@ const submitTargetedAttack =
 // SUBMIT ACTION
 // =========================================================
 
+const loadComboRules = async () => {
+  if (comboRuleLoading.value) return;
+  comboRuleLoading.value = true;
+  comboRuleError.value = "";
+  try {
+    if (Array.isArray(battle.value?.combo_rules_snapshot)) {
+      comboRuleCatalog.value = battle.value.combo_rules_snapshot;
+      return;
+    }
+    const { data, error: queryError } = await supabase
+      .from("tcg_combo_rule_catalog")
+      .select("*")
+      .eq("enabled", true);
+    if (queryError) throw queryError;
+    comboRuleCatalog.value = Array.isArray(data) ? data : [];
+  } catch {
+    comboRuleError.value = "Resep Combo belum dapat dimuat. Coba lagi sebelum menyerang.";
+  } finally {
+    comboRuleLoading.value = false;
+  }
+};
+
 const openComboAttackModal = () => {
   if (!validateActionTurn()) return;
   if (!canComboAttackUi.value) {
-    warningToast("COMBO BELUM SIAP", `Combo membutuhkan sedikitnya dua kartu Active yang masih memiliki kesempatan menyerang dan ${configuredActionPointCost("combo_attack", 2)} poin giliran.`);
+    warningToast("COMBO BELUM SIAP", comboCooldownState.value.reason || `Combo membutuhkan sedikitnya dua kartu Active yang masih memiliki kesempatan menyerang dan ${comboEntryCost.value} poin giliran.`);
     return;
   }
 
@@ -5266,16 +5320,7 @@ const openComboAttackModal = () => {
   comboPrimaryCardId.value = getCardId(primary) ?? null;
   comboTargetCardId.value = getCardId(enemyActiveCards.value[0]) ?? null;
   comboAttackModalOpen.value = true;
-  if (!comboRuleCatalog.value.length) {
-    void supabase
-      .from("tcg_combo_rule_catalog")
-      .select("rule_kind,type_keys,combo_name,ap_cost,bonus_damage,assist_multipliers,status_key,status_target,effect_json")
-      .eq("enabled", true)
-      .then(({ data, error: queryError }) => {
-        if (queryError) return;
-        comboRuleCatalog.value = Array.isArray(data) ? data : [];
-      });
-  }
+  void loadComboRules();
 };
 
 const toggleComboParticipant = (card) => {
@@ -5314,6 +5359,7 @@ const closeComboAttackModal = () => {
 };
 
 const submitComboAttack = async () => {
+  if (actionLoading.value) return;
   if (!validateActionTurn()) return;
   if (selectedComboParticipants.value.length < 2 || !comboPrimaryCardId.value) {
     warningToast("PILIH KARTU ACTIVE", "Pilih minimal dua kartu Active dan tentukan kartu utama.");
@@ -5327,6 +5373,10 @@ const submitComboAttack = async () => {
     warningToast("FORMATION NONAKTIF", "Game Setup belum mengaktifkan Formation.");
     return;
   }
+  if (selectedComboBlockReason.value) {
+    warningToast("COMBO BELUM SIAP", selectedComboBlockReason.value);
+    return;
+  }
   if (!canSpendActionPoints(comboActionPointCost.value)) {
     warningToast("POIN GILIRAN TIDAK CUKUP", `Combo ini membutuhkan ${comboActionPointCost.value} poin giliran.`);
     return;
@@ -5336,6 +5386,7 @@ const submitComboAttack = async () => {
     return;
   }
 
+  const participants = [comboPrimaryCardId.value, ...selectedComboParticipants.value.map(getCardId).filter(id => String(id) !== String(comboPrimaryCardId.value))];
   actionLoading.value = true;
   try {
     const { data, error: rpcError } = await supabase.rpc("submit_battle_action", {
@@ -5345,10 +5396,8 @@ const submitComboAttack = async () => {
       p_action: "combo_attack",
       p_card_id: comboPrimaryCardId.value,
       p_payload: {
-        participant_card_ids: [
-          comboPrimaryCardId.value,
-          ...comboParticipantIds.value.filter((id) => String(id) !== String(comboPrimaryCardId.value)),
-        ],
+        action_id: crypto.randomUUID(),
+        participant_card_ids: participants,
         target_card_id: comboTargetCardId.value || null,
       },
     });
@@ -5362,7 +5411,7 @@ const submitComboAttack = async () => {
     selectedCardId.value = null;
     successToast(
       data?.combo_name ?? "COMBO ATTACK",
-      `${data?.damage ?? 0} damage${data?.healing ? ` • pulih ${data.healing} HP` : ""}. ${selectedComboParticipants.value.length} kartu Active memakai kesempatan serangnya.`,
+      `${data?.damage ?? 0} damage${data?.healing ? ` • pulih ${data.healing} HP` : ""}. ${participants.length} kartu Active memakai kesempatan serangnya.`,
     );
   } catch (err) {
     errorToast("COMBO ERROR", playerErrorMessage(err, "Combo Attack gagal. Perbarui battle lalu coba lagi."));
@@ -5777,8 +5826,8 @@ let questionTimeoutRetryAt = 0;
 
 const updateQuestionClock = () => {
   const limit = questionTimeLimitSeconds.value;
-  const createdAt = currentQuestionRound.value?.created_at;
-  if (!limit || !createdAt || !questionActive.value || currentQuestionRound.value?.winner_player) {
+  const startedAt = currentQuestionRound.value?.timer_started_at ?? currentQuestionRound.value?.created_at;
+  if (!limit || !startedAt || !questionActive.value || currentQuestionRound.value?.winner_player) {
     questionSecondsRemaining.value = null;
     return;
   }
@@ -6517,6 +6566,8 @@ watch(
     () => currentQuestionRound.value?.created_at,
     () => currentQuestionRound.value?.winner_player,
     questionTimeLimitSeconds,
+    () => currentQuestionRound.value?.timer_started_at,
+    () => currentQuestionRound.value?.timer_paused_at,
   ],
   ([active, roundId, , winner]) => {
     if (questionClockInterval) {
@@ -7099,6 +7150,8 @@ const panelBlockReason = computed(() => {
 });
 const actionPanelContext = computed(() => ({
   card: selectedCard.value, myTurn: isMyTurn.value,
+  cardId:selectedCardId.value,
+  sources:activeCards.value.map(card=>({id:getCardId(card),name:card.name,element:card.element,disabled:card.exhausted||Number(card.current_hp??card.hp??0)<=0})),
   pilotRules: isTcgV1.value, roundLimit: battle.value?.total_rounds ?? 10,
   apEnabled: actionPointsEnabled.value, ap: ownActionPoints.value, maxAp: actionPointsPerTurn.value,
   seconds: turnTimerVisible.value ? turnSecondsRemaining.value : null,
@@ -7118,7 +7171,7 @@ const panelActions = computed(() => {
     ? '' : `Butuh ${configuredActionPointCost(key, fallback)} AP; kamu memiliki ${ownActionPoints.value} AP.`;
   const make = (key, label, icon, fallback, enabled, reason, description, primary = false) => {
     const blocked = panelBlockReason.value || cardRuleReason(selectedCard.value, key === 'special' ? 'special_skill' : key) || reason;
-    const cost = configuredActionPointCost(key === 'combo' ? 'combo_attack' : key, fallback);
+    const cost = key === 'combo' ? comboEntryCost.value : configuredActionPointCost(key, fallback);
     return {key, label, icon, primary, description, cost,
       ready: Boolean(enabled && !blocked), reason: blocked,
       shortReason: blocked === needCard && needCard ? 'Pilih kartu dulu' : blocked?.startsWith('Butuh ') ? 'AP belum cukup' : blocked?.startsWith('Tunggu giliran') ? 'Giliran lawan' : blocked?.includes('dijeda') ? 'Dijeda guru' : blocked?.includes('cooldown') || blocked?.includes('Tersedia setelah') ? 'Cooldown' : blocked?.includes('target') ? 'Perlu target' : blocked ? 'Belum tersedia' : '',
@@ -7141,8 +7194,8 @@ const panelActions = computed(() => {
   actions[2].inspectSkills = Boolean(selectedCard.value && runtimeSpecialSkills.value.length);
   actions[2].readyHint = readySpecialSkills.value.length === 1 ? `${readySpecialSkills.value[0].name} siap!` : `${readySpecialSkills.value.length} skill siap!`;
   if (isTcgV1.value && comboEnabled.value) actions.push(make('combo', 'Combo', '⚒', 2, canComboAttackUi.value,
-    comboEligibleActiveCards.value.length < 2 ? 'Perlu sedikitnya dua kartu Active yang masih boleh menyerang.' : !actionPointsEnabled.value ? 'Combo memerlukan aturan AP yang aktif.' : noAp('combo_attack', 2),
-    'Serangan bersama dari kartu Active. Pilih peserta, kartu utama, lalu target lawan.'));
+    comboCooldownState.value.reason || (comboEligibleActiveCards.value.length < 2 ? `Perlu sedikitnya dua kartu ${battle.value?.combo_policy?.base_only ? 'Base ' : ''}Active yang masih boleh menyerang.` : !actionPointsEnabled.value ? 'Combo memerlukan aturan AP yang aktif.' : !canSpendActionPoints(comboEntryCost.value) ? `Butuh ${comboEntryCost.value} AP; kamu memiliki ${ownActionPoints.value} AP.` : ''),
+    'Serangan bersama: Generic/pasangan 2 kartu, Triple 3, Formation 4. Pilih peserta, kartu utama, lalu target lawan.' + (battle.value?.combo_policy ? ' Semua jenis berbagi cooldown: setelah Combo, lewati satu giliranmu.' : '')));
   if (fusionFeatureEnabled.value) actions.push(make('fusion', 'Fusion', '🧬', 2,
     !fusionLoading.value && canFusionUi.value,
     fusionLoading.value ? 'Sedang memeriksa resep Fusion.' : !readyFusions.value.length ? fusionUnavailableReason.value : noAp('fusion', 2),
@@ -7154,8 +7207,8 @@ const panelActions = computed(() => {
     needCard || (ownHealUsed.value ? 'Jatah Heal pada pertandingan ini sudah dipakai.' : '') || (ownHp.value > ownMaxHp.value * .5 ? 'HP pemain harus 50% atau lebih rendah untuk memakai Heal.' : '') || noAp('heal', 1),
     'Memulihkan HP pemain sesuai aturan battle. Pemulihan HP kartu menggunakan skill kartu.'));
   actions.push(make('synergy', 'Synergy', '✧', 1, canSynergyUi.value,
-    needCard || synergyRuleReason.value || (!selectedSynergyInfo.value?.ready ? selectedSynergyInfo.value?.effect || 'Kombinasi kartu belum memenuhi syarat Synergy.' : '') || noAp('synergy', 1),
-    selectedSynergyInfo.value?.effect || 'Aktifkan efek dari kombinasi tipe kartu yang memenuhi syarat.'));
+    needCard || synergyRuleReason.value || (!selectedSynergyInfo.value?.ready ? selectedSynergyInfo.value?.reason || selectedSynergyInfo.value?.status || 'Kombinasi kartu belum memenuhi syarat Synergy.' : '') || noAp('synergy', 1),
+    [selectedSynergyInfo.value?.summary,selectedSynergyInfo.value?.effect,selectedSynergyInfo.value?.detail].filter(Boolean).join(' ') || 'Aktifkan efek dari kombinasi tipe kartu yang memenuhi syarat.'));
   if (!actionPointsEnabled.value) actions.push(make('defense', 'Bertahan', '🛡', 1, canDefenseUi.value, needCard,
     'Memakai aksi bertahan sesuai aturan Classic. Periksa efek sebelum mengonfirmasi.'));
   if (actionPointsEnabled.value) actions.push(make('end_turn', 'Akhiri giliran', '→|', 0, isMyTurn.value, '', 'Menyerahkan giliran kepada lawan. Sisa AP tidak dibawa ke giliran berikutnya.'));
@@ -8914,7 +8967,8 @@ onUnmounted(
               <div>
                 <span class="eyebrow">COMBO ATTACK • {{ comboActionPointCost }} POIN GILIRAN</span>
                 <h2 id="combo-picker-title">Pilih kartu Active untuk Combo</h2>
-                <p>Pilih minimal dua kartu Active yang belum menyerang. Kartu Bench tidak dapat ikut combo; kartu utama menyumbang ATK penuh dan kartu bantuan mengikuti multiplier aturan combo.</p>
+                <p>Pilih minimal dua kartu Active yang belum menyerang. Kartu Bench tidak ikut Combo. ATK utama dan pendamping mengikuti pengali resep; urutan pendamping mengikuti urutan pilihanmu.</p>
+                <p v-if="battle?.combo_policy" class="combo-policy-note">Kartu Base saja. Semua peserta memakai jatah serang dan tetap di Active sampai giliranmu berikutnya. Setelah Combo, lewati satu giliranmu tanpa Combo; mengganti peserta tidak mereset cooldown.</p>
               </div>
               <button type="button" class="modal-close" aria-label="Tutup" @click="closeComboAttackModal">✕</button>
             </header>
@@ -8946,11 +9000,17 @@ onUnmounted(
                 </div>
               </div>
               <p v-if="comboEligibleActiveCards.length < 2" class="combo-direct-note">Perlu dua kartu Active yang belum menggunakan kesempatan serangnya.</p>
-              <p v-if="comboRuleCatalog.length && selectedComboParticipants.length >= 2" class="combo-synergy-preview">
-                <b>{{ selectedComboRule?.combo_name ?? (battle?.generic_combo_enabled && selectedComboParticipants.length === 2 ? "Combined Strike" : "Combo belum memiliki aturan tipe") }}</b>
+              <p v-if="selectedComboParticipants.length >= 2" class="combo-synergy-preview" :class="{ 'combo-recipe-blocked': !!selectedComboBlockReason }" aria-live="polite">
+                <b>{{ selectedComboBlockReason ? 'Combo belum siap' : selectedComboRule?.combo_name ?? 'Combined Strike · Generic Combo' }}</b>
                 <span>{{ selectedComboParticipants.map((card) => formatTcgType(card.element)).join(" + ") }}</span>
-                <small>{{ selectedComboRule?.effect_json?.summary ?? (selectedComboRule ? "Efek synergy aktif" : battle?.generic_combo_enabled && selectedComboParticipants.length === 2 ? "Serangan bantuan tanpa bonus tipe" : "Pilih kombinasi yang memiliki synergy") }}</small>
+                <small>{{ selectedComboBlockReason || selectedComboRule?.effect_json?.summary || (selectedComboRule ? "Bonus mengikuti resep Combo." : "100% ATK utama + 50% ATK pendamping, sebelum DEF target. Tanpa bonus efek.") }}</small>
+                <small v-if="!selectedComboBlockReason">Kekuatan dasar {{ selectedComboPower }} sebelum DEF dan efek battle. Heal {{ selectedComboRule?.heal_after || 0 }} HP per peserta · Shield {{ selectedComboRule?.shield_after || 0 }} untuk utama{{ selectedComboRule?.status_key ? ` · ${selectedComboRule.status_key}` : '' }}.{{ battle?.status_effects_enabled === false ? ' Efek status dan Shield dinonaktifkan di match ini.' : '' }}</small>
               </p>
+              <button v-if="comboRuleError" type="button" class="fusion-retry-btn" @click="loadComboRules">COBA MUAT RESEP LAGI</button>
+              <details v-if="availableGroupComboRules.length && !comboRuleLoading && !comboRuleError" class="combo-recipe-help">
+                <summary>Lihat resep Combo yang tersedia</summary>
+                <div class="combo-recipe-list"><p v-for="rule in availableGroupComboRules" :key="rule.id || `${rule.rule_kind}:${rule.type_keys.join('+')}`"><b>{{ rule.combo_name }}</b> · {{ comboRecipeRequirement(rule) }}</p></div>
+              </details>
             </div>
 
             <div v-if="enemyActiveCards.length" class="combo-choice-section">
@@ -8979,7 +9039,7 @@ onUnmounted(
             <footer class="combo-attack-actions">
               <span>{{ ownActionPoints }} AP tersedia</span>
               <button type="button" class="modal-primary secondary" @click="closeComboAttackModal">BATAL</button>
-              <button type="button" class="modal-primary combo-submit" :disabled="actionLoading || !!panelBlockReason || selectedComboParticipants.length < 2 || (enemyActiveCards.length > 0 && !comboTargetCardId) || !canSpendActionPoints(comboActionPointCost)" @click="submitComboAttack">
+              <button type="button" class="modal-primary combo-submit" :disabled="actionLoading || !!panelBlockReason || !!selectedComboBlockReason || (enemyActiveCards.length > 0 && !comboTargetCardId) || !canSpendActionPoints(comboActionPointCost)" @click="submitComboAttack">
                 {{ actionLoading ? "MENYERANG..." : `COMBO ATTACK • ${comboActionPointCost} POIN` }}
               </button>
             </footer>
@@ -9468,6 +9528,7 @@ onUnmounted(
         :review="panelReview"
         :busy="actionLoading"
         @choose="choosePanelAction"
+        @select-source="id => { const card = activeCards.find(card => getCardId(card) === id); if (card) selectCard(card); }"
         @inspect-skill="openSpecialSkillModal()"
         @confirm="confirmPanelAction"
         @cancel="pendingPanelAction = null"
@@ -9501,7 +9562,7 @@ onUnmounted(
           >
             <div class="question-modal-topline">
               <span class="question-round-label">🧠 QUIZ ROUND {{ currentQuestionRound?.round_number ?? battle.round }}</span>
-              <QuizTimer :round="currentQuestionRound" :seconds="questionTimeLimitSeconds" />
+              <QuizTimer :round="currentQuestionRound" :seconds="questionTimeLimitSeconds" :unavailable="Boolean(questionError)" />
             </div>
             <span class="hud-label">
               {{ questionLearningEnabled ? "CHALLENGE & BELAJAR" : "CODING CHALLENGE" }}
@@ -9532,9 +9593,8 @@ onUnmounted(
                 question-state
               "
             >
-              {{
-                questionError
-              }}
+              <p>{{ questionError }}</p>
+              <button type="button" class="question-retry" :disabled="retryingQuestion" @click="retryQuestion">{{ retryingQuestion ? 'Memuat ulang…' : 'Coba muat ulang soal' }}</button>
             </div>
 
             <template
@@ -15877,6 +15937,9 @@ small {
   .question-bonus-action { grid-column:auto; }
 }
 
+.question-retry { display:block; margin:18px auto 0; padding:12px 18px; border:1px solid #1379ac; border-radius:10px; background:#eff8ff; color:#145578; font:inherit; font-size:14px; font-weight:700; line-height:1.4; cursor:pointer; }
+.question-retry:disabled { opacity:.6; cursor:wait; }
+.question-retry:focus-visible { outline:3px solid #f4bf45; outline-offset:3px; }
 .question-state {
   padding:
     50px
@@ -18033,6 +18096,13 @@ h2 {
 .combo-synergy-preview { display: grid; gap: 4px; margin: 12px 0 0; padding: 13px 15px; border: 1px solid #c8e5c5; border-radius: 14px; color: #245633; background: linear-gradient(120deg, #f1faef, #fff); }
 .combo-synergy-preview > span { color: #398348; font-size: 12px; font-weight: 850; }
 .combo-synergy-preview > small { color: #66806a; line-height: 1.4; }
+.combo-synergy-preview.combo-recipe-blocked { border-color: #e6d4ad; background: #fffaf0; color: #74501b; }
+.combo-recipe-blocked > small { color: #74501b; }
+.combo-recipe-help { margin-top: 12px; font-size: 13px; color: #31516d; }
+.combo-recipe-help summary { cursor: pointer; font-weight: 750; }
+.combo-recipe-help p { margin: 8px 0; line-height: 1.5; }
+.combo-recipe-list { max-height: 220px; overflow-y: auto; padding: 0 8px; }
+.combo-policy-note { padding: 10px; border-left: 3px solid #8056bb; background: #f7f3ff; color: #513b70!important; }
 .combo-direct-note { margin: 14px 0 0; padding: 12px 14px; border: 1px solid #d4e6d2; border-radius: 12px; color: #5c765f; background: #f4faf1; }
 .combo-attack-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 22px; }
 .combo-attack-actions > span { margin-right: auto; color: #397247; font-size: 13px; font-weight: 850; }

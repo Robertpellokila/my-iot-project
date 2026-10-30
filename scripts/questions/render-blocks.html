@@ -1,0 +1,21 @@
+<!doctype html><html lang="id"><head><meta charset="UTF-8"><title>Question seed artwork renderer</title><style>body{margin:0;background:#fff}#workspace{width:1300px;height:1000px}</style></head><body><div id="workspace"></div><script type="module">
+import * as Blockly from 'blockly/core';
+import * as English from 'blockly/msg/en';
+import {BLOCK_SPECS} from '/src/lib/questions/scratchBlocks.js';
+Blockly.setLocale(English);
+Blockly.defineBlocksWithJsonArray(BLOCK_SPECS.map(s=>s.definition));
+const workspace=Blockly.inject('workspace',{renderer:'zelos',readOnly:true,scrollbars:false,sounds:false,zoom:{startScale:1}});
+window.renderProgram=async program=>{
+ workspace.clear();Blockly.serialization.workspaces.load(program,workspace);
+ await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+ const box=workspace.getBlocksBoundingBox(),padding=35,width=Math.ceil(box.right-box.left+padding*2),height=Math.ceil(box.bottom-box.top+padding*2);
+ const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('xmlns','http://www.w3.org/2000/svg');svg.setAttribute('width',String(width));svg.setAttribute('height',String(height));svg.setAttribute('viewBox',`0 0 ${width} ${height}`);svg.setAttribute('role','img');
+ const background=document.createElementNS(svg.namespaceURI,'rect');background.setAttribute('width','100%');background.setAttribute('height','100%');background.setAttribute('rx','14');background.setAttribute('fill','#f4f8fc');svg.appendChild(background);
+ const canvas=workspace.getCanvas().cloneNode(true);canvas.setAttribute('transform',`translate(${padding-box.left},${padding-box.top})`);
+ // Copy computed paint/font styles: the exported SVG works without Blockly CSS.
+ const source=workspace.getCanvas().querySelectorAll('*'),target=canvas.querySelectorAll('*');
+ const properties=['fill','stroke','stroke-width','font-family','font-size','font-weight','text-anchor','dominant-baseline','display','opacity','paint-order'];
+ source.forEach((el,i)=>{const style=getComputedStyle(el);for(const property of properties)target[i].style.setProperty(property,style.getPropertyValue(property));target[i].removeAttribute('data-id');target[i].removeAttribute('id');});
+ svg.appendChild(canvas);return new XMLSerializer().serializeToString(svg);
+};
+</script></body></html>

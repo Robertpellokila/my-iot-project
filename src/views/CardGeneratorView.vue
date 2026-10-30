@@ -21,6 +21,7 @@ import CardValidationPanel from '../components/card-generator/CardValidationPane
 import CardFrameRenderer from '../components/card-generator/CardFrameRenderer.vue';
 import CardExportDialog from '../components/card-generator/CardExportDialog.vue';
 import CardRfidDialog from '../components/card-generator/CardRfidDialog.vue';
+import CardRfidLookupDialog from '../components/card-generator/CardRfidLookupDialog.vue';
 import FusionRecipeEditor from '../components/card-generator/FusionRecipeEditor.vue';
 import SkillCatalog from './SkillCatalog.vue';
 import { createDraft, normalizeDraft, validateDraft, TEMPLATES } from '../lib/card-generator/cardDrafts.js';
@@ -35,11 +36,12 @@ const route=useRoute(),catalogOpen=ref(false),catalogCards=ref([]),catalogSelect
 const selected = ref('TOC-003'), checked = ref([]), tab = ref('studio'), busy = ref(false), exportOpen = ref(false), exportSelection = ref([]), mapping = ref(null);
 const creating = ref(false);
 const rfidCard=ref(null),rulesOpen=ref(false),rulesSaving=ref(false),savedEntries=new Map(),ruleSlots=new Map();
+const rfidLookupOpen=ref(false),rfidInitialUid=ref('');
 const fusionOpen=ref(false),fusionCard=ref(null),fusionEditor=ref(null),fusionSaving=ref(false);
 const editorSaving=computed(()=>rulesSaving.value||fusionSaving.value);
 const currentEntry=()=>studioSaveEntries([currentCard.value],workspace)[0];
 const signature=entry=>JSON.stringify({card:entry.card,artwork:entry.artwork});
-onDeactivated(()=>{rfidCard.value=null;rulesOpen.value=false;fusionOpen.value=false;});
+onDeactivated(()=>{rfidCard.value=null;rfidLookupOpen.value=false;rulesOpen.value=false;fusionOpen.value=false;});
 const libraryCards = computed(() => studioLibrary(workspace));
 const pilotCards=computed(()=>libraryCards.value.filter(card=>CARD_BY_CODE.has(card.card_code)));
 // Returning from registration restores the current design for this account.
@@ -71,8 +73,9 @@ const ensureCurrentSaved=async()=>{
  const entry=currentEntry();
  return catalogLinks.value[selected.value]&&savedEntries.get(selected.value)===signature(entry) ? true : await saveCards([currentCard.value]);
 };
-const registerCurrent=async()=>{
+const registerCurrent=async(initialUid='')=>{
  if(currentCard.value.kind==='fusion'){message.value='Kartu Fusion dipanggil melalui resep dan tidak memakai RFID.';return;}
+ rfidInitialUid.value=typeof initialUid==='string'?initialUid:'';
  if(!await ensureCurrentSaved())return;
  busy.value=true;error.value='';
  try{const {data,error:e}=await supabase.from('game_cards').select('*').eq('id',catalogLinks.value[selected.value]).single();if(e)throw e;if(!data)throw new Error('Kartu belum tersedia di akun. Simpan kembali.');rfidCard.value=data;}
@@ -254,7 +257,7 @@ const adminToast=useAdminFeedback({error,message,scope:'CardGeneratorView'});
     <p v-if="message" class="cg-message" :class="{'cg-warning':studioNoticeType(message)==='warning'}" role="status">{{ message }} <button type="button" aria-label="Tutup pesan" @click="message = ''">×</button></p>
     <p v-if="loading" class="cg-empty">Memuat workspace…</p>
     <template v-else-if="owner">
-      <div class="cg-catalog-actions"><button type="button" :disabled="busy || cloudBusy || rulesSaving" @click="openCatalog">Pilih kartu tersimpan</button><RouterLink :to="{name:'album-card'}">Buka Album ↗</RouterLink><span>{{ catalogLinks[selected]?'✓ Kartu tersedia di akun':'Draft baru · simpan tanpa UID terlebih dahulu' }}</span><span v-if="currentCard.kind==='fusion'">Fusion memakai resep, tanpa UID RFID.</span></div>
+      <div class="cg-catalog-actions"><button type="button" :disabled="loading || !owner || busy || cloudBusy || editorSaving" @click="rfidLookupOpen=true">◉ Cek kartu RFID</button><RouterLink to="/admin/game/catalog?tab=synergy">Atur Synergy ↗</RouterLink><button type="button" :disabled="busy || cloudBusy || rulesSaving" @click="openCatalog">Pilih kartu tersimpan</button><RouterLink :to="{name:'album-card'}">Buka Album ↗</RouterLink><span>{{ catalogLinks[selected]?'✓ Kartu tersedia di akun':'Draft baru · simpan tanpa UID terlebih dahulu' }}</span><span v-if="currentCard.kind==='fusion'">Fusion memakai resep, tanpa UID RFID.</span></div>
       <section v-if="catalogOpen" class="cg-catalog-picker"><label>Pilih data kartu<SearchableSelect v-model="catalogSelection"><option value="">Pilih kartu…</option><option v-for="card in catalogCards" :key="card.id" :value="card.id">{{ card.name }} · {{ card.metadata?.studio_card?.display_code || card.card_code }}{{ card.uid ? ` · RFID ${card.uid}` : ' · Desain tersimpan' }}</option></SearchableSelect></label><button type="button" :disabled="!catalogSelection || busy" @click="importCatalog()">Buka kartu</button><button type="button" @click="catalogOpen=false">Tutup</button></section>
       <div class="cg-workspace-bar"><nav class="cg-tabs" aria-label="Tampilan generator"><button v-for="item in [['studio','Studio'],['review','Review 42 kartu'],['masters','9 templates']]" :key="item[0]" type="button" :class="{ active: tab === item[0] }" :aria-pressed="tab === item[0]" @click="tab = item[0]">{{ item[1] }}</button></nav><div class="cg-progress-summary"><span><b>{{ artworkCount }}</b> / {{ libraryCards.length }} artwork</span><span><i></i><b>{{ readyCount }}</b> ready for print</span></div></div>
       <section v-if="creating" class="cg-template-picker" aria-labelledby="cg-choose-template"><div class="cg-section-title"><div><h2 id="cg-choose-template">Pilih template kartu</h2><p class="cg-muted">Pilih rarity, lalu isi data. Posisi elemen dan back sudah tetap.</p></div><button type="button" @click="creating = false">Tutup</button></div><div class="cg-template-grid"><button v-for="item in TEMPLATES" :key="item" type="button" :style="{ '--rarity-color': RARITY_THEMES[item].main }" @click="addCard(item)"><span class="cg-template-sample"><CardFrameRenderer :card="masters.find(master => master.template === item).card" :dataset="PILOT" :artwork="masters.find(master => master.template === item).artwork" :template="item" /></span><strong>{{ item }}</strong><small>Pakai template ↗</small></button></div></section>
@@ -271,7 +274,8 @@ const adminToast=useAdminFeedback({error,message,scope:'CardGeneratorView'});
       <section v-if="tab === 'masters'" class="cg-review"><div class="cg-review-header"><div><h2>Template kartu</h2><p>Tujuh frame rarity, Trial Join Card, dan Winning Card. Artwork contoh dapat diganti dengan ilustrasi kartu milikmu.</p></div></div><div class="cg-review-grid cg-master-grid"><article v-for="master in masters" :key="master.template"><h3>{{ master.template }}</h3><p>{{ master.study ? 'Contoh isi · data & gambar bisa diganti' : master.card.card_code }}</p><CardFrameRenderer :card="master.card" :dataset="PILOT" :artwork="master.artwork" :template="master.template" /></article></div></section>
       <footer class="cg-workspace-footer"><span>Draft tersimpan di perangkat ini.</span><div><button type="button" :disabled="busy || cloudBusy" @click="downloadWorkspace">Download workspace</button><label class="cg-inline-file"><input type="file" accept="application/json,.json" :disabled="busy || cloudBusy" @change="importWorkspace" /><span>Import workspace</span></label><button type="button" :disabled="busy || cloudBusy" @click="loadCloud">Muat dari akun</button><button type="button" @click="downloadManifest">42 artwork briefs</button><button type="button" :disabled="busy" @click="auditProduction">Audit katalog existing</button></div></footer>
       <CardExportDialog v-if="exportOpen" :cards="exportSelection" :dataset="PILOT" :workspace="workspace" @close="exportOpen = false" @edit="code => { selected = code; tab = 'studio'; exportOpen = false; }" />
-      <CardRfidDialog v-if="rfidCard" :card="rfidCard" @close="rfidCard=null" @linked="data=>{message=`RFID ${data.uid} terhubung ke ${data.name}.`}"/>
+      <CardRfidLookupDialog v-if="rfidLookupOpen" :can-link="currentCard.kind!=='fusion'" :current-name="currentCard.name" @close="rfidLookupOpen=false" @open-card="id=>{rfidLookupOpen=false;importCatalog(id)}" @link-uid="uid=>{rfidLookupOpen=false;registerCurrent(uid)}"/>
+      <CardRfidDialog v-if="rfidCard" :card="rfidCard" :initial-uid="rfidInitialUid" @close="rfidCard=null" @linked="data=>{message=`RFID ${data.uid} terhubung ke ${data.name}.`}"/>
     </template>
   </main>
 </template>

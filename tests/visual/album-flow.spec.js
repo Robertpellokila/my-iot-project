@@ -13,6 +13,14 @@ async function mock(page){
   const q=r.request(),url=new URL(q.url()),resource=url.pathname.split('/').at(-1);
   if(resource==='user')return r.fulfill({json:user});
   if(resource==='profiles')return r.fulfill({json:{...user,role:'admin'}});
+  if(resource==='admin_lookup_card_rfid'){
+   const body=q.postDataJSON();(state.lookups??=[]).push(body);
+   if(state.lookupFail)return r.fulfill({status:503,json:{message:'Koneksi pemeriksaan terputus'}});
+   const cards=state.cards.filter(card=>card.uid?.trim().toUpperCase()===body.p_uid);
+   const registration=body.p_uid==='REGISTRY-ONLY'?{uid:body.p_uid,label:'Reader cadangan',is_active:true}:null;
+   if(state.lookupDelay?.[body.p_uid])await new Promise(resolve=>setTimeout(resolve,state.lookupDelay[body.p_uid]));
+   return r.fulfill({json:{uid:body.p_uid,cards,registration,registered:cards.length>0||!!registration}});
+  }
   if(resource==='card_generator_projects')return r.fulfill({json:state.workspace?{workspace:state.workspace,updated_at:new Date().toISOString()}:null});
   if(resource==='card_studio_entries')return r.fulfill({json:state.entries});
   if(resource==='fusion_recipes'){const id=url.searchParams.get('result_game_card_id')?.replace('eq.','');return r.fulfill({json:state.recipes.filter(row=>!id||row.result_game_card_id===id)});}
@@ -245,4 +253,50 @@ test('RFID reassignment previews both cards, preserves the old card and handles 
  expect(old).toEqual({...before,uid:null,physical_scan_enabled:false});expect(state.cards.filter(c=>c.uid==='RFID-123')).toHaveLength(1);
  await expect(dialog).toContainText('tetap tersimpan tanpa UID');await page.setViewportSize({width:390,height:844});expect(await dialog.evaluate(e=>e.scrollWidth<=e.clientWidth)).toBe(true);
  await dialog.screenshot({path:'test-results/rfid-transfer-mobile.png'});
+});
+
+async function scanLookup(page,uid){
+ await page.evaluate(async uid=>{const {supabase}=await import('/src/lib/supabase.js');const channel=supabase.getChannels().find(c=>c.topic.includes('studio-rfid-lookup:'));channel.bindings.postgres_changes[0].callback({new:{uid,device_id:'reader-pilot'}});},uid);
+}
+async function openLookup(page){
+ await page.routeWebSocket('**',socket=>socket.close());
+ await page.goto('/admin/card-generator');await page.getByRole('button',{name:'◉ Cek kartu RFID',exact:true}).click();
+ return page.getByRole('dialog',{name:'Cek kartu RFID',exact:true});
+}
+test('RFID lookup reads a tapped card without saving or relinking and opens that exact card in Studio',async({page})=>{
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));const state=await mock(page);const before=structuredClone(state.cards);
+ const dialog=await openLookup(page);await scanLookup(page,'rfid-123');
+ await expect(dialog).toContainText('Kartu ditemukan');await expect(dialog.locator('h3')).toHaveText('Coby 02');
+ await expect(dialog.getByLabel('UID kartu')).toHaveValue('RFID-123');await expect(dialog.locator('dl')).toContainText('120');
+ await expect(dialog.locator('.lookup-reader')).toContainText('reader-pilot');
+ expect(state.lookups).toEqual([{p_uid:'RFID-123'}]);expect(state.saved).toHaveLength(0);expect(state.linked).toHaveLength(0);expect(state.cards).toEqual(before);
+ await dialog.screenshot({path:'test-results/rfid-lookup-desktop.png'});
+ await dialog.getByRole('button',{name:'Buka di Studio →'}).click();await expect(dialog).toBeHidden();
+ await expect(page.getByLabel('Nama karakter / Fusion',{exact:true})).toHaveValue('Coby 02');
+ expect(await page.evaluate(async()=>{const {supabase}=await import('/src/lib/supabase.js');return supabase.getChannels().some(c=>c.topic.includes('studio-rfid-lookup:'));})).toBe(false);
+ expect(errors).toEqual([]);
+});
+test('RFID lookup ignores an older slow scan and only links a new UID after explicit confirmation',async({page})=>{
+ const state=await mock(page);state.lookupDelay={'RFID-123':900};const dialog=await openLookup(page);
+ await scanLookup(page,'RFID-123');await expect.poll(()=>state.lookups?.length).toBe(1);
+ await scanLookup(page,'PILOT-NEW');await expect(dialog.locator('.lookup-result-heading')).toContainText('UID baru');
+ await page.waitForTimeout(1000);await expect(dialog.locator('.lookup-result-heading code')).toHaveText('PILOT-NEW');await expect(dialog.locator('.lookup-card')).toHaveCount(0);
+ expect(state.saved).toHaveLength(0);expect(state.linked).toHaveLength(0);
+ await dialog.getByRole('button',{name:/Hubungkan ke/}).click();
+ const link=page.locator('dialog.studio-rfid-dialog');
+ await expect(link.getByLabel('UID RFID',{exact:true})).toHaveValue('PILOT-NEW');expect(state.linked).toHaveLength(0);
+ await link.getByRole('button',{name:'Hubungkan kartu',exact:true}).click();await expect(link).toContainText('RFID berhasil dihubungkan');
+ expect(state.linked).toHaveLength(1);expect(state.linked[0].p_uid).toBe('PILOT-NEW');expect(state.cards.find(c=>c.uid==='RFID-123').name).toBe('Coby 02');
+});
+test('RFID lookup distinguishes registry-only, archived, duplicate and failed lookups on a phone',async({page})=>{
+ const state=await mock(page);state.cards[1].archived_at='2026-10-29T00:00:00Z';await page.setViewportSize({width:390,height:844});const dialog=await openLookup(page);
+ await dialog.getByLabel('UID kartu').fill(' registry-only ');await dialog.getByRole('button',{name:'Cek UID',exact:true}).click();
+ await expect(dialog).toContainText('UID sudah terdaftar');await expect(dialog).toContainText('Belum terhubung ke kartu battle');await expect(dialog).toContainText('Reader cadangan');
+ await scanLookup(page,'RFID-123');await expect(dialog).toContainText('Kartu ada di Sampah');await expect(dialog.getByRole('button',{name:'Buka di Studio →'})).toHaveCount(0);
+ await expect(dialog.getByRole('link',{name:'Buka Album untuk memulihkan →'})).toBeVisible();
+ expect(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);await dialog.screenshot({path:'test-results/rfid-lookup-mobile.png'});
+ state.cards.push({...state.cards[1],id:crypto.randomUUID(),uid:'rfid-123',archived_at:null});await scanLookup(page,'RFID-123');await expect(dialog).toContainText('beberapa data kartu');await expect(dialog.locator('.lookup-card')).toHaveCount(2);
+ state.lookupFail=true;await scanLookup(page,'UNKNOWN-UID');await expect(dialog.getByRole('alert')).toContainText('Koneksi pemeriksaan terputus');await expect(dialog.locator('.lookup-result')).toHaveCount(0);
+ expect(state.saved).toHaveLength(0);expect(state.linked).toHaveLength(0);
+ await page.keyboard.press('Escape');await expect(dialog).toBeHidden();
 });

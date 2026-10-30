@@ -10,7 +10,7 @@ export async function mockGameSetup(page){
   if(url.pathname.startsWith('/storage/v1/object/card-images/')){let bytes=request.postDataBuffer();if(request.headers()['content-type']?.startsWith('multipart/form-data')){const form=await new Request('http://photo.test',{method:'POST',headers:{'content-type':request.headers()['content-type']},body:bytes}).formData();const image=[...form.values()].find(value=>typeof value?.arrayBuffer==='function');bytes=Buffer.from(await image.arrayBuffer());}uploads.push({path:url.pathname,bytes});return route.fulfill({json:{Key:url.pathname.split('/object/')[1]}});}
   if(resource==='coding_questions')return route.fulfill({json:[],headers:{'content-range':'0-0/10','access-control-expose-headers':'content-range'}});
   if(resource==='battle_sessions'&&request.method()==='POST'){const body=request.postDataJSON();saved.push(body);return route.fulfill({json:{...body,id:'10000000-0000-4000-8000-000000000044',player1_token:'qa-one',player2_token:'qa-two'}});}
-  if(resource==='admin_battle_access')return route.fulfill({json:{player1_access_code:'111122223333',player2_access_code:'444455556666'}});
+  if(resource==='admin_battle_access')return route.fulfill({json:{player1_access_code:'K7M4Q9',player2_access_code:'D6M8R9'}});
   if(resource==='bind_battle_readers')return route.fulfill({json:{ok:true}});return route.fulfill({json:[]});
  });return {saved,uploads};
 }

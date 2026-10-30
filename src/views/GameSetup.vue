@@ -78,9 +78,9 @@ const destructionDamagePercent = ref(30);
 const specialCardSkillsEnabled = ref(true);
 const comboEnabled = ref(true);
 const fusionEnabled = ref(true);
-const tripleComboEnabled = ref(false);
-const genericComboEnabled = ref(false);
-const formationEnabled = ref(false);
+const tripleComboEnabled = ref(true);
+const genericComboEnabled = ref(true);
+const formationEnabled = ref(true);
 const statusEffectsEnabled = ref(true);
 const actionPointsPerTurn = ref(3);
 const maxAttacksPerCard = ref(1);
@@ -737,13 +737,13 @@ const createBattle = async () => {
           ),
 
         triple_combo_enabled:
-          Boolean(tripleComboEnabled.value),
+          Boolean(comboEnabled.value && tripleComboEnabled.value),
 
         generic_combo_enabled:
-          Boolean(genericComboEnabled.value),
+          Boolean(comboEnabled.value && genericComboEnabled.value),
 
         formation_enabled:
-          Boolean(formationEnabled.value),
+          Boolean(comboEnabled.value && formationEnabled.value),
 
         status_effects_enabled:
           Boolean(statusEffectsEnabled.value),
@@ -1934,7 +1934,7 @@ const adminToast=useAdminFeedback({error,warning:qrError,scope:'GameSetup'});
 
           <div class="form-grid three tcg-config-fields">
             <label class="field" v-for="(cost, action) in actionCosts" :key="action">
-              <span>Biaya poin · {{ action.replaceAll('_', ' ') }}</span>
+              <span>Biaya poin · {{ action === 'ultimate_combo' ? 'Formation' : action.replaceAll('_', ' ') }}</span>
               <input v-model.number="actionCosts[action]" type="number" min="0" :max="actionPointsPerTurn" />
               <small>Atur 0 untuk aksi gratis.</small>
             </label>
@@ -2063,23 +2063,25 @@ const adminToast=useAdminFeedback({error,warning:qrError,scope:'GameSetup'});
               <span class="toggle"><input v-model="statusEffectsEnabled" type="checkbox" /><span class="toggle-track"><span class="toggle-dot" /></span></span>
             </label>
             <label class="rule-option">
-              <div><strong>🔺 Triple Combo</strong><small>Mengizinkan tiga kartu Active jika ada aturan kombinasi khusus dan poin giliran cukup.</small></div>
+              <div><strong>🔺 Triple Combo</strong><small>3 kartu Active dengan resep tipe yang cocok. Biaya {{ actionCosts.triple_combo }} AP; semua peserta memakai jatah serang.</small></div>
               <span class="toggle"><input v-model="tripleComboEnabled" type="checkbox" :disabled="!comboEnabled" /><span class="toggle-track"><span class="toggle-dot" /></span></span>
             </label>
             <label class="rule-option">
-              <div><strong>✨ Generic Combo</strong><small>Mengizinkan Combined Strike saat tidak ada synergy tipe khusus.</small></div>
+              <div><strong>✨ Generic Combo</strong><small>2 kartu Active tanpa resep Combo khusus. Combined Strike memakai 100% ATK utama + 50% ATK pendamping, tanpa bonus efek. Biaya {{ actionCosts.combo_attack }} AP.</small></div>
               <span class="toggle"><input v-model="genericComboEnabled" type="checkbox" :disabled="!comboEnabled" /><span class="toggle-track"><span class="toggle-dot" /></span></span>
             </label>
             <label class="rule-option">
-              <div><strong>🛡 Formation</strong><small>Menyiapkan bonus susunan Active; default nonaktif hingga formasi didaftarkan.</small></div>
-              <span class="toggle"><input v-model="formationEnabled" type="checkbox" /><span class="toggle-track"><span class="toggle-dot" /></span></span>
+              <div><strong>🛡 Formation</strong><small>Serangan bersama 4 kartu Active dengan resep formasi yang cocok. Biaya {{ actionCosts.ultimate_combo }} AP; membutuhkan 4 slot Active.</small></div>
+              <span class="toggle"><input v-model="formationEnabled" type="checkbox" :disabled="!comboEnabled" /><span class="toggle-track"><span class="toggle-dot" /></span></span>
             </label>
           </div>
 
           <div
             class="future-note"
           >
-            Aturan ini disimpan pada battle session dan diperiksa oleh server. Combo menggunakan kartu Active saja; tipe lama Electric, Grass, dan Wind tetap dikenali oleh resolver tipe.
+            Battle baru memakai kartu Base saja. Generic untuk 2 kartu tanpa resep; Triple dan Formation membutuhkan resep yang cocok. Semua peserta memakai jatah serang dan tetap di Active sampai giliranmu berikutnya. Maksimal satu Combo per giliran; sesudahnya lewati satu giliranmu tanpa Combo. Semua jenis berbagi cooldown.
+            <RouterLink to="/admin/game/catalog?tab=combo">Atur resep Combo →</RouterLink>
+            <span v-if="comboEnabled && ((tripleComboEnabled && Number(maxActive)<3) || (formationEnabled && Number(maxActive)<4))"> Tambahkan slot Active agar jumlah peserta mencukupi: Triple memerlukan 3, Formation 4.</span>
           </div>
         </section>
 
@@ -2318,6 +2320,7 @@ const adminToast=useAdminFeedback({error,warning:qrError,scope:'GameSetup'});
             <span>{{ turnDurationSeconds }} dtk / giliran</span>
             <span>{{ actionPointsPerTurn }} poin / giliran</span>
             <span>{{ comboEnabled ? "Combo aktif" : "Combo nonaktif" }}</span>
+            <template v-if="comboEnabled"><span v-if="tripleComboEnabled">Triple · {{ actionCosts.triple_combo }} AP</span><span v-if="genericComboEnabled">Generic · {{ actionCosts.combo_attack }} AP</span><span v-if="formationEnabled">Formation · {{ actionCosts.ultimate_combo }} AP</span></template>
             <span>{{ fusionEnabled ? "Fusion aktif" : "Fusion nonaktif" }}</span>
           </div>
         </section>

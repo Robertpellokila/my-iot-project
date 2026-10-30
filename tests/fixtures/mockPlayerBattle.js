@@ -54,7 +54,7 @@ export async function mockPlayerBattle(page, overrides = {}) {
     const url = new URL(route.request().url()), resource = url.pathname.split('/').at(-1);
     if(resource==='get_public_battle_state')return route.fulfill({json:{ok:true,battle:safeBattle()}});
     if(resource==='get_battle_player_state'){const b=route.request().postDataJSON();const valid=b.p_token===battle[b.p_player==='p1'?'player1_token':'player2_token'];return route.fulfill({json:valid?{ok:true,battle:safeBattle()}:{ok:false,code:'PLAYER_ACCESS_REQUIRED',message:'Masukkan kode pribadi dari guru.'}});}
-    if(resource==='redeem_battle_player_code'){const b=route.request().postDataJSON(),side=b.p_access_code==='111122223333'?'p1':b.p_access_code==='444455556666'?'p2':null;return route.fulfill({json:side&&(!b.p_player||side===b.p_player)?{ok:true,code:battle.code,player:side,token:battle[side==='p1'?'player1_token':'player2_token']}:{ok:false,message:'Kode pribadi tidak valid untuk pemain ini.'}});}
+    if(resource==='redeem_battle_player_code'){const b=route.request().postDataJSON(),side=['K7M4Q9','111122223333'].includes(b.p_access_code)?'p1':['D6M8R9','444455556666'].includes(b.p_access_code)?'p2':null;return route.fulfill({json:side&&(!b.p_player||side===b.p_player)?{ok:true,code:battle.code,player:side,token:battle[side==='p1'?'player1_token':'player2_token']}:{ok:false,message:'Kode pribadi tidak valid untuk pemain ini.'}});}
     if(resource==='battle_player_ui_state')return route.fulfill({json:uiRows});
     if(resource==='publish_battle_player_ui'){const b=route.request().postDataJSON();if(b.p_token!==battle[b.p_player==='p1'?'player1_token':'player2_token'])return route.fulfill({json:{ok:false}});const row={battle_id:battle.id,player:b.p_player,state:b.p_state};const i=uiRows.findIndex(row=>row.player===b.p_player);if(i>=0)uiRows[i]=row;else uiRows.push(row);publish('battle_player_ui_state',row);return route.fulfill({json:{ok:true}});}
     if (resource === 'battle_sessions') return route.fulfill({json:safeBattle()});
@@ -78,10 +78,16 @@ export async function mockPlayerBattle(page, overrides = {}) {
       const body = route.request().postDataJSON(); submissions.push(body);
       await new Promise(resolve => setTimeout(resolve,delay));
       if (rejectNext) { rejectNext=false; return route.fulfill({json:{ok:false,message:'Kondisi kartu berubah. Periksa target dan coba lagi.'}}); }
-      const cost = body.p_action === 'special_skill' ? skills.find(skill => skill.id === body.p_payload.skill_id)?.limits.action_points ?? 1 : battle.action_costs?.[body.p_action] ?? ({fusion:2,ultimate:2,combo_attack:2,end_turn:0}[body.p_action] ?? 1);
+      const comboCount=body.p_payload?.participant_card_ids?.length??2;
+      const costKey=body.p_action==='combo_attack'?(comboCount===4?'ultimate_combo':comboCount===3?'triple_combo':'combo_attack'):body.p_action;
+      const cost = body.p_action === 'special_skill' ? skills.find(skill => skill.id === body.p_payload.skill_id)?.limits.action_points ?? 1 : battle.action_costs?.[costKey] ?? ({fusion:2,ultimate:2,combo_attack:2,triple_combo:3,ultimate_combo:3,end_turn:0}[costKey] ?? 1);
       if (battle.action_points_enabled) battle.player1_action_points = Math.max(0,battle.player1_action_points-cost);
       if (body.p_action === 'summon') { battle.pending_action='summon';battle.pending_action_player='p1';battle.pending_summon_request_id=randomUUID();battle.pending_summon_ap_cost=battle.action_points_enabled?cost:0;battle.pending_summon_turn_index=battle.turn_index; }
       if (body.p_action === 'attack') { source.attack_turn_index=battle.turn_index;source.attacks_this_turn=1; }
+      if (body.p_action === 'combo_attack' && battle.combo_policy) {
+        battle.player1_combo_last_owner_turn=battle.player1_owner_turn;
+        for (const card of cards.filter(card=>body.p_payload.participant_card_ids.includes(card.id))) {card.attack_turn_index=battle.turn_index;card.attacks_this_turn=1;publish('battle_cards',structuredClone(card));}
+      }
       if (body.p_action === 'end_turn') { battle.current_turn='p2';battle.turn_index++;battle.player1_action_points=0;battle.player2_action_points=3; }
       if (body.p_action === 'special_skill') skills.find(skill => skill.id === body.p_payload.skill_id).cooldown_until_owner_turn = battle.player1_owner_turn + 2;
       publish('battle_sessions',safeBattle());publish('battle_cards',structuredClone(source));

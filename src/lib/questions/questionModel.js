@@ -1,5 +1,6 @@
 import { DEFAULT_BLOCK_CONFIG,DEFAULT_GRADING,EMPTY_WORKSPACE } from './scratchBlocks.js';
 import { normalizeWorkspace,gradeWorkspace } from './blockGrading.js';
+export const QUESTION_CATEGORIES = ['scratch','block_coding','programming_basics','programming','python','javascript','html','css','database','algorithm','general'];
 export const QUIZ_MODES = [
   {id:'scratch_blocks',name:'Scratch workspace',description:'Susun blok yang tersambung, loop, kondisi, dan input.'},
   { id: 'choice', name: 'Pilihan ganda', description: 'Pertanyaan dengan empat pilihan jawaban.' },
@@ -57,7 +58,7 @@ export function questionPayload(draft, imageUrl = null) {
   const blockMode = draft.mode === 'block_order';
   const bugMode = draft.mode === 'find_bug';
   // Persist a shuffled block pool; its visible order must not reveal the key.
-  const pool = blockMode ? shuffleItems(draft.blocks.map((text, id) => ({ text:text.trim(), id }))) : [];
+  const pool = blockMode ? shuffleItems(draft.blocks.map((text, id) => ({ text:text.trimEnd(), id }))) : [];
   if (pool.length > 1 && pool.every((block, i) => block.id === i)) pool.push(pool.shift());
   const payload = {
     question:draft.question.trim(), question_type:blockMode ? 'block_order' : bugMode ? 'find_bug' : 'choice',

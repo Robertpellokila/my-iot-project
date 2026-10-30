@@ -105,6 +105,7 @@ const router =
       { path: "/cards", name: "public-cards", component: GameLanding },
       { path: "/fusion", name: "public-fusion", component: GameLanding },
       { path: "/skills", name: "public-skills", component: GameLanding },
+      { path: "/combo", name: "public-combo", component: GameLanding },
       { path: "/play", name: "public-game-play", component: GameLanding },
 
       // =====================================================

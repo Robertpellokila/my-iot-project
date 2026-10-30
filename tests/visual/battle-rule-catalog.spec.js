@@ -3,7 +3,7 @@ import {battleEndpoint,mockPlayerBattle} from '../fixtures/mockPlayerBattle.js';
 const types=['knight','fire','water','forest','thunder','light','dark','ice'];
 const rules=[...types.map(element=>({code:`synergy_${element}`,kind:'synergy',element,name:`${element} Synergy`,icon:'✧',description:'',effect_type:'shield_percent',effect_values:{2:30,3:45,4:60},min_cards:2,enabled:true,updated_at:'2026-10-25T01:00:00Z'})),...Array.from({length:6},(_,i)=>({code:`quiz_bonus_${i}`,kind:'quiz_bonus',element:null,name:`Bonus ${i+1}`,icon:i===0?'/images/tutorial/player-battle-guide.jpg':'✦',description:'Hadiah dari kuis.',effect_type:'heal_flat',effect_values:{1:10+i},min_cards:2,enabled:true,updated_at:'2026-10-25T01:00:00Z'}))];
 const bonusRules=rules.filter(rule=>rule.kind==='quiz_bonus');
-async function admin(page){
+async function admin(page,catalog=rules){
  const user={id:'00000000-0000-4000-8000-000000000001',aud:'authenticated',role:'authenticated',email:'qa@example.invalid',app_metadata:{provider:'email'},user_metadata:{},created_at:'2026-01-01T00:00:00Z'};
  const token=`${Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url')}.${Buffer.from(JSON.stringify({sub:user.id,role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})).toString('base64url')}.test`;
  await page.addInitScript(({key,user,token})=>localStorage.setItem(key,JSON.stringify({access_token:token,refresh_token:'test-refresh',expires_at:Math.floor(Date.now()/1000)+3600,user})),{key:`sb-${new URL(battleEndpoint).hostname.split('.')[0]}-auth-token`,user,token});
@@ -12,7 +12,7 @@ async function admin(page){
   const resource=new URL(route.request().url()).pathname.split('/').at(-1);
   if(resource==='user')return route.fulfill({json:user});
   if(resource==='profiles')return route.fulfill({json:{...user,role:'admin'}});
-  if(resource==='battle_effect_catalog')return route.fulfill({json:rules});
+  if(resource==='battle_effect_catalog')return route.fulfill({json:catalog});
   if(resource==='battle_reward_settings')return route.fulfill({json:{id:1,choice_count:3,updated_at:'2026-10-25T01:00:00Z'}});
   if(resource==='save_battle_effect_rule'){const {p_rule}=route.request().postDataJSON();saves.push(p_rule);return route.fulfill({json:{...p_rule,updated_at:'2026-10-26T01:00:00Z'}});}
   if(resource==='save_battle_reward_settings'){const data=route.request().postDataJSON();settings.push(data);return route.fulfill({json:{id:1,choice_count:data.p_choice_count,updated_at:'2026-10-26T01:00:00Z'}});}
@@ -90,6 +90,54 @@ test('battle review uses configured per-type thresholds and the actual frozen ef
  const drawer=page.getByRole('dialog',{name:'Aksi lainnya',exact:true});await expect(drawer.locator('[data-action="synergy"]')).toContainText('30%');await expect(drawer.locator('[data-action="synergy"]')).toHaveAttribute('aria-disabled','false');
  await drawer.locator('[data-action="synergy"]').click();const review=page.getByRole('dialog',{name:'Synergy?',exact:true});await expect(review).toContainText('30%');
  await review.getByRole('button',{name:/Konfirmasi/}).click();await expect.poll(()=>mock.submissions.length).toBe(1);expect(mock.submissions[0].p_action).toBe('synergy');expect(mock.submissions[0].p_card_id).toBe(mock.source.id);
+});
+
+test('four same-type Active cards enable Synergy after selecting a source inside the action panel',async({page})=>{
+ const synergy={...rules.find(r=>r.element==='thunder'),effect_type:'add_gauge',effect_values:{2:40,3:70,4:100}};
+ const mock=await mockPlayerBattle(page,{synergy_rules_snapshot:[synergy],player1_synergy_used:{},player1_skill:0});
+ const allies=mock.cards.filter(c=>c.player==='p1'&&c.zone==='active');
+ allies.forEach(c=>{c.element='Thunder';c.exhausted=false;});
+ while(allies.length<4){const card={...mock.source,id:crypto.randomUUID(),uid:crypto.randomUUID(),slot:allies.length+1,element:'Electric',exhausted:false};mock.cards.push(card);allies.push(card);}
+ await mock.open();await page.locator('.player-action-panel').getByRole('button',{name:/Aksi lainnya/}).click();
+ const drawer=page.getByRole('dialog',{name:'Aksi lainnya',exact:true});
+ await expect(drawer.locator('[data-action="synergy"]')).toBeDisabled();
+ await drawer.getByLabel('Kartu sumber aksi').selectOption(mock.source.id);
+ await expect(drawer).toBeVisible();await expect(drawer.locator('[data-action="synergy"]')).toBeEnabled();
+ await expect(drawer.locator('[data-action="synergy"]')).toContainText('4 kartu Active Thunder');
+ await expect(drawer.locator('[data-action="synergy"]')).toContainText('100 poin');
+ expect(mock.submissions).toHaveLength(0);
+ await drawer.locator('[data-action="synergy"]').click();
+ await page.getByRole('dialog',{name:'Synergy?',exact:true}).getByRole('button',{name:/Konfirmasi/}).click();
+ await expect.poll(()=>mock.submissions.length).toBe(1);expect(mock.submissions[0].p_card_id).toBe(mock.source.id);
+ mock.patch({player1_synergy_used:{electric:true}});
+ await page.locator('.player-action-panel').getByRole('button',{name:/Aksi lainnya/}).click();
+ await drawer.getByLabel('Kartu sumber aksi').selectOption(mock.source.id);
+ await expect(drawer.locator('[data-action="synergy"]')).toBeDisabled();await expect(drawer.locator('[data-action="synergy"]')).toContainText('sudah dipakai');
+});
+
+test('Bench cards cannot silently satisfy a four-Active Synergy threshold',async({page})=>{
+ const mock=await mockPlayerBattle(page,{synergy_rules_snapshot:[{...rules[0],min_cards:4}]});
+ const allies=mock.cards.filter(c=>c.player==='p1'&&c.zone==='active');allies.forEach(c=>c.element='Knight');
+ while(allies.length<3){const c={...mock.source,id:crypto.randomUUID(),uid:crypto.randomUUID(),element:'Knight',slot:allies.length+1};mock.cards.push(c);allies.push(c);}
+ mock.cards.push({...mock.source,id:crypto.randomUUID(),uid:crypto.randomUUID(),element:'Knight',zone:'bench'});
+ await mock.open();await page.locator('.cyber-card').first().click();await page.locator('.player-action-panel').getByRole('button',{name:/Aksi lainnya/}).click();
+ const button=page.getByRole('dialog',{name:'Aksi lainnya',exact:true}).locator('[data-action="synergy"]');
+ await expect(button).toBeDisabled();await expect(button).toContainText('Baru 3 dari 4 kartu Active Knight');await expect(button).toContainText('Bench dan Graveyard tidak dihitung');
+});
+
+test('admin can create a missing type and preview the four-card threshold',async({page})=>{
+ const api=await admin(page,rules.filter(r=>r.element!=='light'));
+ await page.goto('/admin/game/catalog?tab=synergy');
+ const panel=page.locator('.battle-rule-catalog');await panel.getByRole('button',{name:'+ Buat Synergy tipe lain'}).click();
+ await expect(panel.getByLabel('Tipe kartu')).toHaveValue('light');await expect(panel.getByLabel('Kode aturan')).toHaveValue('synergy_light');
+ await panel.getByLabel('Nama kemampuan').fill('Light Protection');await panel.getByLabel('Minimal kartu Active').selectOption('4');
+ await expect(panel.locator('.tier-unavailable')).toHaveCount(2);
+ await panel.getByLabel('Efek yang dijalankan').selectOption('shield_percent');
+ await panel.getByLabel('4+ kartu · % pengurangan').fill('65');
+ await expect(panel.getByRole('region',{name:'Pratinjau aturan'})).toContainText('65%');
+ await panel.getByRole('button',{name:'Simpan aturan',exact:true}).click();
+ await expect.poll(()=>api.saves.length).toBe(1);expect(api.saves[0]).toMatchObject({kind:'synergy',element:'light',min_cards:4,effect_values:{2:20,3:30,4:65}});
+ await page.screenshot({path:'test-results/synergy-admin.png',fullPage:true});
 });
 test('chosen custom reward appears by name and icon and is used once from Bonus Skills',async({page})=>{
  const mock=await quiz(page,1,{pending:true});await mock.open();await page.locator('dialog.quiz-bonus-award .award-option').click();

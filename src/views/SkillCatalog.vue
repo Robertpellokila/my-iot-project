@@ -8,6 +8,7 @@ import { computed, defineAsyncComponent, onMounted, ref, watch } from "vue";
 const BattleRuleCatalog = defineAsyncComponent(
   () => import("../components/battle/BattleRuleCatalog.vue"),
 );
+const ComboRuleCatalog = defineAsyncComponent(() => import('../components/battle/ComboRuleCatalog.vue'));
 import { useRoute } from "vue-router";
 import { supabase } from "../lib/supabase";
 const props = defineProps({ embedded: Boolean, cardId: String });
@@ -29,6 +30,9 @@ const errorMessage = ref("");
 const successMessage = ref("");
 const selectedSkillId = ref("");
 const activeTab = ref("skills");
+watch(() => route.query.tab, value => {
+  if (!props.embedded && ['skills','synergy','combo','quiz_bonus','audit'].includes(value)) activeTab.value = value;
+}, { immediate:true });
 const historyTab = ref("playtests");
 const search = ref("");
 const statusFilter = ref("all");
@@ -165,7 +169,7 @@ const loadCatalog = async () => {
   const results = await Promise.all([
     supabase
       .from("game_cards")
-      .select("id,name,card_code,uid,element,level,rarity,fusion_only,metadata,archived_at")
+      .select("id,name,card_code,uid,element,level,rarity,fusion_only,metadata,archived_at,tags")
       .order("name"),
     supabase.from("special_skills").select("*").order("name"),
     supabase
@@ -423,6 +427,7 @@ async function refreshAdminData() {
       >
         Bonus kuis
       </button>
+      <button type="button" :class="{selected:activeTab==='combo'}" @click="activeTab='combo'">Resep Combo</button>
       <button
         type="button"
         :class="{ selected: activeTab === 'audit' }"
@@ -432,6 +437,7 @@ async function refreshAdminData() {
       </button>
     </nav>
 
+    <ComboRuleCatalog v-if="!embedded && activeTab === 'combo'" :cards="cards" />
     <BattleRuleCatalog
       v-if="!embedded && ['synergy', 'quiz_bonus'].includes(activeTab)"
       :kind="activeTab"
